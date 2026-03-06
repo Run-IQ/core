@@ -6,5 +6,6 @@ export interface EvaluationInput {
     readonly userId?: string | undefined;
     readonly tags?: readonly string[] | undefined;
     readonly context?: Record<string, unknown> | undefined;
+    readonly effectiveDate?: Date | undefined;
   };
 }

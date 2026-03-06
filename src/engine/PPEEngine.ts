@@ -124,7 +124,7 @@ export class PPEEngine {
     }
 
     // Step 4: Rule filtering
-    const now = new Date();
+    const now = currentInput.meta.effectiveDate ?? new Date();
     const filterResult = await this.ruleFilter.filter(rules, currentInput, now);
     allSkipped.push(...filterResult.skipped);
 
