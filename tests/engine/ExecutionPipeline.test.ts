@@ -47,4 +47,18 @@ describe('ExecutionPipeline', () => {
     expect(result.value).toBe(0);
     expect(result.breakdown).toHaveLength(0);
   });
+
+  it('aggregates decimal values without floating-point drift', () => {
+    const registry = new ModelRegistry();
+    registry.register(new StubModel('A', 0.1));
+    registry.register(new StubModel('B', 0.2));
+
+    const pipeline = new ExecutionPipeline(registry);
+    const traceBuilder = new TraceBuilder();
+
+    const rules = [makeRule({ id: 'r1', model: 'A' }), makeRule({ id: 'r2', model: 'B' })];
+
+    const result = pipeline.execute(rules, makeInput(), traceBuilder);
+    expect(result.value).toBe(0.3);
+  });
 });

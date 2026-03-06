@@ -1,3 +1,4 @@
+import Decimal from 'decimal.js';
 import type { Rule } from '../types/rule.js';
 import type { EvaluationInput } from '../types/input.js';
 import type { BreakdownItem } from '../types/result.js';
@@ -20,7 +21,7 @@ export class ExecutionPipeline {
   ): PipelineResult {
     const breakdown: BreakdownItem[] = [];
     const appliedRules: Rule[] = [];
-    let totalValue = 0;
+    let totalValue = new Decimal(0);
 
     for (const rule of rules) {
       const model = this.modelRegistry.get(rule.model);
@@ -48,9 +49,9 @@ export class ExecutionPipeline {
       });
 
       appliedRules.push(rule);
-      totalValue += contribution;
+      totalValue = totalValue.plus(new Decimal(String(contribution)));
     }
 
-    return { value: totalValue, breakdown, appliedRules };
+    return { value: totalValue.toNumber(), breakdown, appliedRules };
   }
 }

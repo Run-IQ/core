@@ -39,6 +39,9 @@
     "typescript": "^5.4.0",
     "vitest": "^1.3.0"
   },
+  "dependencies": {
+    "decimal.js": "^10.4.3"
+  },
   "engines": {
     "node": ">=20.0.0"
   }
