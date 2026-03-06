@@ -35,7 +35,7 @@ export interface PPEEngineConfig {
   readonly dryRun?: boolean | undefined;
 }
 
-const ENGINE_VERSION = '0.1.0';
+const ENGINE_VERSION = '0.1.1';
 
 export class PPEEngine {
   private readonly modelRegistry: ModelRegistry;
