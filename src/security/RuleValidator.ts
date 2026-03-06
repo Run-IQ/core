@@ -29,6 +29,8 @@ export class RuleValidator {
 
   private checkRule(rule: Rule): SkipReason | null {
     // 1. Verify checksum
+    // v1: checksum covers params only. v2 could extend to condition + priority + model
+    // to detect broader tampering. Acceptable for v1 since params drive calculation output.
     const computedChecksum = createHash('sha256').update(JSON.stringify(rule.params)).digest('hex');
 
     if (computedChecksum !== rule.checksum) {
