@@ -27,6 +27,14 @@
     "lint:fix": "eslint src/ tests/ --fix && prettier --write src/ tests/"
   },
   "keywords": ["ppe", "policy-engine", "rules-engine", "parametric"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Run-IQ/core.git"
+  },
+  "homepage": "https://github.com/Run-IQ/core#readme",
+  "bugs": {
+    "url": "https://github.com/Run-IQ/core/issues"
+  },
   "author": "Abdou-Raouf ATARMLA",
   "license": "MIT",
   "devDependencies": {
