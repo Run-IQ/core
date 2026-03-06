@@ -28,7 +28,7 @@ describe('PPEEngine', () => {
 
     expect(result.value).toBe(250);
     expect(result.appliedRules).toHaveLength(1);
-    expect(result.engineVersion).toBe('0.1.1');
+    expect(result.engineVersion).toBe('0.1.2');
     expect(result.snapshotId).toBeTruthy();
     expect(result.trace.steps).toHaveLength(1);
   });
