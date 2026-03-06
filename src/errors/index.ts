@@ -4,4 +4,5 @@ export { ModelNotFoundError } from './ModelNotFoundError.js';
 export { DSLNotFoundError } from './DSLNotFoundError.js';
 export { SnapshotFailureError } from './SnapshotFailureError.js';
 export { DSLTimeoutError } from './DSLTimeoutError.js';
+export { DSLEvaluationError } from './DSLEvaluationError.js';
 export { ValidationError } from './ValidationError.js';

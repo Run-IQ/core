@@ -15,5 +15,7 @@ export {
   DSLNotFoundError,
   SnapshotFailureError,
   DSLTimeoutError,
+  DSLEvaluationError,
   ValidationError,
 } from './errors/index.js';
+export { hydrateRule, hydrateRules } from './utils/hydrate.js';

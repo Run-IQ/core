@@ -5,6 +5,7 @@ export type SkipReason =
   | 'INACTIVE_DATE'
   | 'CONDITION_FALSE'
   | 'CONDITION_TIMEOUT'
+  | 'DSL_ERROR'
   | 'DSL_NOT_FOUND'
   | 'CHECKSUM_MISMATCH'
   | 'INVALID_PARAMS'

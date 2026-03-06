@@ -1,5 +1,6 @@
 import type { DSLEvaluator } from '../types/dsl.js';
 import { DSLTimeoutError } from '../errors/DSLTimeoutError.js';
+import { DSLEvaluationError } from '../errors/DSLEvaluationError.js';
 
 export class PluginSandbox {
   constructor(
@@ -22,24 +23,26 @@ export class PluginSandbox {
       if (error instanceof DSLTimeoutError) {
         throw error;
       }
-      throw new DSLTimeoutError(evaluator.dsl, this.dslTimeout);
+      throw new DSLEvaluationError(evaluator.dsl, error);
     }
   }
 
-  private withTimeout<T>(fn: () => T, timeoutMs: number): Promise<T> {
+  private withTimeout<T>(fn: () => T | Promise<T>, timeoutMs: number): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         reject(new DSLTimeoutError('unknown', timeoutMs));
       }, timeoutMs);
 
-      try {
-        const result = fn();
-        clearTimeout(timer);
-        resolve(result);
-      } catch (error) {
-        clearTimeout(timer);
-        reject(error);
-      }
+      Promise.resolve()
+        .then(() => fn())
+        .then((result) => {
+          clearTimeout(timer);
+          resolve(result);
+        })
+        .catch((error: unknown) => {
+          clearTimeout(timer);
+          reject(error);
+        });
     });
   }
 }

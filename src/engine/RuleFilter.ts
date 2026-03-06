@@ -3,6 +3,7 @@ import type { EvaluationInput } from '../types/input.js';
 import type { SkipReason } from '../types/result.js';
 import type { DSLRegistry } from '../registry/DSLRegistry.js';
 import type { PluginSandbox } from '../security/PluginSandbox.js';
+import { DSLTimeoutError } from '../errors/DSLTimeoutError.js';
 
 export interface FilterResult {
   readonly passed: readonly Rule[];
@@ -69,8 +70,9 @@ export class RuleFilter {
         if (!result) {
           return 'CONDITION_FALSE';
         }
-      } catch {
-        return 'CONDITION_TIMEOUT';
+      } catch (error) {
+        if (error instanceof DSLTimeoutError) return 'CONDITION_TIMEOUT';
+        return 'DSL_ERROR';
       }
     }
 
