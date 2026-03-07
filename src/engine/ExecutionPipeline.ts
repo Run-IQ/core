@@ -2,6 +2,7 @@ import Decimal from 'decimal.js';
 import type { Rule } from '../types/rule.js';
 import type { EvaluationInput } from '../types/input.js';
 import type { BreakdownItem } from '../types/result.js';
+import type { CalculationOutput } from '../types/model.js';
 import type { ModelRegistry } from '../registry/ModelRegistry.js';
 import type { TraceBuilder } from './TraceBuilder.js';
 
@@ -9,6 +10,13 @@ export interface PipelineResult {
   readonly value: number;
   readonly breakdown: readonly BreakdownItem[];
   readonly appliedRules: readonly Rule[];
+}
+
+function normalizeOutput(raw: number | CalculationOutput): CalculationOutput {
+  if (typeof raw === 'number') {
+    return { value: raw };
+  }
+  return raw;
 }
 
 export class ExecutionPipeline {
@@ -27,7 +35,8 @@ export class ExecutionPipeline {
       const model = this.modelRegistry.get(rule.model);
       const stepStart = performance.now();
 
-      const contribution = model.calculate(input.data, rule, rule.params);
+      const raw = model.calculate(input.data, rule, rule.params);
+      const output = normalizeOutput(raw);
 
       const durationMs = Math.round((performance.now() - stepStart) * 100) / 100;
 
@@ -37,19 +46,21 @@ export class ExecutionPipeline {
         conditionDetail: rule.condition?.value ?? null,
         modelUsed: model.name,
         inputSnapshot: { ...input.data },
-        contribution,
+        contribution: output.value,
+        detail: output.detail,
         durationMs,
         dslUsed: rule.condition?.dsl,
       });
 
       breakdown.push({
         ruleId: rule.id,
-        contribution,
+        contribution: output.value,
         modelUsed: model.name,
+        detail: output.detail,
       });
 
       appliedRules.push(rule);
-      totalValue = totalValue.plus(new Decimal(String(contribution)));
+      totalValue = totalValue.plus(new Decimal(String(output.value)));
     }
 
     return { value: totalValue.toNumber(), breakdown, appliedRules };

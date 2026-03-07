@@ -5,6 +5,7 @@ export interface TraceStep {
   readonly modelUsed: string;
   readonly inputSnapshot: unknown;
   readonly contribution: unknown;
+  readonly detail?: unknown;
   readonly durationMs: number;
   readonly dslUsed?: string | undefined;
 }

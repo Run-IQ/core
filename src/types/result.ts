@@ -17,6 +17,7 @@ export interface BreakdownItem {
   readonly contribution: unknown;
   readonly modelUsed: string;
   readonly label?: string | undefined;
+  readonly detail?: unknown;
 }
 
 export interface SkippedRule {
