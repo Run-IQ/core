@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { hashParams } from '../utils/crypto.js';
 import type { Rule } from '../types/rule.js';
 import type { SkipReason } from '../types/result.js';
 import type { ModelRegistry } from '../registry/ModelRegistry.js';
@@ -32,7 +32,7 @@ export class RuleValidator {
 
   private checkRule(rule: Rule): SkipReason | null {
     // 1. Verify checksum
-    const computedChecksum = createHash('sha256').update(JSON.stringify(rule.params)).digest('hex');
+    const computedChecksum = hashParams(rule.params);
 
     if (computedChecksum !== rule.checksum) {
       if (this.onChecksumMismatch === 'throw') {
