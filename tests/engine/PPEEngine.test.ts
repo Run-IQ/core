@@ -28,7 +28,7 @@ describe('PPEEngine', () => {
 
     expect(result.value).toBe(250);
     expect(result.appliedRules).toHaveLength(1);
-    expect(result.engineVersion).toBe('0.1.2');
+    expect(result.engineVersion).toBe('0.2.0');
     expect(result.snapshotId).toBeTruthy();
     expect(result.trace.steps).toHaveLength(1);
   });
@@ -104,7 +104,8 @@ describe('PPEEngine', () => {
     const model = new StubModel('M', 100);
 
     const errorPlugin = new StubPlugin('erroring', [model]);
-    errorPlugin.beforeEvaluate = () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (errorPlugin as any).beforeEvaluate = () => {
       throw new Error('hook crash');
     };
 

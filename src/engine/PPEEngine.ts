@@ -4,6 +4,7 @@ import type { EvaluationResult, SkippedRule } from '../types/result.js';
 import type { PPEPlugin, PluginContext } from '../types/plugin.js';
 import type { DSLEvaluator } from '../types/dsl.js';
 import type { ISnapshotAdapter } from '../types/snapshot.js';
+import type { PPEError } from '../errors/PPEError.js';
 import { ModelRegistry } from '../registry/ModelRegistry.js';
 import { PluginRegistry } from '../registry/PluginRegistry.js';
 import { DSLRegistry } from '../registry/DSLRegistry.js';
@@ -16,7 +17,7 @@ import { TraceBuilder } from './TraceBuilder.js';
 import { PluginSandbox } from '../security/PluginSandbox.js';
 import { SnapshotManager } from '../snapshot/SnapshotManager.js';
 import { SnapshotSerializer } from '../snapshot/SnapshotSerializer.js';
-import type { PPEError } from '../errors/PPEError.js';
+import { VERSION } from '../utils/version.js';
 
 export interface PPEEngineConfig {
   readonly plugins: PPEPlugin[];
@@ -24,18 +25,18 @@ export interface PPEEngineConfig {
   readonly snapshot?: ISnapshotAdapter | undefined;
   readonly strict?: boolean | undefined;
   readonly timeout?:
-    | {
-        readonly dsl?: number | undefined;
-        readonly hook?: number | undefined;
-        readonly pipeline?: number | undefined;
-      }
-    | undefined;
+  | {
+    readonly dsl?: number | undefined;
+    readonly hook?: number | undefined;
+    readonly pipeline?: number | undefined;
+  }
+  | undefined;
   readonly onConflict?: 'throw' | 'first' | undefined;
   readonly onChecksumMismatch?: 'throw' | 'skip' | undefined;
   readonly dryRun?: boolean | undefined;
 }
 
-const ENGINE_VERSION = '0.1.2';
+const ENGINE_VERSION = VERSION;
 
 export class PPEEngine {
   private readonly modelRegistry: ModelRegistry;
