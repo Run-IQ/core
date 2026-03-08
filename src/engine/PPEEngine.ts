@@ -65,7 +65,7 @@ export class PPEEngine {
     this.sandbox = new PluginSandbox(config.timeout?.hook ?? 500, config.timeout?.dsl ?? 100);
 
     this.ruleFilter = new RuleFilter(this.dslRegistry, this.sandbox);
-    this.ruleValidator = new RuleValidator(this.modelRegistry);
+    this.ruleValidator = new RuleValidator(this.modelRegistry, config.onChecksumMismatch ?? 'skip');
     this.dominanceResolver = new DominanceResolver();
     this.executionPipeline = new ExecutionPipeline(this.modelRegistry);
 

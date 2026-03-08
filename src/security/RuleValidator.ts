@@ -9,7 +9,10 @@ export interface RuleValidationResult {
 }
 
 export class RuleValidator {
-  constructor(private readonly modelRegistry: ModelRegistry) {}
+  constructor(
+    private readonly modelRegistry: ModelRegistry,
+    private readonly onChecksumMismatch: 'throw' | 'skip' = 'skip'
+  ) {}
 
   validate(rules: ReadonlyArray<Rule>): RuleValidationResult {
     const valid: Rule[] = [];
@@ -29,11 +32,12 @@ export class RuleValidator {
 
   private checkRule(rule: Rule): SkipReason | null {
     // 1. Verify checksum
-    // v1: checksum covers params only. v2 could extend to condition + priority + model
-    // to detect broader tampering. Acceptable for v1 since params drive calculation output.
     const computedChecksum = createHash('sha256').update(JSON.stringify(rule.params)).digest('hex');
 
     if (computedChecksum !== rule.checksum) {
+      if (this.onChecksumMismatch === 'throw') {
+        throw new Error(`Checksum mismatch for rule ${rule.id}`);
+      }
       return 'CHECKSUM_MISMATCH';
     }
 
