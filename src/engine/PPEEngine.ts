@@ -108,13 +108,16 @@ export class PPEEngine {
 
     // Step 3: Plugin beforeEvaluate hooks
     let currentInput = input;
+    let currentRules: ReadonlyArray<Rule> = rules;
     for (const plugin of this.plugins) {
       if (plugin.beforeEvaluate) {
         try {
-          currentInput = await this.sandbox.runHook(
-            () => plugin.beforeEvaluate!(currentInput, rules),
+          const hookResult = await this.sandbox.runHook(
+            () => plugin.beforeEvaluate!(currentInput, currentRules),
             plugin.name,
           );
+          currentInput = hookResult.input;
+          currentRules = hookResult.rules;
         } catch (error) {
           if (plugin.onError) {
             plugin.onError(error as PPEError, currentInput);
@@ -125,7 +128,7 @@ export class PPEEngine {
 
     // Step 4: Rule filtering
     const now = currentInput.meta.effectiveDate ?? new Date();
-    const filterResult = await this.ruleFilter.filter(rules, currentInput, now);
+    const filterResult = await this.ruleFilter.filter(currentRules, currentInput, now);
     allSkipped.push(...filterResult.skipped);
 
     // Step 5: Rule validation (checksum + params)

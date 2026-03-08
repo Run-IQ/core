@@ -3,7 +3,7 @@ export type { PPEEngineConfig } from './engine/PPEEngine.js';
 export type { Rule, Expression } from './types/rule.js';
 export type { EvaluationInput } from './types/input.js';
 export type { EvaluationResult, BreakdownItem, SkippedRule, SkipReason } from './types/result.js';
-export type { PPEPlugin, PluginContext } from './types/plugin.js';
+export type { PPEPlugin, PluginContext, BeforeEvaluateResult } from './types/plugin.js';
 export type { CalculationModel, CalculationOutput, ValidationResult } from './types/model.js';
 export type { DSLEvaluator } from './types/dsl.js';
 export type { ISnapshotAdapter, Snapshot } from './types/snapshot.js';

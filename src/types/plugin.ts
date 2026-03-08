@@ -11,13 +11,18 @@ export interface PluginContext {
   readonly engineVersion: string;
 }
 
+export interface BeforeEvaluateResult {
+  readonly input: EvaluationInput;
+  readonly rules: ReadonlyArray<Rule>;
+}
+
 export interface PPEPlugin {
   readonly name: string;
   readonly version: string;
 
   onInit(context: PluginContext): void;
 
-  beforeEvaluate?(input: EvaluationInput, rules: ReadonlyArray<Rule>): EvaluationInput;
+  beforeEvaluate?(input: EvaluationInput, rules: ReadonlyArray<Rule>): BeforeEvaluateResult;
 
   afterEvaluate?(input: EvaluationInput, result: EvaluationResult): EvaluationResult;
 
@@ -25,3 +30,4 @@ export interface PPEPlugin {
 
   teardown?(): void;
 }
+
