@@ -54,8 +54,8 @@ describe('Strict mode', () => {
     });
 
     const rules = [
-      makeRule({ id: 'r1', model: 'M', priority: 100, params: {} }),
-      makeRule({ id: 'r2', model: 'M', priority: 100, params: {} }),
+      makeRule({ id: 'r1', model: 'M', priority: 100, params: {}, dominanceGroup: 'G1' }),
+      makeRule({ id: 'r2', model: 'M', priority: 100, params: {}, dominanceGroup: 'G1' }),
     ];
     await expect(engine.evaluate(rules, makeInput())).rejects.toThrow(RuleConflictError);
   });

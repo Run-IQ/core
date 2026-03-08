@@ -20,16 +20,16 @@ describe('DominanceResolver', () => {
 
   it('throws RuleConflictError in strict mode when priorities conflict', () => {
     const rules = [
-      makeRule({ id: 'r1', model: 'M', priority: 100 }),
-      makeRule({ id: 'r2', model: 'M', priority: 100 }),
+      makeRule({ id: 'r1', model: 'M', priority: 100, dominanceGroup: 'G1' }),
+      makeRule({ id: 'r2', model: 'M', priority: 100, dominanceGroup: 'G1' }),
     ];
     expect(() => resolver.resolve(rules, 'throw')).toThrow(RuleConflictError);
   });
 
   it('keeps first rule in lenient mode when priorities conflict', () => {
     const rules = [
-      makeRule({ id: 'r1', model: 'M', priority: 100 }),
-      makeRule({ id: 'r2', model: 'M', priority: 100 }),
+      makeRule({ id: 'r1', model: 'M', priority: 100, dominanceGroup: 'G1' }),
+      makeRule({ id: 'r2', model: 'M', priority: 100, dominanceGroup: 'G1' }),
     ];
     const result = resolver.resolve(rules, 'first');
     expect(result).toHaveLength(1);

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { hashParams } from '../src/utils/crypto.js';
 import type { Rule } from '../src/types/rule.js';
 import type { EvaluationInput } from '../src/types/input.js';
 import type { CalculationModel, ValidationResult } from '../src/types/model.js';
@@ -7,7 +7,7 @@ import type { ISnapshotAdapter, Snapshot } from '../src/types/snapshot.js';
 import type { PPEPlugin, PluginContext } from '../src/types/plugin.js';
 
 export function makeChecksum(params: unknown): string {
-  return createHash('sha256').update(JSON.stringify(params)).digest('hex');
+  return hashParams(params);
 }
 
 export function makeRule(overrides: Partial<Rule> & { id: string; model: string }): Rule {
