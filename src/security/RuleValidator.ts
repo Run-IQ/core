@@ -32,6 +32,7 @@ export class RuleValidator {
 
   private checkRule(rule: Rule): SkipReason | null {
     // 1. Verify checksum
+    // TODO: Extend checksum to cover model + condition + priority for full immutable security
     const computedChecksum = hashParams(rule.params);
 
     if (computedChecksum !== rule.checksum) {

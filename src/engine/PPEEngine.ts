@@ -107,9 +107,15 @@ export class PPEEngine {
       return this.buildCachedResult(input);
     }
 
-    // Step 3: Plugin beforeEvaluate hooks
+    // Step 3: Rule validation (checksum of the source rules)
+    const initialValidation = this.ruleValidator.validate(rules);
+    allSkipped.push(...initialValidation.invalid);
+    
+    // Continue with valid source rules
+    let currentRules: ReadonlyArray<Rule> = initialValidation.valid;
+
+    // Step 4: Plugin beforeEvaluate hooks
     let currentInput = input;
-    let currentRules: ReadonlyArray<Rule> = rules;
     for (const plugin of this.plugins) {
       if (plugin.beforeEvaluate) {
         try {
@@ -132,21 +138,17 @@ export class PPEEngine {
       }
     }
 
-    // Step 4: Rule filtering
+    // Step 5: Rule filtering (on potentially mutated rules)
     const now = currentInput.meta.effectiveDate ?? new Date();
     const filterResult = await this.ruleFilter.filter(currentRules, currentInput, now);
     allSkipped.push(...filterResult.skipped);
 
-    // Step 5: Rule validation (checksum + params)
-    const validationResult = this.ruleValidator.validate(filterResult.passed);
-    allSkipped.push(...validationResult.invalid);
-
     // Step 6: Dominance resolution
-    const resolvedRules = this.dominanceResolver.resolve(validationResult.valid, this.conflictMode);
+    const resolvedRules = this.dominanceResolver.resolve(filterResult.passed, this.conflictMode);
     
     // Identify rules skipped due to conflict
     const resolvedIds = new Set(resolvedRules.map(r => r.id));
-    for (const rule of validationResult.valid) {
+    for (const rule of filterResult.passed) {
       if (!resolvedIds.has(rule.id)) {
         allSkipped.push({ rule, reason: 'RULE_CONFLICT' });
       }
