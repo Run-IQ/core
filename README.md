@@ -38,7 +38,7 @@ The engine executes a 10-step pipeline on every call to `evaluate()`:
 
 1. **Input validation** — sanitize and validate the input
 2. **Idempotence check** — skip if `requestId` already processed
-3. **beforeEvaluate hooks** — plugins enrich input
+3. **beforeEvaluate hooks** — plugins enrich input and can modify rules via `BeforeEvaluateResult`
 4. **Rule filtering** — date range, tags, DSL conditions
 5. **Rule validation** — checksum + params verification
 6. **Dominance resolution** — priority sort + conflict handling
@@ -54,7 +54,8 @@ The engine executes a 10-step pipeline on every call to `evaluate()`:
 | **Rule** | Declarative policy unit with model, params, condition, priority, and date range |
 | **CalculationModel** | Pure function `(input, rule, params) → number` — registered by plugins |
 | **DSLEvaluator** | Evaluates rule conditions (e.g. JSONLogic, CEL) — pluggable |
-| **PPEPlugin** | Lifecycle hooks + model registration |
+| **PPEPlugin** | Lifecycle hooks (`beforeEvaluate`, `afterEvaluate`) + model registration |
+| **BeforeEvaluateResult** | Return type from `beforeEvaluate` containing both `input` and `rules` to evaluate |
 | **Snapshot** | Immutable audit record with full rule copies and DSL versions |
 
 ## Retroactive calculation
