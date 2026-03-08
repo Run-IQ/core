@@ -2,58 +2,43 @@ import type { Rule } from '../types/rule.js';
 import { RuleConflictError } from '../errors/RuleConflictError.js';
 
 export class DominanceResolver {
+  /**
+   * Resolves rule order and detects conflicts.
+   * A conflict occurs when multiple rules share the same Priority AND the same DominanceGroup.
+   * If a rule has no dominanceGroup, its ID is used as a fallback to prevent accidental conflicts.
+   */
   resolve(rules: ReadonlyArray<Rule>, mode: 'throw' | 'first'): readonly Rule[] {
     if (rules.length <= 1) {
       return rules;
     }
 
-    // Sort by priority descending
+    // Sort by priority descending (highest first)
     const sorted = [...rules].sort((a, b) => b.priority - a.priority);
 
-    // Detect conflicts: same priority
-    const priorityGroups = new Map<number, Rule[]>();
+    // Group rules by Priority + DominanceGroup
+    const groups = new Map<string, Rule[]>();
     for (const rule of sorted) {
-      const group = priorityGroups.get(rule.priority);
-      if (group) {
-        group.push(rule);
-      } else {
-        priorityGroups.set(rule.priority, [rule]);
-      }
+      const groupKey = `${rule.priority}_${rule.dominanceGroup || rule.id}`;
+      const group = groups.get(groupKey) || [];
+      group.push(rule);
+      groups.set(groupKey, group);
     }
 
-    for (const [priority, group] of priorityGroups) {
+    const finalRules: Rule[] = [];
+
+    for (const [, group] of groups) {
       if (group.length > 1) {
         if (mode === 'throw') {
-          throw new RuleConflictError(
-            group.map((r) => r.id),
-            priority,
-          );
+          throw new RuleConflictError(group.map(r => r.id), group[0].priority);
         }
-        // mode 'first': keep only the first rule in each conflict group
+        // mode 'first': keep only the first one in this specific group
+        finalRules.push(group[0]);
+      } else {
+        finalRules.push(group[0]);
       }
     }
 
-    if (mode === 'first') {
-      // Deduplicate by priority: keep first occurrence per priority
-      const seen = new Set<number>();
-      const deduped: Rule[] = [];
-      for (const rule of sorted) {
-        if (!seen.has(rule.priority)) {
-          seen.add(rule.priority);
-          deduped.push(rule);
-        } else {
-          // Check if this priority has conflicts
-          const group = priorityGroups.get(rule.priority);
-          if (group && group.length > 1) {
-            // Already added the first one, skip duplicates
-            continue;
-          }
-          deduped.push(rule);
-        }
-      }
-      return deduped;
-    }
-
-    return sorted;
+    // Re-sort final rules by priority descending
+    return finalRules.sort((a, b) => b.priority - a.priority);
   }
 }

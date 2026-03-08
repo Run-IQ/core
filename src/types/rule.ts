@@ -15,4 +15,5 @@ export interface Rule {
   readonly tags: readonly string[];
   readonly checksum: string;
   readonly schemaVersion?: string | undefined;
+  readonly dominanceGroup?: string | undefined;
 }

@@ -10,7 +10,10 @@ export type SkipReason =
   | 'CHECKSUM_MISMATCH'
   | 'INVALID_PARAMS'
   | 'TAG_MISMATCH'
-  | 'INHIBITED_BY_META_RULE';
+  | 'INHIBITED_BY_META_RULE'
+  | 'COUNTRY_MISMATCH'
+  | 'SHORT_CIRCUITED'
+  | 'RULE_CONFLICT';
 
 export interface BreakdownItem {
   readonly ruleId: string;
