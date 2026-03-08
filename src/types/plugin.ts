@@ -1,5 +1,5 @@
 import type { EvaluationInput } from './input.js';
-import type { EvaluationResult } from './result.js';
+import type { EvaluationResult, SkippedRule } from './result.js';
 import type { Rule } from './rule.js';
 import type { PPEError } from '../errors/PPEError.js';
 import type { ModelRegistry } from '../registry/ModelRegistry.js';
@@ -14,6 +14,7 @@ export interface PluginContext {
 export interface BeforeEvaluateResult {
   readonly input: EvaluationInput;
   readonly rules: ReadonlyArray<Rule>;
+  readonly skipped?: ReadonlyArray<SkippedRule>;
 }
 
 export interface PPEPlugin {
@@ -22,12 +23,11 @@ export interface PPEPlugin {
 
   onInit(context: PluginContext): void;
 
-  beforeEvaluate?(input: EvaluationInput, rules: ReadonlyArray<Rule>): BeforeEvaluateResult;
+  beforeEvaluate?(input: EvaluationInput, rules: ReadonlyArray<Rule>): BeforeEvaluateResult | Promise<BeforeEvaluateResult>;
 
-  afterEvaluate?(input: EvaluationInput, result: EvaluationResult): EvaluationResult;
+  afterEvaluate?(input: EvaluationInput, result: EvaluationResult): EvaluationResult | Promise<EvaluationResult>;
 
   onError?(error: PPEError, input: EvaluationInput): void;
 
   teardown?(): void;
 }
-

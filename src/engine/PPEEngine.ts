@@ -119,6 +119,11 @@ export class PPEEngine {
           );
           currentInput = hookResult.input;
           currentRules = hookResult.rules;
+          
+          // Collect rules explicitly skipped by the plugin
+          if (hookResult.skipped) {
+            allSkipped.push(...hookResult.skipped);
+          }
         } catch (error) {
           if (plugin.onError) {
             plugin.onError(error as PPEError, currentInput);
