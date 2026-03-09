@@ -22,4 +22,4 @@ export { ModelRegistry } from './registry/ModelRegistry.js';
 export { DSLRegistry } from './registry/DSLRegistry.js';
 export { hydrateRule, hydrateRules } from './utils/hydrate.js';
 export { canonicalStringify } from './utils/json.js';
-export { hashParams } from './utils/crypto.js';
+export { hashParams, computeRuleChecksum } from './utils/crypto.js';

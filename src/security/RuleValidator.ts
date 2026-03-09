@@ -1,4 +1,4 @@
-import { hashParams } from '../utils/crypto.js';
+import { computeRuleChecksum } from '../utils/crypto.js';
 import type { Rule } from '../types/rule.js';
 import type { SkipReason } from '../types/result.js';
 import type { ModelRegistry } from '../registry/ModelRegistry.js';
@@ -31,9 +31,8 @@ export class RuleValidator {
   }
 
   private checkRule(rule: Rule): SkipReason | null {
-    // 1. Verify checksum
-    // TODO: Extend checksum to cover model + condition + priority for full immutable security
-    const computedChecksum = hashParams(rule.params);
+    // 1. Verify checksum (full rule integrity)
+    const computedChecksum = computeRuleChecksum(rule);
 
     if (computedChecksum !== rule.checksum) {
       if (this.onChecksumMismatch === 'throw') {
