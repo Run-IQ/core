@@ -16,11 +16,11 @@ export class SnapshotSerializer {
     pluginVersions: Record<string, string>,
     dslVersions: Record<string, string>,
   ): Snapshot {
-    // Deep immutable copy
-    const inputSnapshot = JSON.parse(JSON.stringify(input)) as EvaluationInput;
-    const rulesSnapshot = JSON.parse(JSON.stringify(rules)) as Rule[];
-    const resultCopy = JSON.parse(JSON.stringify(result)) as EvaluationResult;
-    const traceCopy = JSON.parse(JSON.stringify(trace)) as EvaluationTrace;
+    // Deep immutable copy — structuredClone preserves Date objects (Node 17+)
+    const inputSnapshot = structuredClone(input) as EvaluationInput;
+    const rulesSnapshot = structuredClone(rules) as Rule[];
+    const resultCopy = structuredClone(result) as EvaluationResult;
+    const traceCopy = structuredClone(trace) as EvaluationTrace;
 
     const id = randomUUID();
 
