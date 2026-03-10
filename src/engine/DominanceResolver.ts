@@ -18,7 +18,7 @@ export class DominanceResolver {
     // Group rules by Priority + DominanceGroup
     const groups = new Map<string, Rule[]>();
     for (const rule of sorted) {
-      const groupKey = `${rule.priority}_${rule.dominanceGroup || rule.id}`;
+      const groupKey = `${rule.priority}_${rule.dominanceGroup ?? rule.id}`;
       const group = groups.get(groupKey) || [];
       group.push(rule);
       groups.set(groupKey, group);
@@ -27,14 +27,19 @@ export class DominanceResolver {
     const finalRules: Rule[] = [];
 
     for (const [, group] of groups) {
+      const first = group[0];
+      if (!first) continue;
       if (group.length > 1) {
         if (mode === 'throw') {
-          throw new RuleConflictError(group.map(r => r.id), group[0].priority);
+          throw new RuleConflictError(
+            group.map((r) => r.id),
+            first.priority,
+          );
         }
         // mode 'first': keep only the first one in this specific group
-        finalRules.push(group[0]);
+        finalRules.push(first);
       } else {
-        finalRules.push(group[0]);
+        finalRules.push(first);
       }
     }
 

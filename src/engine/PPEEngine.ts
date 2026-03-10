@@ -25,12 +25,12 @@ export interface PPEEngineConfig {
   readonly snapshot?: ISnapshotAdapter | undefined;
   readonly strict?: boolean | undefined;
   readonly timeout?:
-  | {
-    readonly dsl?: number | undefined;
-    readonly hook?: number | undefined;
-    readonly pipeline?: number | undefined;
-  }
-  | undefined;
+    | {
+        readonly dsl?: number | undefined;
+        readonly hook?: number | undefined;
+        readonly pipeline?: number | undefined;
+      }
+    | undefined;
   readonly onConflict?: 'throw' | 'first' | undefined;
   readonly onChecksumMismatch?: 'throw' | 'skip' | undefined;
   readonly dryRun?: boolean | undefined;
@@ -110,7 +110,7 @@ export class PPEEngine {
     // Step 3: Rule validation (checksum of the source rules)
     const initialValidation = this.ruleValidator.validate(rules);
     allSkipped.push(...initialValidation.invalid);
-    
+
     // Continue with valid source rules
     let currentRules: ReadonlyArray<Rule> = initialValidation.valid;
 
@@ -125,7 +125,7 @@ export class PPEEngine {
           );
           currentInput = hookResult.input;
           currentRules = hookResult.rules;
-          
+
           // Collect rules explicitly skipped by the plugin
           if (hookResult.skipped) {
             allSkipped.push(...hookResult.skipped);
@@ -145,9 +145,9 @@ export class PPEEngine {
 
     // Step 6: Dominance resolution
     const resolvedRules = this.dominanceResolver.resolve(filterResult.passed, this.conflictMode);
-    
+
     // Identify rules skipped due to conflict
-    const resolvedIds = new Set(resolvedRules.map(r => r.id));
+    const resolvedIds = new Set(resolvedRules.map((r) => r.id));
     for (const rule of filterResult.passed) {
       if (!resolvedIds.has(rule.id)) {
         allSkipped.push({ rule, reason: 'RULE_CONFLICT' });
@@ -187,7 +187,7 @@ export class PPEEngine {
       engineVersion: ENGINE_VERSION,
       pluginVersions,
       dslVersions,
-      timestamp: now,
+      timestamp: new Date(),
     };
 
     // Step 8: Plugin afterEvaluate hooks
@@ -206,10 +206,10 @@ export class PPEEngine {
       }
     }
 
-    // Step 9: Snapshot
+    // Step 9: Snapshot — use the rules that actually executed (post-plugin)
     const snapshot = SnapshotSerializer.serialize(
       currentInput,
-      rules,
+      currentRules,
       result,
       trace,
       ENGINE_VERSION,
