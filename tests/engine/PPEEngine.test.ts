@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import { ValidationError } from '../../src/errors/ValidationError.js';
+import { VERSION } from '../../src/utils/version.js';
 import {
   makeRule,
   makeInput,
@@ -28,7 +29,7 @@ describe('PPEEngine', () => {
 
     expect(result.value).toBe(250);
     expect(result.appliedRules).toHaveLength(1);
-    expect(result.engineVersion).toBe('0.2.4');
+    expect(result.engineVersion).toBe(VERSION);
     expect(result.snapshotId).toBeTruthy();
     expect(result.trace.steps).toHaveLength(1);
   });
