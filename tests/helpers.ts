@@ -1,4 +1,4 @@
-import { hashParams } from '../src/utils/crypto.js';
+import { computeRuleChecksum } from '../src/utils/crypto.js';
 import type { Rule } from '../src/types/rule.js';
 import type { EvaluationInput } from '../src/types/input.js';
 import type { CalculationModel, ValidationResult } from '../src/types/model.js';
@@ -6,22 +6,27 @@ import type { DSLEvaluator } from '../src/types/dsl.js';
 import type { ISnapshotAdapter, Snapshot } from '../src/types/snapshot.js';
 import type { PPEPlugin, PluginContext } from '../src/types/plugin.js';
 
-export function makeChecksum(params: unknown): string {
-  return hashParams(params);
-}
-
 export function makeRule(overrides: Partial<Rule> & { id: string; model: string }): Rule {
   const params = overrides.params ?? {};
-  return {
+  const ruleWithoutChecksum = {
     version: 1,
     priority: 100,
     effectiveFrom: new Date('2024-01-01'),
     effectiveUntil: null,
     tags: [],
-    checksum: makeChecksum(params),
     params,
     ...overrides,
   };
+  const checksum = computeRuleChecksum({
+    model: ruleWithoutChecksum.model,
+    params: ruleWithoutChecksum.params,
+    condition: ruleWithoutChecksum.condition,
+    priority: ruleWithoutChecksum.priority,
+  });
+  return {
+    ...ruleWithoutChecksum,
+    checksum,
+  } as Rule;
 }
 
 export function makeInput(overrides?: Partial<EvaluationInput>): EvaluationInput {
