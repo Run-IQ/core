@@ -5,5 +5,6 @@ export class PPEError extends Error {
   ) {
     super(message);
     this.name = 'PPEError';
+    Object.setPrototypeOf(this, new.target.prototype);
   }
 }
