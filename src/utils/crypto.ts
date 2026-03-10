@@ -7,19 +7,13 @@ export function hashParams(params: unknown): string {
 }
 
 /**
- * Computes a checksum for the critical parts of a rule to ensure integrity.
+ * Computes a SHA-256 checksum of the entire rule object, excluding the
+ * `checksum` field itself. All fields present on the rule contribute to
+ * the hash — missing/optional fields are simply absent from the digest.
+ * Key order is irrelevant thanks to canonicalStringify.
  */
-export function computeRuleChecksum(rule: {
-  model: string;
-  params: unknown;
-  condition?: unknown;
-  priority: number;
-}): string {
-  const criticalData = {
-    model: rule.model,
-    params: rule.params,
-    condition: rule.condition,
-    priority: rule.priority,
-  };
-  return hashParams(criticalData);
+export function computeRuleChecksum(rule: object): string {
+  // justification: extracting own enumerable entries to build a checksum-free copy for hashing
+  const entries = Object.entries(rule).filter(([key]) => key !== 'checksum');
+  return hashParams(Object.fromEntries(entries));
 }

@@ -8,6 +8,7 @@ import type { PPEPlugin, PluginContext } from '../src/types/plugin.js';
 
 export function makeRule(overrides: Partial<Rule> & { id: string; model: string }): Rule {
   const params = overrides.params ?? {};
+  const { checksum: _ignored, ...cleanOverrides } = overrides;
   const ruleWithoutChecksum = {
     version: 1,
     priority: 100,
@@ -15,14 +16,9 @@ export function makeRule(overrides: Partial<Rule> & { id: string; model: string 
     effectiveUntil: null,
     tags: [],
     params,
-    ...overrides,
+    ...cleanOverrides,
   };
-  const checksum = computeRuleChecksum({
-    model: ruleWithoutChecksum.model,
-    params: ruleWithoutChecksum.params,
-    condition: ruleWithoutChecksum.condition,
-    priority: ruleWithoutChecksum.priority,
-  });
+  const checksum = computeRuleChecksum(ruleWithoutChecksum as Record<string, unknown>);
   return {
     ...ruleWithoutChecksum,
     checksum,

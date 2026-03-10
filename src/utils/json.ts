@@ -4,6 +4,10 @@ export function canonicalStringify(obj: unknown): string | undefined {
     return JSON.stringify(obj);
   }
 
+  if (obj instanceof Date) {
+    return JSON.stringify(obj.toISOString());
+  }
+
   if (Array.isArray(obj)) {
     return '[' + obj.map((o: unknown) => canonicalStringify(o) ?? 'null').join(',') + ']';
   }
