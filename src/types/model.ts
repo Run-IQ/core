@@ -16,5 +16,9 @@ export interface CalculationModel {
 
   validateParams(params: unknown): ValidationResult;
 
-  calculate(input: Record<string, unknown>, matchedRule: Readonly<Rule>, params: unknown): number | CalculationOutput;
+  calculate(
+    input: Record<string, unknown>,
+    matchedRule: Readonly<Rule>,
+    params: unknown,
+  ): number | CalculationOutput;
 }

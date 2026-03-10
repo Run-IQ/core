@@ -23,9 +23,15 @@ export interface PPEPlugin {
 
   onInit(context: PluginContext): void;
 
-  beforeEvaluate?(input: EvaluationInput, rules: ReadonlyArray<Rule>): BeforeEvaluateResult | Promise<BeforeEvaluateResult>;
+  beforeEvaluate?(
+    input: EvaluationInput,
+    rules: ReadonlyArray<Rule>,
+  ): BeforeEvaluateResult | Promise<BeforeEvaluateResult>;
 
-  afterEvaluate?(input: EvaluationInput, result: EvaluationResult): EvaluationResult | Promise<EvaluationResult>;
+  afterEvaluate?(
+    input: EvaluationInput,
+    result: EvaluationResult,
+  ): EvaluationResult | Promise<EvaluationResult>;
 
   onError?(error: PPEError, input: EvaluationInput): void;
 
