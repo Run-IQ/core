@@ -13,7 +13,8 @@ export type SkipReason =
   | 'INHIBITED_BY_META_RULE'
   | 'COUNTRY_MISMATCH'
   | 'SHORT_CIRCUITED'
-  | 'RULE_CONFLICT';
+  | 'RULE_CONFLICT'
+  | 'MODEL_NOT_FOUND';
 
 export interface BreakdownItem {
   readonly ruleId: string;

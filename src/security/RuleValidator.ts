@@ -11,7 +11,7 @@ export interface RuleValidationResult {
 export class RuleValidator {
   constructor(
     private readonly modelRegistry: ModelRegistry,
-    private readonly onChecksumMismatch: 'throw' | 'skip' = 'skip'
+    private readonly onChecksumMismatch: 'throw' | 'skip' = 'skip',
   ) {}
 
   validate(rules: ReadonlyArray<Rule>): RuleValidationResult {
@@ -41,7 +41,9 @@ export class RuleValidator {
       return 'CHECKSUM_MISMATCH';
     }
 
-    // 2. Validate params via model
+    // 2. Validate params via model (if registered)
+    // Note: unregistered models are allowed here — plugins may handle them
+    // in beforeEvaluate (e.g., meta-rules). ExecutionPipeline will skip them.
     if (this.modelRegistry.has(rule.model)) {
       const model = this.modelRegistry.get(rule.model);
       const validation = model.validateParams(rule.params);
