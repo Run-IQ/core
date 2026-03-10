@@ -18,7 +18,11 @@ export class PluginSandbox {
     context: Record<string, unknown>,
   ): Promise<boolean> {
     try {
-      return await this.withTimeout(() => evaluator.evaluate(expression, context), this.dslTimeout);
+      return await this.withTimeout(
+        () => evaluator.evaluate(expression, context),
+        this.dslTimeout,
+        evaluator.dsl,
+      );
     } catch (error) {
       if (error instanceof DSLTimeoutError) {
         throw error;
@@ -27,10 +31,14 @@ export class PluginSandbox {
     }
   }
 
-  private withTimeout<T>(fn: () => T | Promise<T>, timeoutMs: number): Promise<T> {
+  private withTimeout<T>(
+    fn: () => T | Promise<T>,
+    timeoutMs: number,
+    label = 'unknown',
+  ): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
-        reject(new DSLTimeoutError('unknown', timeoutMs));
+        reject(new DSLTimeoutError(label, timeoutMs));
       }, timeoutMs);
 
       Promise.resolve()
