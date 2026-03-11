@@ -64,4 +64,40 @@ describe('InputSanitizer', () => {
       expect((err as ValidationError).reasons.length).toBeGreaterThan(0);
     }
   });
+
+  it('rejects __proto__ key in data', () => {
+    // Use JSON.parse to create a literal __proto__ key (object literal syntax sets prototype instead)
+    const maliciousInput = JSON.parse(
+      '{"requestId":"r","data":{"__proto__":{"polluted":true}},"meta":{"tenantId":"t"}}',
+    ) as unknown;
+    expect(() => InputSanitizer.validate(maliciousInput)).toThrow(ValidationError);
+  });
+
+  it('rejects constructor key in data', () => {
+    expect(() =>
+      InputSanitizer.validate({
+        requestId: 'r',
+        data: { constructor: 'evil' },
+        meta: { tenantId: 't' },
+      }),
+    ).toThrow(ValidationError);
+  });
+
+  it('rejects prototype key in meta', () => {
+    expect(() =>
+      InputSanitizer.validate({
+        requestId: 'r',
+        data: {},
+        meta: { tenantId: 't', prototype: {} },
+      }),
+    ).toThrow(ValidationError);
+  });
+
+  it('rejects __proto__ key in meta', () => {
+    // Use JSON.parse to create a literal __proto__ key
+    const maliciousInput = JSON.parse(
+      '{"requestId":"r","data":{},"meta":{"tenantId":"t","__proto__":{"polluted":true}}}',
+    ) as unknown;
+    expect(() => InputSanitizer.validate(maliciousInput)).toThrow(ValidationError);
+  });
 });
