@@ -5,6 +5,7 @@ export class SnapshotManager {
   constructor(
     private readonly adapter: ISnapshotAdapter | null,
     private readonly strict: boolean,
+    private readonly onSnapshotError?: ((error: unknown) => void) | undefined,
   ) {}
 
   async exists(requestId: string): Promise<boolean> {
@@ -23,7 +24,10 @@ export class SnapshotManager {
       if (this.strict) {
         throw new SnapshotFailureError(error);
       }
-      // Lenient mode: return snapshot id, log failure silently
+      // Lenient mode: notify via callback if provided, then return snapshot id
+      if (this.onSnapshotError) {
+        this.onSnapshotError(error);
+      }
       return snapshot.id;
     }
   }
