@@ -19,7 +19,7 @@ export class DominanceResolver {
     const groups = new Map<string, Rule[]>();
     for (const rule of sorted) {
       const groupKey = `${rule.priority}_${rule.dominanceGroup ?? rule.id}`;
-      const group = groups.get(groupKey) || [];
+      const group = groups.get(groupKey) ?? [];
       group.push(rule);
       groups.set(groupKey, group);
     }
