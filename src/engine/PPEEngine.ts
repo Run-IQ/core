@@ -5,6 +5,7 @@ import type { PPEPlugin, PluginContext } from '../types/plugin.js';
 import type { DSLEvaluator } from '../types/dsl.js';
 import type { ISnapshotAdapter } from '../types/snapshot.js';
 import type { PPEError } from '../errors/PPEError.js';
+import { ValidationError } from '../errors/ValidationError.js';
 import { ModelRegistry } from '../registry/ModelRegistry.js';
 import { PluginRegistry } from '../registry/PluginRegistry.js';
 import { DSLRegistry } from '../registry/DSLRegistry.js';
@@ -99,6 +100,13 @@ export class PPEEngine {
 
     // Step 1: Input validation
     InputSanitizer.validate(input);
+
+    // Strict mode requires effectiveDate
+    if (this.strict && input.meta.effectiveDate === undefined) {
+      throw new ValidationError('effectiveDate is required in strict mode', [
+        'meta.effectiveDate must be provided when strict mode is enabled',
+      ]);
+    }
 
     // Step 2: Idempotence check
     const alreadyExists = await this.snapshotManager.exists(input.requestId);

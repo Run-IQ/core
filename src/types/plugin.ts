@@ -1,6 +1,7 @@
 import type { EvaluationInput } from './input.js';
 import type { EvaluationResult, SkippedRule } from './result.js';
 import type { Rule } from './rule.js';
+import type { CalculationModel } from './model.js';
 import type { PPEError } from '../errors/PPEError.js';
 import type { ModelRegistry } from '../registry/ModelRegistry.js';
 import type { DSLRegistry } from '../registry/DSLRegistry.js';
@@ -34,6 +35,8 @@ export interface PPEPlugin {
   ): EvaluationResult | Promise<EvaluationResult>;
 
   onError?(error: PPEError, input: EvaluationInput): void;
+
+  getModels?(): readonly CalculationModel[];
 
   teardown?(): void;
 }

@@ -10,6 +10,11 @@ export interface CalculationOutput {
   readonly detail?: unknown;
 }
 
+export interface ParamDescriptor {
+  readonly type: string;
+  readonly description?: string | undefined;
+}
+
 export interface CalculationModel {
   readonly name: string;
   readonly version: string;
@@ -21,4 +26,6 @@ export interface CalculationModel {
     matchedRule: Readonly<Rule>,
     params: unknown,
   ): number | CalculationOutput;
+
+  describeParams?(): Record<string, ParamDescriptor>;
 }
