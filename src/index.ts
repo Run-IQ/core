@@ -16,6 +16,7 @@ export {
   SnapshotFailureError,
   DSLTimeoutError,
   DSLEvaluationError,
+  PipelineTimeoutError,
   ValidationError,
 } from './errors/index.js';
 export { ModelRegistry } from './registry/ModelRegistry.js';

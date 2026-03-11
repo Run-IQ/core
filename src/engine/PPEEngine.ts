@@ -6,6 +6,7 @@ import type { DSLEvaluator } from '../types/dsl.js';
 import type { ISnapshotAdapter } from '../types/snapshot.js';
 import type { PPEError } from '../errors/PPEError.js';
 import { ValidationError } from '../errors/ValidationError.js';
+import { PipelineTimeoutError } from '../errors/PipelineTimeoutError.js';
 import { ModelRegistry } from '../registry/ModelRegistry.js';
 import { PluginRegistry } from '../registry/PluginRegistry.js';
 import { DSLRegistry } from '../registry/DSLRegistry.js';
@@ -35,6 +36,7 @@ export interface PPEEngineConfig {
   readonly onConflict?: 'throw' | 'first' | undefined;
   readonly onChecksumMismatch?: 'throw' | 'skip' | undefined;
   readonly dryRun?: boolean | undefined;
+  readonly onSnapshotError?: ((error: unknown) => void) | undefined;
 }
 
 const ENGINE_VERSION = VERSION;
@@ -53,11 +55,13 @@ export class PPEEngine {
   private readonly strict: boolean;
   private readonly conflictMode: 'throw' | 'first';
   private readonly dryRun: boolean;
+  private readonly pipelineTimeout: number | undefined;
 
   constructor(config: PPEEngineConfig) {
     this.strict = config.strict ?? true;
     this.conflictMode = config.onConflict ?? (this.strict ? 'throw' : 'first');
     this.dryRun = config.dryRun ?? false;
+    this.pipelineTimeout = config.timeout?.pipeline;
 
     this.modelRegistry = new ModelRegistry();
     this.pluginRegistry = new PluginRegistry();
@@ -73,6 +77,7 @@ export class PPEEngine {
     this.snapshotManager = new SnapshotManager(
       this.dryRun ? null : (config.snapshot ?? null),
       this.strict,
+      config.onSnapshotError,
     );
 
     // Register DSL evaluators
@@ -95,6 +100,23 @@ export class PPEEngine {
   }
 
   async evaluate(rules: ReadonlyArray<Rule>, input: EvaluationInput): Promise<EvaluationResult> {
+    if (this.pipelineTimeout !== undefined) {
+      return Promise.race([
+        this.executeEvaluation(rules, input),
+        new Promise<never>((_resolve, reject) => {
+          setTimeout(() => {
+            reject(new PipelineTimeoutError(this.pipelineTimeout!)); // justification: guarded by undefined check above
+          }, this.pipelineTimeout); // justification: guarded by undefined check above
+        }),
+      ]);
+    }
+    return this.executeEvaluation(rules, input);
+  }
+
+  private async executeEvaluation(
+    rules: ReadonlyArray<Rule>,
+    input: EvaluationInput,
+  ): Promise<EvaluationResult> {
     const traceBuilder = new TraceBuilder();
     const allSkipped: SkippedRule[] = [];
 
@@ -202,10 +224,17 @@ export class PPEEngine {
     for (const plugin of this.plugins) {
       if (plugin.afterEvaluate) {
         try {
-          result = await this.sandbox.runHook(
+          const hookResult = await this.sandbox.runHook(
             () => plugin.afterEvaluate!(currentInput, result),
             plugin.name,
           );
+
+          // Validate invariants: requestId and engineVersion must not change
+          result = {
+            ...hookResult,
+            requestId: result.requestId,
+            engineVersion: result.engineVersion,
+          };
         } catch (error) {
           if (plugin.onError) {
             plugin.onError(error as PPEError, currentInput);

@@ -5,4 +5,5 @@ export { DSLNotFoundError } from './DSLNotFoundError.js';
 export { SnapshotFailureError } from './SnapshotFailureError.js';
 export { DSLTimeoutError } from './DSLTimeoutError.js';
 export { DSLEvaluationError } from './DSLEvaluationError.js';
+export { PipelineTimeoutError } from './PipelineTimeoutError.js';
 export { ValidationError } from './ValidationError.js';
