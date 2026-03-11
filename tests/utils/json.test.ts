@@ -60,4 +60,24 @@ describe('canonicalStringify', () => {
   it('returns "[]" for empty array', () => {
     expect(canonicalStringify([])).toBe('[]');
   });
+
+  it('serializes Date objects as ISO strings', () => {
+    const date = new Date('2025-06-15T10:30:00.000Z');
+    const result = canonicalStringify(date);
+    expect(result).toBe('"2025-06-15T10:30:00.000Z"');
+  });
+
+  it('serializes objects containing Date values', () => {
+    const result = canonicalStringify({ d: new Date('2025-01-01T00:00:00.000Z'), a: 1 });
+    expect(result).toBe('{"a":1,"d":"2025-01-01T00:00:00.000Z"}');
+  });
+
+  it('is deterministic across multiple calls', () => {
+    const obj = { z: [1, { b: 2, a: 1 }], a: 'hello' };
+    const r1 = canonicalStringify(obj);
+    const r2 = canonicalStringify(obj);
+    const r3 = canonicalStringify(obj);
+    expect(r1).toBe(r2);
+    expect(r2).toBe(r3);
+  });
 });

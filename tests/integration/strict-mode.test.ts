@@ -20,7 +20,8 @@ describe('Strict mode', () => {
     });
 
     const rules = [makeRule({ id: 'r1', model: 'M', params: {} })];
-    await expect(engine.evaluate(rules, makeInput())).rejects.toThrow(SnapshotFailureError);
+    const input = makeInput({ meta: { tenantId: 'tenant-1', effectiveDate: new Date() } });
+    await expect(engine.evaluate(rules, input)).rejects.toThrow(SnapshotFailureError);
   });
 
   it('returns result when save fails in lenient mode', async () => {
@@ -57,6 +58,7 @@ describe('Strict mode', () => {
       makeRule({ id: 'r1', model: 'M', priority: 100, params: {}, dominanceGroup: 'G1' }),
       makeRule({ id: 'r2', model: 'M', priority: 100, params: {}, dominanceGroup: 'G1' }),
     ];
-    await expect(engine.evaluate(rules, makeInput())).rejects.toThrow(RuleConflictError);
+    const input = makeInput({ meta: { tenantId: 'tenant-1', effectiveDate: new Date() } });
+    await expect(engine.evaluate(rules, input)).rejects.toThrow(RuleConflictError);
   });
 });

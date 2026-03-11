@@ -137,7 +137,8 @@ describe('PPEEngine', () => {
     });
 
     const rules = [makeRule({ id: 'r1', model: 'M', params: {} })];
-    const result = await engine.evaluate(rules, makeInput());
+    const input = makeInput({ meta: { tenantId: 'tenant-1', effectiveDate: new Date() } });
+    const result = await engine.evaluate(rules, input);
     expect(result.value).toBe(100);
     // In dryRun, snapshot adapter should not have been called
     expect(await adapter.exists('test-request-001')).toBe(false);
