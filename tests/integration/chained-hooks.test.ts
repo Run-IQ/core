@@ -17,7 +17,7 @@ class EnrichingPlugin implements PPEPlugin {
     this.enrichValue = enrichValue;
   }
 
-  onInit(context: PluginContext): void {
+  onInit(_context: PluginContext): void {
     // No models to register
   }
 

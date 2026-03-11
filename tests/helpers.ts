@@ -8,7 +8,8 @@ import type { PPEPlugin, PluginContext } from '../src/types/plugin.js';
 
 export function makeRule(overrides: Partial<Rule> & { id: string; model: string }): Rule {
   const params = overrides.params ?? {};
-  const { checksum: _ignored, ...cleanOverrides } = overrides;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { checksum: _discarded, ...cleanOverrides } = overrides;
   const ruleWithoutChecksum = {
     version: 1,
     priority: 100,

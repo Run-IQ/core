@@ -47,6 +47,33 @@ describe('SnapshotManager lenient mode (via engine)', () => {
     expect(result.snapshotId).not.toBe('');
   });
 
+  it('calls onSnapshotError callback when adapter fails in lenient mode', async () => {
+    const adapter = new InMemorySnapshotAdapter();
+    adapter.shouldFail = true;
+
+    const model = new StubModel('M', 500);
+    const plugin = new StubPlugin('test', [model]);
+
+    let capturedError: unknown = undefined;
+
+    const engine = new PPEEngine({
+      plugins: [plugin],
+      dsls: [],
+      snapshot: adapter,
+      strict: false,
+      onSnapshotError: (error) => {
+        capturedError = error;
+      },
+    });
+
+    const rules = [makeRule({ id: 'r1', model: 'M', params: {} })];
+    const result = await engine.evaluate(rules, makeInput());
+
+    expect(result.value).toBe(500);
+    expect(capturedError).toBeDefined();
+    expect(capturedError).toBeInstanceOf(Error);
+  });
+
   it('does not throw when adapter fails in lenient mode with multiple rules', async () => {
     const adapter = new InMemorySnapshotAdapter();
     adapter.shouldFail = true;
