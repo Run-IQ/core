@@ -24,7 +24,7 @@ describe('computeRuleChecksum', () => {
 
   it('returns different hashes for different inputs', () => {
     const hashA = computeRuleChecksum(fullRule);
-    const hashB = computeRuleChecksum({ ...fullRule, params: { rate: 0.20 } });
+    const hashB = computeRuleChecksum({ ...fullRule, params: { rate: 0.2 } });
 
     expect(hashA).not.toBe(hashB);
   });
@@ -65,8 +65,12 @@ describe('computeRuleChecksum', () => {
     expect(computeRuleChecksum({ ...fullRule, id: 'rule-2' })).not.toBe(base);
     expect(computeRuleChecksum({ ...fullRule, version: 2 })).not.toBe(base);
     expect(computeRuleChecksum({ ...fullRule, priority: 200 })).not.toBe(base);
-    expect(computeRuleChecksum({ ...fullRule, effectiveFrom: new Date('2025-01-01') })).not.toBe(base);
-    expect(computeRuleChecksum({ ...fullRule, effectiveUntil: new Date('2026-01-01') })).not.toBe(base);
+    expect(computeRuleChecksum({ ...fullRule, effectiveFrom: new Date('2025-01-01') })).not.toBe(
+      base,
+    );
+    expect(computeRuleChecksum({ ...fullRule, effectiveUntil: new Date('2026-01-01') })).not.toBe(
+      base,
+    );
     expect(computeRuleChecksum({ ...fullRule, tags: ['other'] })).not.toBe(base);
     expect(computeRuleChecksum({ ...fullRule, model: 'OTHER' })).not.toBe(base);
   });

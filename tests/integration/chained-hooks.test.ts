@@ -21,10 +21,7 @@ class EnrichingPlugin implements PPEPlugin {
     // No models to register
   }
 
-  beforeEvaluate(
-    input: EvaluationInput,
-    rules: ReadonlyArray<Rule>,
-  ): BeforeEvaluateResult {
+  beforeEvaluate(input: EvaluationInput, rules: ReadonlyArray<Rule>): BeforeEvaluateResult {
     return {
       input: {
         ...input,
