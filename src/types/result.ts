@@ -2,19 +2,37 @@ import type { Rule } from './rule.js';
 import type { EvaluationTrace } from './trace.js';
 
 export type SkipReason =
+  /** `meta.effectiveDate` is outside `[effectiveFrom, effectiveUntil]` (both inclusive in core). */
   | 'INACTIVE_DATE'
+  /** The rule's DSL condition evaluated to false. */
   | 'CONDITION_FALSE'
+  /** The rule's DSL condition exceeded `timeout.dsl`. */
   | 'CONDITION_TIMEOUT'
+  /** The rule's DSL condition threw. */
   | 'DSL_ERROR'
+  /** No DSL evaluator is registered for the rule's `condition.dsl`. */
   | 'DSL_NOT_FOUND'
+  /** The rule's `checksum` differs from the checksum of its content. */
   | 'CHECKSUM_MISMATCH'
+  /**
+   * Malformed rule, checksum unverifiable: invalid or zone-less date, `effectiveUntil <=
+   * effectiveFrom`, absent or non-string `checksum`, non-integer `version`, non-JSON value...
+   * `detail` names the rule (`id@version`) and the reason.
+   */
   | 'INVALID_RULE'
+  /** A registered model refused the rule's params. */
   | 'INVALID_PARAMS'
+  /** The rule's tags do not intersect the input's `meta.tags`. */
   | 'TAG_MISMATCH'
+  /** A plugin meta-rule inhibited the rule. */
   | 'INHIBITED_BY_META_RULE'
+  /** The rule does not apply to the input's country (set by plugins). */
   | 'COUNTRY_MISMATCH'
+  /** A plugin short-circuited the evaluation, so the rule was not run. */
   | 'SHORT_CIRCUITED'
+  /** Another rule with the same priority won the conflict (`onConflict: 'first'`). */
   | 'RULE_CONFLICT'
+  /** No model is registered for the rule's `model` (for plugins; core throws `ModelNotFoundError`). */
   | 'MODEL_NOT_FOUND';
 
 export interface BreakdownItem {

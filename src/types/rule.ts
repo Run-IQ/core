@@ -17,8 +17,13 @@ export interface Expression {
  */
 export interface Rule extends Omit<
   ExecutableRuleBase,
-  'condition' | 'dominanceGroup' | 'dimensions'
+  'condition' | 'dominanceGroup' | 'dimensions' | 'effectiveUntil'
 > {
+  /**
+   * End of validity; `null` for no end. Inclusive in core until phase 2 aligns with spec's
+   * `[from, until)`.
+   */
+  readonly effectiveUntil: Date | null;
   readonly condition?: Expression | undefined;
   readonly dominanceGroup?: string | undefined;
   /** Absent means no dimension, like `{}`. */

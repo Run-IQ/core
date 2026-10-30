@@ -72,7 +72,7 @@ result.breakdown; // [{ ruleId: 'shipping-fee', contribution: 10, modelUsed: 'PE
 8. Run plugin `afterEvaluate` hooks
 9. Save the snapshot
 
-Rules that are not applied appear in `result.skippedRules` with a reason (`CONDITION_FALSE`, `CHECKSUM_MISMATCH`, `INACTIVE_DATE`, ...).
+Rules that are not applied appear in `result.skippedRules` with a reason (`CONDITION_FALSE`, `CHECKSUM_MISMATCH`, `INVALID_RULE`, `INACTIVE_DATE`, ...). `INVALID_RULE` marks a malformed rule whose checksum cannot be verified: an invalid date, `effectiveUntil` not after `effectiveFrom`, an absent or non-string `checksum`, a non-integer `version`. Its `detail` field names the rule (`id@version`) and the reason.
 
 ## Options
 
@@ -80,7 +80,7 @@ Rules that are not applied appear in `result.skippedRules` with a reason (`CONDI
 |---|---|---|
 | `strict` | `true` | Requires `meta.effectiveDate`, throws on rule conflicts and on snapshot failures |
 | `onConflict` | `'throw'` in strict mode, otherwise `'first'` | What to do when two rules have the same priority |
-| `onChecksumMismatch` | `'skip'` | `'throw'` to fail instead of skipping the rule |
+| `onChecksumMismatch` | `'skip'` | `'throw'` to fail instead of skipping the rule. Covers checksum mismatches (throws `Error`) and malformed rules (throws `ValidationError`) |
 | `snapshot` | none | Adapter used to persist evaluations |
 | `dryRun` | `false` | Evaluate without saving a snapshot |
 | `timeout` | `{ dsl: 100, hook: 500 }` ms | Time limits for conditions, hooks and the whole pipeline |
@@ -91,7 +91,9 @@ Rules that are not applied appear in `result.skippedRules` with a reason (`CONDI
 
 ## Rules stored as JSON
 
-Rules loaded from a database or an API have their dates as strings. `hydrateRule` and `hydrateRules` convert them back.
+Rules loaded from a database or an API have their dates as strings. `hydrateRule` and `hydrateRules` convert them back. They keep the stored `checksum`, so a row changed after sealing is still skipped as `CHECKSUM_MISMATCH`.
+
+They throw a `ValidationError` on an invalid definition, for example a date-time without a time zone, `effectiveUntil` not after `effectiveFrom`, missing `params`, or a non-integer `version`. Its `reasons` list every problem found.
 
 ## License
 
