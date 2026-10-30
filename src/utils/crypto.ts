@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto';
-import { computeRuleChecksum as specRuleChecksum } from '@run-iq/spec';
+import { canonicalize, computeRuleChecksum as specRuleChecksum } from '@run-iq/spec';
 import type { RuleDefinitionInput } from '@run-iq/spec';
-import { canonicalStringify } from './json.js';
 
+/**
+ * sha256 hex of `canonicalize(params)` from `@run-iq/spec`. Throws `SpecError` on a value that
+ * has no canonical JSON form (`undefined`, `NaN`, `Infinity`, `Map`...).
+ */
 export function hashParams(params: unknown): string {
-  const serialized = canonicalStringify(params) ?? 'null';
-  return createHash('sha256').update(serialized).digest('hex');
+  return createHash('sha256').update(canonicalize(params)).digest('hex');
 }
 
 /**

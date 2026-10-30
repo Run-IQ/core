@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { canonicalStringify } from '../../src/utils/json.js';
+import { canonicalize, SpecError } from '@run-iq/spec';
 
 describe('canonicalStringify', () => {
   it('returns undefined for undefined', () => {
@@ -79,5 +80,21 @@ describe('canonicalStringify', () => {
     const r3 = canonicalStringify(obj);
     expect(r1).toBe(r2);
     expect(r2).toBe(r3);
+  });
+});
+
+describe('canonicalStringify delegates to @run-iq/spec canonicalize', () => {
+  it('escapes a key containing a quote, giving valid JSON', () => {
+    const out = canonicalStringify({ 'a"b': 1 });
+    expect(out).toBe(canonicalize({ 'a"b': 1 }));
+    expect(JSON.parse(out!)).toEqual({ 'a"b': 1 });
+  });
+
+  it.each([
+    ['NaN', { v: NaN }],
+    ['Infinity', { v: Infinity }],
+    ['a Map', { v: new Map() }],
+  ])('throws SpecError on %s', (_name, value) => {
+    expect(() => canonicalStringify(value)).toThrow(SpecError);
   });
 });

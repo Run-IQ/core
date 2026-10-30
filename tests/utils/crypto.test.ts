@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { computeRuleChecksum } from '../../src/utils/crypto.js';
+import { createHash } from 'node:crypto';
+import { canonicalize, SpecError } from '@run-iq/spec';
+import { computeRuleChecksum, hashParams } from '../../src/utils/crypto.js';
 
 describe('computeRuleChecksum', () => {
   const fullRule = {
@@ -87,5 +89,22 @@ describe('computeRuleChecksum', () => {
     };
     const hash = computeRuleChecksum(minimal);
     expect(hash).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe('hashParams', () => {
+  it('is the sha256 of spec canonicalize', () => {
+    const params = { 'a"b': 1, z: [1, { y: 2, x: 1 }] };
+    expect(hashParams(params)).toBe(
+      createHash('sha256').update(canonicalize(params)).digest('hex'),
+    );
+  });
+
+  it.each([
+    ['NaN', { rate: NaN }],
+    ['Infinity', { rate: Infinity }],
+    ['a Map', { rate: new Map() }],
+  ])('throws SpecError on %s', (_name, params) => {
+    expect(() => hashParams(params)).toThrow(SpecError);
   });
 });

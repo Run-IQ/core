@@ -1,30 +1,10 @@
+import { canonicalize } from '@run-iq/spec';
+
+/**
+ * Canonical JSON of a value: `canonicalize` of `@run-iq/spec` (keys sorted at every depth,
+ * `Date` as ISO string), or `undefined` for `undefined`. Throws `SpecError`
+ * (`NON_SERIALIZABLE`) on `NaN`, `Infinity`, `bigint`, `Map`, `Set`, class instances and cycles.
+ */
 export function canonicalStringify(obj: unknown): string | undefined {
-  if (obj === undefined) return undefined;
-  if (obj === null || typeof obj !== 'object') {
-    return JSON.stringify(obj);
-  }
-
-  if (obj instanceof Date) {
-    return JSON.stringify(obj.toISOString());
-  }
-
-  if (Array.isArray(obj)) {
-    return '[' + obj.map((o: unknown) => canonicalStringify(o) ?? 'null').join(',') + ']';
-  }
-
-  // justification: validated above — obj is a non-null, non-array object
-  const record = obj as Record<string, unknown>;
-  const keys = Object.keys(record).sort();
-  return (
-    '{' +
-    keys
-      .map((k) => {
-        const val = canonicalStringify(record[k]);
-        if (val === undefined) return null;
-        return `"${k}":${val}`;
-      })
-      .filter((v) => v !== null)
-      .join(',') +
-    '}'
-  );
+  return obj === undefined ? undefined : canonicalize(obj);
 }
