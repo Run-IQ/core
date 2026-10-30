@@ -7,10 +7,10 @@ The engine knows nothing about any business domain. Calculation logic comes from
 ## Install
 
 ```bash
-npm install @run-iq/core
+npm install @run-iq/core@next
 ```
 
-Requires Node.js 20 or later.
+The 1.0 line, built on the rule contract of [`@run-iq/spec`](https://github.com/Run-IQ/spec), is published under the `next` tag. Requires Node.js 20 or later.
 
 ## Example
 
@@ -54,7 +54,7 @@ result.breakdown; // [{ ruleId: 'shipping-fee', contribution: 10, modelUsed: 'PE
 
 ## Concepts
 
-- **Rule**: a model name, its params, an optional condition, a priority and a validity period. Each rule carries a SHA-256 `checksum`. A rule whose checksum does not match its content is skipped.
+- **Rule**: a model name, its params, an optional condition, a priority and a validity period. Each rule carries a SHA-256 `checksum`, computed by `computeRuleChecksum` over the canonical form defined in `@run-iq/spec`. A rule whose checksum does not match its content is skipped.
 - **Calculation model**: a pure function `(input, rule, params) => number`. Plugins register models.
 - **Plugin**: registers models and can hook into `beforeEvaluate` / `afterEvaluate`.
 - **DSL evaluator**: decides whether a rule's `condition` applies to the input.
@@ -88,6 +88,8 @@ Rules that are not applied appear in `result.skippedRules` with a reason (`CONDI
 ## Evaluating at a past date
 
 `meta.effectiveDate` selects the rules that were in force at that date. This lets you recompute an old result with the rules that applied at the time.
+
+When filtering, core still treats `effectiveUntil` as inclusive: a rule is in force at the instant `effectiveUntil` itself. `@run-iq/spec` defines the window as `[effectiveFrom, effectiveUntil)`, and core will apply it in a later release. The checksum already requires `effectiveUntil` to be after `effectiveFrom`, so a one-day rule ends the next day (`2025-03-01` to `2025-03-02`).
 
 ## Rules stored as JSON
 
