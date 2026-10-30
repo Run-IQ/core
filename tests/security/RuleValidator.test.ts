@@ -56,13 +56,13 @@ describe('RuleValidator', () => {
     expect(result.valid).toHaveLength(0);
     expect(result.invalid).toHaveLength(1);
     expect(result.invalid[0]!.reason).toBe('INVALID_RULE');
-    expect(result.invalid[0]!.detail).toMatch(/^Invalid rule r1: .*effectiveFrom/);
+    expect(result.invalid[0]!.detail).toMatch(/^Invalid rule r1@1: .*effectiveFrom/);
   });
 
   it('throws a ValidationError for a malformed rule when onChecksumMismatch is throw', () => {
     const validator = new RuleValidator(new ModelRegistry(), 'throw');
     const rule = makeRule({ id: 'r1', model: 'M' });
     expect(() => validator.validate([{ ...rule, version: 1.5 }])).toThrow(ValidationError);
-    expect(() => validator.validate([{ ...rule, version: 1.5 }])).toThrow(/Invalid rule r1/);
+    expect(() => validator.validate([{ ...rule, version: 1.5 }])).toThrow(/Invalid rule r1@1\.5/);
   });
 });

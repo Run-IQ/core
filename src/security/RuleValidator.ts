@@ -14,7 +14,8 @@ export interface RuleValidationResult {
  *
  * - checksum mismatch: `CHECKSUM_MISMATCH`;
  * - malformed rule, whose checksum cannot be computed (`SpecError`, e.g. an invalid date or a
- *   non-integer version): `INVALID_RULE`, with the `SpecError` message as `detail`;
+ *   non-integer version): `INVALID_RULE`, with `detail` naming the rule (`id@version`) and the
+ *   `SpecError` message;
  * - params refused by a registered model: `INVALID_PARAMS`.
  *
  * With `onChecksumMismatch: 'throw'`, the first two throw instead of skipping the rule.
@@ -48,7 +49,7 @@ export class RuleValidator {
       intact = verifyRuleChecksum(rule);
     } catch (error) {
       if (!(error instanceof SpecError)) throw error;
-      const detail = `Invalid rule ${String(rule.id)}: ${error.message}`;
+      const detail = `Invalid rule ${String(rule.id)}@${String(rule.version)}: ${error.message}`;
       if (this.onChecksumMismatch === 'throw') {
         throw new ValidationError(detail, [detail]);
       }

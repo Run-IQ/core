@@ -96,4 +96,17 @@ describe('checksum compatibility with @run-iq/spec', () => {
       expect(reasons[1]).toMatch(/^tags must be an array/);
     }
   });
+
+  it.each([
+    ['a date-time without a zone', { effectiveFrom: '2025-01-01T00:00:00' }],
+    ['an empty window', { effectiveUntil: '2025-01-01' }],
+    ['missing params', { params: undefined }],
+    ['a non-integer version', { version: 1.5 }],
+  ])('hydrateRule throws a ValidationError on %s', (_case, change) => {
+    const raw = {
+      ...(JSON.parse(JSON.stringify(sealedRule())) as Record<string, unknown>),
+      ...change,
+    };
+    expect(() => hydrateRule(raw)).toThrow(ValidationError);
+  });
 });

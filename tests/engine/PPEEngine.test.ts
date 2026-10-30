@@ -143,4 +143,55 @@ describe('PPEEngine', () => {
     // In dryRun, snapshot adapter should not have been called
     expect(await adapter.exists('test-request-001')).toBe(false);
   });
+
+  describe('malformed rules', () => {
+    function engineWith(config: { strict?: boolean; onChecksumMismatch?: 'throw' | 'skip' } = {}) {
+      return new PPEEngine({
+        plugins: [new StubPlugin('test', [new StubModel('M', 100)])],
+        dsls: [],
+        strict: config.strict ?? false,
+        ...(config.onChecksumMismatch ? { onChecksumMismatch: config.onChecksumMismatch } : {}),
+      });
+    }
+    const dated = makeInput({ meta: { tenantId: 't', effectiveDate: new Date('2024-06-01') } });
+
+    it('throws a ValidationError with onChecksumMismatch: throw', async () => {
+      const malformed = { ...makeRule({ id: 'r1', model: 'M' }), version: 1.5 };
+      const engine = engineWith({ onChecksumMismatch: 'throw' });
+      await expect(engine.evaluate([malformed], dated)).rejects.toThrow(ValidationError);
+      await expect(engine.evaluate([malformed], dated)).rejects.toThrow(/Invalid rule r1@1\.5/);
+    });
+
+    it('skips a rule without checksum and one with a non-string checksum as INVALID_RULE', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { checksum: _omit, ...absent } = makeRule({ id: 'absent', model: 'M' });
+      const nonString = { ...makeRule({ id: 'num', model: 'M' }), checksum: 42 };
+      const valid = makeRule({ id: 'ok', model: 'M' });
+      const result = await engineWith().evaluate(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        [absent as any, nonString as any, valid],
+        dated,
+      );
+      expect(result.appliedRules.map((r) => r.id)).toEqual(['ok']);
+      expect(result.skippedRules.map((s) => [s.rule.id, s.reason])).toEqual([
+        ['absent', 'INVALID_RULE'],
+        ['num', 'INVALID_RULE'],
+      ]);
+      expect(result.skippedRules[0]!.detail).toMatch(/^Invalid rule absent@1: .*checksum/);
+      expect(result.skippedRules[1]!.detail).toMatch(/^Invalid rule num@1: .*checksum/);
+    });
+
+    it('behaves the same in strict mode', async () => {
+      const malformed = {
+        ...makeRule({ id: 'bad', model: 'M' }),
+        effectiveUntil: new Date('2023-01-01'),
+      };
+      const valid = makeRule({ id: 'ok', model: 'M' });
+      const result = await engineWith({ strict: true }).evaluate([malformed, valid], dated);
+      expect(result.appliedRules.map((r) => r.id)).toEqual(['ok']);
+      expect(result.skippedRules).toHaveLength(1);
+      expect(result.skippedRules[0]!.reason).toBe('INVALID_RULE');
+      expect(result.skippedRules[0]!.detail).toMatch(/^Invalid rule bad@1: .*window/);
+    });
+  });
 });
