@@ -43,7 +43,7 @@
     "url": "https://github.com/Run-IQ/core/issues"
   },
   "author": "Abdou-Raouf ATARMLA",
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "BUSL-1.1",
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
