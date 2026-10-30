@@ -29,3 +29,4 @@ export { DSLRegistry } from './registry/DSLRegistry.js';
 export { hydrateRule, hydrateRules } from './utils/hydrate.js';
 export { canonicalStringify } from './utils/json.js';
 export { hashParams, computeRuleChecksum } from './utils/crypto.js';
+export { VERSION } from './utils/version.js';
