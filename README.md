@@ -1,6 +1,8 @@
 # @run-iq/core
 
-Parametric Policy Engine (PPE) — a deterministic, plugin-driven rules engine for financial and regulatory computation.
+The Run-IQ rule engine. It evaluates a set of versioned rules against input data and returns the result, the contribution of each rule, and a trace of how it got there.
+
+The engine knows nothing about any business domain. Calculation logic comes from plugins (for example [`@run-iq/plugin-fiscal`](https://github.com/Run-IQ/plugin-fiscal)), and rule conditions come from a DSL evaluator (for example [`@run-iq/dsl-jsonlogic`](https://github.com/Run-IQ/dsl-jsonlogic)).
 
 ## Install
 
@@ -8,99 +10,89 @@ Parametric Policy Engine (PPE) — a deterministic, plugin-driven rules engine f
 npm install @run-iq/core
 ```
 
-## Quick start
+Requires Node.js 20 or later.
 
-```typescript
-import { PPEEngine } from '@run-iq/core';
+## Example
+
+```ts
+import { PPEEngine, computeRuleChecksum } from '@run-iq/core';
+
+// A calculation model: input + params -> number
+const percentage = {
+  name: 'PERCENTAGE',
+  version: '1.0.0',
+  validateParams: (p) => ({ valid: typeof p?.rate === 'number' }),
+  calculate: (input, _rule, p) => input[p.base] * p.rate,
+};
 
 const engine = new PPEEngine({
-  plugins: [fiscalPlugin],
-  dsls: [jsonLogicEvaluator],
-  snapshot: snapshotAdapter,
-  strict: true,
-  timeout: { dsl: 100, hook: 500, pipeline: 5000 },
+  plugins: [{ name: 'demo', version: '1.0.0', onInit: (ctx) => ctx.modelRegistry.register(percentage) }],
+  dsls: [],
 });
 
-const result = await engine.evaluate(rules, {
-  requestId: 'req-001',
-  data: { grossSalary: 2_500_000 },
-  meta: { tenantId: 'tenant-1' },
+const draft = {
+  id: 'shipping-fee',
+  version: 1,
+  model: 'PERCENTAGE',
+  params: { base: 'orderTotal', rate: 0.05 },
+  priority: 1,
+  effectiveFrom: new Date('2025-01-01'),
+  effectiveUntil: null,
+  tags: [],
+};
+const rule = { ...draft, checksum: computeRuleChecksum(draft) };
+
+const result = await engine.evaluate([rule], {
+  requestId: 'order-42',
+  data: { orderTotal: 200 },
+  meta: { tenantId: 'acme', effectiveDate: new Date('2025-06-01') },
 });
 
-console.log(result.value);       // aggregated value
-console.log(result.breakdown);   // per-rule contributions
-console.log(result.trace);       // full audit trail
+result.value;     // 10
+result.breakdown; // [{ ruleId: 'shipping-fee', contribution: 10, modelUsed: 'PERCENTAGE' }]
 ```
 
-## Pipeline
+## Concepts
 
-The engine executes a 10-step pipeline on every call to `evaluate()`:
+- **Rule**: a model name, its params, an optional condition, a priority and a validity period. Each rule carries a SHA-256 `checksum`. A rule whose checksum does not match its content is skipped.
+- **Calculation model**: a pure function `(input, rule, params) => number`. Plugins register models.
+- **Plugin**: registers models and can hook into `beforeEvaluate` / `afterEvaluate`.
+- **DSL evaluator**: decides whether a rule's `condition` applies to the input.
+- **Snapshot**: an optional record of every evaluation, saved through an adapter you provide. It is also used to make `requestId` idempotent.
 
-1. **Input validation** — sanitize and validate the input
-2. **Idempotence check** — skip if `requestId` already processed
-3. **beforeEvaluate hooks** — plugins enrich input and can modify rules via `BeforeEvaluateResult`
-4. **Rule filtering** — date range, tags, DSL conditions
-5. **Rule validation** — checksum + params verification
-6. **Dominance resolution** — priority sort + conflict handling
-7. **Execution** — models compute contributions (decimal-safe)
-8. **afterEvaluate hooks** — plugins enrich result
-9. **Snapshot** — persist immutable audit record
-10. **Return** — final `EvaluationResult`
+## How `evaluate()` works
 
-## Key concepts
+1. Validate the input
+2. Return early if a snapshot already exists for `requestId`
+3. Verify rule checksums and params
+4. Run plugin `beforeEvaluate` hooks
+5. Filter rules by validity period, tags and condition
+6. Resolve conflicts between rules by priority
+7. Run the models and sum their contributions
+8. Run plugin `afterEvaluate` hooks
+9. Save the snapshot
 
-| Concept | Description |
-|---|---|
-| **Rule** | Declarative policy unit with model, params, condition, priority, and date range |
-| **CalculationModel** | Pure function `(input, rule, params) → number` — registered by plugins |
-| **DSLEvaluator** | Evaluates rule conditions (e.g. JSONLogic, CEL) — pluggable |
-| **PPEPlugin** | Lifecycle hooks (`beforeEvaluate`, `afterEvaluate`) + model registration |
-| **BeforeEvaluateResult** | Return type from `beforeEvaluate` containing both `input` and `rules` to evaluate |
-| **Snapshot** | Immutable audit record with full rule copies and DSL versions |
+Rules that are not applied appear in `result.skippedRules` with a reason (`CONDITION_FALSE`, `CHECKSUM_MISMATCH`, `INACTIVE_DATE`, ...).
 
-## Retroactive calculation
+## Options
 
-Pass `effectiveDate` to evaluate rules as of a specific date:
-
-```typescript
-const result = await engine.evaluate(rules, {
-  requestId: 'req-002',
-  data: { grossSalary: 2_500_000 },
-  meta: {
-    tenantId: 'tenant-1',
-    effectiveDate: new Date('2023-12-01'),
-  },
-});
-```
-
-## Hydrating rules from JSON
-
-When rules come from an API or database as JSON, date fields are strings. Use `hydrateRule` to convert them:
-
-```typescript
-import { hydrateRule, hydrateRules } from '@run-iq/core';
-
-const rule = hydrateRule(jsonFromApi);
-const rules = hydrateRules(jsonArrayFromDb);
-```
-
-## Exported errors
-
-| Error | Code | When |
+| Option | Default | |
 |---|---|---|
-| `RuleConflictError` | `RULE_CONFLICT` | Same-priority rules in strict mode |
-| `ModelNotFoundError` | `MODEL_NOT_FOUND` | Rule references unregistered model |
-| `DSLNotFoundError` | `DSL_NOT_FOUND` | Rule condition uses unregistered DSL |
-| `DSLTimeoutError` | `DSL_TIMEOUT` | DSL evaluation exceeds timeout |
-| `DSLEvaluationError` | `DSL_EVALUATION_ERROR` | DSL syntax or runtime error |
-| `SnapshotFailureError` | `SNAPSHOT_FAILURE` | Snapshot save fails in strict mode |
-| `ValidationError` | `VALIDATION_ERROR` | Input validation fails |
+| `strict` | `true` | Requires `meta.effectiveDate`, throws on rule conflicts and on snapshot failures |
+| `onConflict` | `'throw'` in strict mode, otherwise `'first'` | What to do when two rules have the same priority |
+| `onChecksumMismatch` | `'skip'` | `'throw'` to fail instead of skipping the rule |
+| `snapshot` | none | Adapter used to persist evaluations |
+| `dryRun` | `false` | Evaluate without saving a snapshot |
+| `timeout` | `{ dsl: 100, hook: 500 }` ms | Time limits for conditions, hooks and the whole pipeline |
 
-## Requirements
+## Evaluating at a past date
 
-- Node.js >= 20
-- TypeScript >= 5.4
+`meta.effectiveDate` selects the rules that were in force at that date. This lets you recompute an old result with the rules that applied at the time.
+
+## Rules stored as JSON
+
+Rules loaded from a database or an API have their dates as strings. `hydrateRule` and `hydrateRules` convert them back.
 
 ## License
 
-MIT
+Business Source License 1.1. Production use is allowed, except offering the package as a hosted or embedded service that competes with the licensor. It converts to Apache 2.0 on 2030-01-01. See [LICENSE](LICENSE).
