@@ -8,6 +8,7 @@ export type SkipReason =
   | 'DSL_ERROR'
   | 'DSL_NOT_FOUND'
   | 'CHECKSUM_MISMATCH'
+  | 'INVALID_RULE'
   | 'INVALID_PARAMS'
   | 'TAG_MISMATCH'
   | 'INHIBITED_BY_META_RULE'
@@ -27,6 +28,8 @@ export interface BreakdownItem {
 export interface SkippedRule {
   readonly rule: Rule;
   readonly reason: SkipReason;
+  /** Why, when the reason alone does not say it (e.g. the `SpecError` of an `INVALID_RULE`). */
+  readonly detail?: string | undefined;
 }
 
 export interface EvaluationResult {

@@ -76,7 +76,15 @@ describe('computeRuleChecksum', () => {
   });
 
   it('handles rules without optional fields', () => {
-    const minimal = { id: 'r1', model: 'M', params: {}, version: 1 };
+    // Required fields only (spec: priority and effectiveFrom are required)
+    const minimal = {
+      id: 'r1',
+      model: 'M',
+      params: {},
+      version: 1,
+      priority: 100,
+      effectiveFrom: new Date('2024-01-01'),
+    };
     const hash = computeRuleChecksum(minimal);
     expect(hash).toMatch(/^[0-9a-f]{64}$/);
   });

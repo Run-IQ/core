@@ -44,7 +44,7 @@ describe('hydrateRule', () => {
     raw.params = { rate: 0.15 };
     raw.priority = 200;
     raw.effectiveFrom = '2024-06-01T00:00:00.000Z';
-    raw.tags = ['tax', 'national'];
+    raw.tags = ['national', 'tax'];
     raw.checksum = 'def';
     raw.condition = { dsl: 'jsonlogic', value: { '==': [1, 1] } };
 
@@ -53,7 +53,7 @@ describe('hydrateRule', () => {
     expect(rule.version).toBe(2);
     expect(rule.model).toBe('BRACKET');
     expect(rule.params).toEqual({ rate: 0.15 });
-    expect(rule.tags).toEqual(['tax', 'national']);
+    expect(rule.tags).toEqual(['national', 'tax']);
   });
 
   // ── Validation: rule.id ─────────────────────────────────────────

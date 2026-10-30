@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { computeRuleChecksum as specRuleChecksum } from '@run-iq/spec';
+import type { RuleDefinitionInput } from '@run-iq/spec';
 import { canonicalStringify } from './json.js';
 
 export function hashParams(params: unknown): string {
@@ -7,13 +9,15 @@ export function hashParams(params: unknown): string {
 }
 
 /**
- * Computes a SHA-256 checksum of the entire rule object, excluding the
- * `checksum` field itself. All fields present on the rule contribute to
- * the hash — missing/optional fields are simply absent from the digest.
- * Key order is irrelevant thanks to canonicalStringify.
+ * Checksum of a rule: `computeRuleChecksum` of `@run-iq/spec`, i.e. sha256 of the canonical
+ * form of the normalized definition. Dates are normalized first (`Date`, `YYYY-MM-DD` and an
+ * ISO date-time with a zone give the same checksum), tags are sorted and deduplicated, a
+ * top-level `null` counts as absent, and the `checksum` field itself is ignored. Every other
+ * field, plugin extensions included, enters the hash.
+ *
+ * Throws `SpecError` when the rule is not a valid definition (missing or invalid
+ * `effectiveFrom`, non-integer `version`, empty validity window, non-JSON value...).
  */
 export function computeRuleChecksum(rule: object): string {
-  // justification: extracting own enumerable entries to build a checksum-free copy for hashing
-  const entries = Object.entries(rule).filter(([key]) => key !== 'checksum');
-  return hashParams(Object.fromEntries(entries));
+  return specRuleChecksum(rule as RuleDefinitionInput);
 }

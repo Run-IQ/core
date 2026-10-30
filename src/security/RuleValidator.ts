@@ -1,13 +1,24 @@
-import { computeRuleChecksum } from '../utils/crypto.js';
+import { SpecError, verifyRuleChecksum } from '@run-iq/spec';
 import type { Rule } from '../types/rule.js';
-import type { SkipReason } from '../types/result.js';
+import type { SkippedRule } from '../types/result.js';
 import type { ModelRegistry } from '../registry/ModelRegistry.js';
+import { ValidationError } from '../errors/ValidationError.js';
 
 export interface RuleValidationResult {
   readonly valid: readonly Rule[];
-  readonly invalid: ReadonlyArray<{ rule: Rule; reason: SkipReason }>;
+  readonly invalid: readonly SkippedRule[];
 }
 
+/**
+ * Checks each rule's integrity (`verifyRuleChecksum` of `@run-iq/spec`) and its params.
+ *
+ * - checksum mismatch: `CHECKSUM_MISMATCH`;
+ * - malformed rule, whose checksum cannot be computed (`SpecError`, e.g. an invalid date or a
+ *   non-integer version): `INVALID_RULE`, with the `SpecError` message as `detail`;
+ * - params refused by a registered model: `INVALID_PARAMS`.
+ *
+ * With `onChecksumMismatch: 'throw'`, the first two throw instead of skipping the rule.
+ */
 export class RuleValidator {
   constructor(
     private readonly modelRegistry: ModelRegistry,
@@ -16,12 +27,12 @@ export class RuleValidator {
 
   validate(rules: ReadonlyArray<Rule>): RuleValidationResult {
     const valid: Rule[] = [];
-    const invalid: Array<{ rule: Rule; reason: SkipReason }> = [];
+    const invalid: SkippedRule[] = [];
 
     for (const rule of rules) {
-      const reason = this.checkRule(rule);
-      if (reason) {
-        invalid.push({ rule, reason });
+      const skipped = this.checkRule(rule);
+      if (skipped) {
+        invalid.push(skipped);
       } else {
         valid.push(rule);
       }
@@ -30,15 +41,25 @@ export class RuleValidator {
     return { valid, invalid };
   }
 
-  private checkRule(rule: Rule): SkipReason | null {
+  private checkRule(rule: Rule): SkippedRule | null {
     // 1. Verify checksum (full rule integrity)
-    const computedChecksum = computeRuleChecksum(rule);
+    let intact: boolean;
+    try {
+      intact = verifyRuleChecksum(rule);
+    } catch (error) {
+      if (!(error instanceof SpecError)) throw error;
+      const detail = `Invalid rule ${String(rule.id)}: ${error.message}`;
+      if (this.onChecksumMismatch === 'throw') {
+        throw new ValidationError(detail, [detail]);
+      }
+      return { rule, reason: 'INVALID_RULE', detail };
+    }
 
-    if (computedChecksum !== rule.checksum) {
+    if (!intact) {
       if (this.onChecksumMismatch === 'throw') {
         throw new Error(`Checksum mismatch for rule ${rule.id}`);
       }
-      return 'CHECKSUM_MISMATCH';
+      return { rule, reason: 'CHECKSUM_MISMATCH' };
     }
 
     // 2. Validate params via model (if registered)
@@ -48,7 +69,7 @@ export class RuleValidator {
       const model = this.modelRegistry.get(rule.model);
       const validation = model.validateParams(rule.params);
       if (!validation.valid) {
-        return 'INVALID_PARAMS';
+        return { rule, reason: 'INVALID_PARAMS' };
       }
     }
 
