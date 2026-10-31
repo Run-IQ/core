@@ -174,15 +174,11 @@ export class PPEEngine {
     allSkipped.push(...filterResult.skipped);
 
     // Step 6: Dominance resolution
-    const resolvedRules = this.dominanceResolver.resolve(filterResult.passed, this.conflictMode);
-
-    // Identify rules skipped due to conflict
-    const resolvedIds = new Set(resolvedRules.map((r) => r.id));
-    for (const rule of filterResult.passed) {
-      if (!resolvedIds.has(rule.id)) {
-        allSkipped.push({ rule, reason: 'RULE_CONFLICT' });
-      }
-    }
+    const { kept: resolvedRules, skipped: dominanceSkipped } = this.dominanceResolver.resolve(
+      filterResult.passed,
+      this.conflictMode,
+    );
+    allSkipped.push(...dominanceSkipped);
 
     // Step 7: Execution pipeline
     const pipelineResult = this.executionPipeline.execute(

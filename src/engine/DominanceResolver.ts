@@ -1,49 +1,53 @@
 import type { Rule } from '../types/rule.js';
-import { RuleConflictError } from '../errors/RuleConflictError.js';
+import type { SkippedRule } from '../types/result.js';
+import { resolveTie } from './resolveTie.js';
+
+const byPriorityThenId = (a: Rule, b: Rule): number =>
+  b.priority - a.priority || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 export class DominanceResolver {
   /**
-   * Resolves rule order and detects conflicts.
-   * A conflict occurs when multiple rules share the same Priority AND the same DominanceGroup.
-   * If a rule has no dominanceGroup, its ID is used as a fallback to prevent accidental conflicts.
+   * Within a dominanceGroup only the highest priority applies; the others are DOMINATED.
+   * A tie at the top of a group is a conflict (see resolveTie). Rules without a group are never
+   * dominated and never in conflict. Kept rules are ordered by priority descending, then id.
    */
-  resolve(rules: ReadonlyArray<Rule>, mode: 'throw' | 'first'): readonly Rule[] {
-    if (rules.length <= 1) {
-      return rules;
-    }
-
-    // Sort by priority descending (highest first)
-    const sorted = [...rules].sort((a, b) => b.priority - a.priority);
-
-    // Group rules by Priority + DominanceGroup
+  resolve(
+    rules: ReadonlyArray<Rule>,
+    mode: 'throw' | 'first',
+  ): { kept: Rule[]; skipped: SkippedRule[] } {
+    const kept: Rule[] = [];
+    const skipped: SkippedRule[] = [];
     const groups = new Map<string, Rule[]>();
-    for (const rule of sorted) {
-      const groupKey = `${rule.priority}_${rule.dominanceGroup ?? rule.id}`;
-      const group = groups.get(groupKey) ?? [];
-      group.push(rule);
-      groups.set(groupKey, group);
+
+    for (const rule of rules) {
+      if (rule.dominanceGroup === undefined) {
+        kept.push(rule);
+        continue;
+      }
+      const members = groups.get(rule.dominanceGroup) ?? [];
+      members.push(rule);
+      groups.set(rule.dominanceGroup, members);
     }
 
-    const finalRules: Rule[] = [];
-
-    for (const [, group] of groups) {
-      const first = group[0];
-      if (!first) continue;
-      if (group.length > 1) {
-        if (mode === 'throw') {
-          throw new RuleConflictError(
-            group.map((r) => r.id),
-            first.priority,
-          );
+    for (const [group, members] of groups) {
+      const top = Math.max(...members.map((r) => r.priority));
+      const head = members.filter((r) => r.priority === top);
+      const tie = resolveTie(head, mode);
+      const winner = tie.winner;
+      skipped.push(...tie.losers);
+      kept.push(winner);
+      for (const rule of members) {
+        if (rule.priority < top) {
+          skipped.push({
+            rule,
+            reason: 'DOMINATED',
+            detail: `dominated by ${winner.id}@${winner.version} (priority ${winner.priority}) in group ${group}`,
+          });
         }
-        // mode 'first': keep only the first one in this specific group
-        finalRules.push(first);
-      } else {
-        finalRules.push(first);
       }
     }
 
-    // Re-sort final rules by priority descending
-    return finalRules.sort((a, b) => b.priority - a.priority);
+    kept.sort(byPriorityThenId);
+    return { kept, skipped };
   }
 }
