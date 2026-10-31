@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { canonicalStringify, isJsonValue } from '../../src/utils/json.js';
+import {
+  canonicalStringify,
+  describeValue,
+  findNonJson,
+  isJsonValue,
+} from '../../src/utils/json.js';
 import { canonicalize, SpecError } from '@run-iq/spec';
 
 describe('canonicalStringify', () => {
@@ -122,5 +127,23 @@ describe('isJsonValue', () => {
   it('accepts the same object twice when it is not a cycle', () => {
     const shared = { k: 1 };
     expect(isJsonValue([shared, shared, { again: shared }])).toBe(true);
+  });
+});
+
+describe('findNonJson and describeValue', () => {
+  it('names where a value stops being JSON', () => {
+    const cycle: Record<string, unknown> = { list: [] };
+    cycle['list'] = [cycle];
+    expect(findNonJson({ ok: 1 })).toBeUndefined();
+    expect(findNonJson(NaN)).toBe('$ (NaN)');
+    expect(findNonJson({ a: { b: [1, undefined] } })).toBe('$.a.b[1] (undefined)');
+    expect(findNonJson({ 'a-b': new Map() })).toBe('$["a-b"] (Map)');
+    expect(findNonJson(cycle)).toBe('$.list[0] (cycle)');
+  });
+
+  it('describes any value without throwing', () => {
+    expect([describeValue({ b: 1, a: 'x' }), describeValue(NaN), describeValue(-Infinity)]).toEqual(
+      ['{"a":"x","b":1}', 'NaN', '-Infinity'],
+    );
   });
 });

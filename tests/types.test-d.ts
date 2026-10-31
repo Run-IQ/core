@@ -182,8 +182,10 @@ describe('SkipReason and SkippedRule', () => {
 });
 
 describe('breakdown, trace, input and hooks', () => {
-  it('names the output of each breakdown item and trace step', () => {
+  it('names the output, rule version and source of each breakdown item and trace step', () => {
     expectTypeOf<BreakdownItem['output']>().toEqualTypeOf<string>();
+    expectTypeOf<BreakdownItem['ruleVersion']>().toEqualTypeOf<number>();
+    expectTypeOf<BreakdownItem['sourceRef']>().toEqualTypeOf<string | undefined>();
     expectTypeOf<TraceStep['output']>().toEqualTypeOf<string>();
     expectTypeOf<TraceStep['ruleVersion']>().toEqualTypeOf<number>();
     expectTypeOf<TraceStep['sourceRef']>().toEqualTypeOf<string | undefined>();

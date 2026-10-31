@@ -3,6 +3,8 @@ import { EXCEPTION_MODEL } from '@run-iq/spec';
 import type { OutputDeclaration } from '@run-iq/spec';
 import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import { ValidationError } from '../../src/errors/ValidationError.js';
+// Imported from the package entry: both errors are public.
+import { InvalidModelError, OutputNotFiniteError } from '../../src/index.js';
 import { VERSION } from '../../src/utils/version.js';
 import {
   makeRule,
@@ -353,6 +355,32 @@ describe('PPEEngine', () => {
           'OUTPUT_MISMATCH',
           'rules feeding output risk declare it differently: a@1 enum/highestPriority (low, high); b@1 string/highestPriority',
         ],
+      ]);
+    });
+
+    it('refuses an overflowing amount instead of returning a partial decision', async () => {
+      const engine = engineWith([new StubModel('H', 1e308)]);
+      const rules = [makeRule({ id: 'b', model: 'H' }), makeRule({ id: 'a', model: 'H' })];
+      await expect(engine.evaluate(rules, makeInput())).rejects.toThrow(OutputNotFiniteError);
+      await expect(engine.evaluate(rules, makeInput())).rejects.toThrow(
+        'Output value is not a finite number; contributors: a, b',
+      );
+    });
+
+    it('refuses at construction a plugin model with an invalid output declaration', () => {
+      // Invalid on purpose: only JSON.parse builds it untyped.
+      const bad = new ValueModel('BAD', JSON.parse('{"type":"string","combine":"sum"}'), {});
+      expect(() => engineWith([bad])).toThrow(InvalidModelError);
+    });
+
+    it('keeps value a number: a rule feeding it with a boolean declaration is excluded', async () => {
+      const engine = engineWith([
+        new ValueModel('B', { type: 'boolean', combine: 'all' }, { a: true }),
+      ]);
+      const result = await engine.evaluate([makeRule({ id: 'a', model: 'B' })], makeInput());
+      expect(result.value).toBe(0);
+      expect(result.skippedRules.map((s) => [s.rule.id, s.reason])).toEqual([
+        ['a', 'OUTPUT_MISMATCH'],
       ]);
     });
 

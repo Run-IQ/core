@@ -5,17 +5,19 @@ import type { EvaluationInput } from '../types/input.js';
 import type { BreakdownItem, SkippedRule } from '../types/result.js';
 import type { DecisionOutput } from '../types/output.js';
 import type { ModelRegistry } from '../registry/ModelRegistry.js';
-import { isJsonValue } from '../utils/json.js';
+import { findNonJson, isJsonValue } from '../utils/json.js';
+import { isPlainObject, ruleLabel } from '../utils/values.js';
 import type { ShortCircuit } from './ExceptionProcessor.js';
 import type { TraceBuilder } from './TraceBuilder.js';
 import { OutputCombiner } from './OutputCombiner.js';
 import type { Contribution } from './OutputCombiner.js';
-import { compareRuleIdentity } from './resolveTie.js';
+import { compareByPriorityThenIdentity, compareRuleIdentity } from './resolveTie.js';
 import {
   declarationKey,
   declarationOf,
   describeDeclaration,
   outputOf,
+  refusesDeclaration,
 } from './outputDeclaration.js';
 
 export interface PipelineResult {
@@ -39,16 +41,7 @@ interface Step {
   readonly durationMs: number;
 }
 
-const byPriorityThenIdentity = (a: Rule, b: Rule): number =>
-  b.priority - a.priority || compareRuleIdentity(a, b);
-
-const label = (rule: Rule): string => `${rule.id}@${rule.version}`;
-
 const sameRule = (a: Rule, b: Rule): boolean => a.id === b.id && a.version === b.version;
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 /**
  * Splits what a model returned into its value and detail. A plain object with an own `value` is
@@ -85,7 +78,9 @@ const emptyDefaultOutput = (): DecisionOutput => ({
  * - Rules feeding one output with different declarations (`model.output`, compared by
  *   `declarationKey`) are all skipped with `OUTPUT_MISMATCH`, without being computed, and the
  *   output is absent.
- * - A computed value that is not JSON is skipped with `OUTPUT_MISMATCH`.
+ * - A rule feeding `value` with a declaration other than a number is skipped with
+ *   `OUTPUT_MISMATCH`, without being computed: `result.value` stays a number.
+ * - A computed value that is not JSON is skipped with `OUTPUT_MISMATCH`, naming where.
  *
  * Applied rules, breakdown items and trace steps are by priority descending, then id@version,
  * then output name, whatever the order of `rules`.
@@ -107,6 +102,8 @@ export class ExecutionPipeline {
     const applied: Rule[] = [];
     const skipped: SkippedRule[] = [];
 
+    // A short-circuit step may cite a carrier that a later stage skipped (dominance...): its
+    // exceptions fired and are final. `detail.shortCircuit` marks these steps.
     for (const [name, shortCircuit] of shortCircuits) {
       const { rule, value, reason, declaration } = shortCircuit;
       outputs.set(name, {
@@ -127,7 +124,7 @@ export class ExecutionPipeline {
     }
 
     const feeding = new Map<string, Rule[]>();
-    for (const rule of [...rules].sort(byPriorityThenIdentity)) {
+    for (const rule of [...rules].sort(compareByPriorityThenIdentity)) {
       const name = outputOf(rule);
       const shortCircuit = shortCircuits.get(name);
       if (shortCircuit === undefined) {
@@ -138,23 +135,33 @@ export class ExecutionPipeline {
         skipped.push({
           rule,
           reason: 'SHORT_CIRCUITED',
-          detail: `output ${name} short-circuited by ${label(shortCircuit.rule)}`,
+          detail: `output ${name} short-circuited by ${ruleLabel(shortCircuit.rule)}`,
         });
       }
     }
 
-    for (const [name, feeders] of feeding) {
-      const declared = feeders.map((rule) => ({
-        rule,
-        declaration: declarationOf(this.modelRegistry, rule),
-      }));
+    for (const [name, candidates] of feeding) {
+      const declared = [];
+      for (const rule of candidates) {
+        const declaration = declarationOf(this.modelRegistry, rule);
+        if (refusesDeclaration(name, declaration)) {
+          skipped.push({
+            rule,
+            reason: 'OUTPUT_MISMATCH',
+            detail: `output ${name} must be a number: ${ruleLabel(rule)} declares it ${describeDeclaration(declaration)}`,
+          });
+        } else {
+          declared.push({ rule, declaration });
+        }
+      }
+      const feeders = declared.map((d) => d.rule);
       const [first] = declared;
       if (first === undefined) continue;
       const declaration = first.declaration;
       if (new Set(declared.map((d) => declarationKey(d.declaration))).size > 1) {
         const described = [...declared]
           .sort((a, b) => compareRuleIdentity(a.rule, b.rule))
-          .map((d) => `${label(d.rule)} ${describeDeclaration(d.declaration)}`)
+          .map((d) => `${ruleLabel(d.rule)} ${describeDeclaration(d.declaration)}`)
           .join('; ');
         for (const rule of feeders) {
           skipped.push({
@@ -178,7 +185,7 @@ export class ExecutionPipeline {
           skipped.push({
             rule,
             reason: 'OUTPUT_MISMATCH',
-            detail: `output ${name}: the value is not JSON`,
+            detail: `output ${name}: the value is not JSON at ${findNonJson(value) ?? '$'}`,
           });
           continue;
         }
@@ -206,7 +213,7 @@ export class ExecutionPipeline {
 
     steps.sort(
       (a, b) =>
-        byPriorityThenIdentity(a.rule, b.rule) ||
+        compareByPriorityThenIdentity(a.rule, b.rule) ||
         (a.output < b.output ? -1 : a.output > b.output ? 1 : 0),
     );
     for (const step of steps) {
@@ -235,13 +242,15 @@ export class ExecutionPipeline {
       outputs: { ...named, value },
       breakdown: steps.map((step) => ({
         ruleId: step.rule.id,
+        ruleVersion: step.rule.version,
+        ...(step.rule.sourceRef === undefined ? {} : { sourceRef: step.rule.sourceRef }),
         output: step.output,
         contribution: step.contribution,
         modelUsed: step.modelUsed,
         detail: step.detail,
       })),
-      applied: applied.sort(byPriorityThenIdentity),
-      skipped: skipped.sort((a, b) => byPriorityThenIdentity(a.rule, b.rule)),
+      applied: applied.sort(compareByPriorityThenIdentity),
+      skipped: skipped.sort((a, b) => compareByPriorityThenIdentity(a.rule, b.rule)),
     };
   }
 }

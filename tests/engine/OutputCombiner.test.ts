@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { JsonValue, OutputDeclaration } from '@run-iq/spec';
 import { OutputCombiner } from '../../src/engine/OutputCombiner.js';
 import { RuleConflictError } from '../../src/errors/RuleConflictError.js';
+import { OutputNotFiniteError } from '../../src/errors/OutputNotFiniteError.js';
 import type { Rule } from '../../src/types/rule.js';
 import { makeRule, permutations } from '../helpers.js';
 
@@ -274,5 +275,70 @@ describe('OutputCombiner', () => {
     for (const order of permutations(contributions)) {
       expect(OutputCombiner.combine('l', LIST, order, 'throw')).toEqual(expected);
     }
+  });
+
+  describe('limits', () => {
+    it('throws OutputNotFiniteError naming the output and its contributors in identity order', () => {
+      try {
+        OutputCombiner.combine(
+          'tax',
+          NUMBER('sum'),
+          [of(rule('b', 900), 1e308), of(rule('a', 100), 1e308), of(rule('c'), 1)],
+          'first',
+        );
+        expect.unreachable('should have thrown');
+      } catch (e) {
+        if (!(e instanceof OutputNotFiniteError)) throw e;
+        expect(e.code).toBe('OUTPUT_NOT_FINITE');
+        expect(e.output).toBe('tax');
+        expect(e.contributors).toEqual(['a', 'b', 'c']);
+        expect(e.message).toBe('Output tax is not a finite number; contributors: a, b, c');
+      }
+    });
+
+    it('reports NaN and Infinity reaching it directly as OUTPUT_MISMATCH, without throwing', () => {
+      const n = rule('n');
+      const i = rule('i');
+      const { output, skipped } = OutputCombiner.combine(
+        'value',
+        NUMBER('max'),
+        [of(n, NaN), of(i, -Infinity), of(rule('a'), 3)],
+        'throw',
+      );
+      expect(output?.value).toBe(3);
+      expect(skipped).toEqual([
+        {
+          rule: i,
+          reason: 'OUTPUT_MISMATCH',
+          detail: 'output value: value -Infinity does not match type number',
+        },
+        {
+          rule: n,
+          reason: 'OUTPUT_MISMATCH',
+          detail: 'output value: value NaN does not match type number',
+        },
+      ]);
+    });
+
+    it('sums exactly to 20 significant digits, whatever the order', () => {
+      const contributions = [
+        of(rule('a', 200), 1e20),
+        of(rule('b', 100), 1),
+        of(rule('c', 50), -1e20),
+      ];
+      for (const order of permutations(contributions)) {
+        expect(OutputCombiner.combine('value', NUMBER('sum'), order, 'throw').output?.value).toBe(
+          0,
+        );
+      }
+    });
+
+    it('throws on a combine strategy it does not know', () => {
+      // A declaration that skipped registration (ModelRegistry refuses it): only a cast builds it.
+      const unknown = JSON.parse('{"type":"number","combine":"avg"}') as OutputDeclaration;
+      expect(() => OutputCombiner.combine('o', unknown, [of(rule('a'), 1)], 'throw')).toThrow(
+        'Unknown combine strategy "avg" for output o',
+      );
+    });
   });
 });

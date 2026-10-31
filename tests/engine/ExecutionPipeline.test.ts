@@ -5,7 +5,8 @@ import { ExecutionPipeline } from '../../src/engine/ExecutionPipeline.js';
 import type { ShortCircuit } from '../../src/engine/ExceptionProcessor.js';
 import { TraceBuilder } from '../../src/engine/TraceBuilder.js';
 import { ModelRegistry } from '../../src/registry/ModelRegistry.js';
-import type { CalculationModel } from '../../src/types/model.js';
+import type { CalculationModel, CalculationOutput } from '../../src/types/model.js';
+import { OutputNotFiniteError } from '../../src/errors/OutputNotFiniteError.js';
 import type { OutputValue } from '../../src/types/output.js';
 import { makeRule, makeInput, StubModel, ValueModel } from '../helpers.js';
 
@@ -78,9 +79,29 @@ describe('ExecutionPipeline', () => {
     const result = pipeline.execute(rules, makeInput(), trace, NONE);
 
     expect(result.breakdown).toEqual([
-      { ruleId: 'r1', output: 'value', contribution: 50, modelUsed: 'M', detail: undefined },
-      { ruleId: 'r2', output: 'risk', contribution: 'high', modelUsed: 'RISK', detail: 'scored' },
+      {
+        ruleId: 'r1',
+        ruleVersion: 3,
+        sourceRef: 'CGI art. 12',
+        output: 'value',
+        contribution: 50,
+        modelUsed: 'M',
+        detail: undefined,
+      },
+      {
+        ruleId: 'r2',
+        ruleVersion: 1,
+        output: 'risk',
+        contribution: 'high',
+        modelUsed: 'RISK',
+        detail: 'scored',
+      },
     ]);
+    expect(result.breakdown.map((b) => [b.ruleId, b.ruleVersion, b.output, b.sourceRef])).toEqual([
+      ['r1', 3, 'value', 'CGI art. 12'],
+      ['r2', 1, 'risk', undefined],
+    ]);
+    expect('sourceRef' in result.breakdown[1]!).toBe(false);
     const steps = trace.build().steps;
     expect(
       steps.map((s) => [s.ruleId, s.ruleVersion, s.output, s.sourceRef, s.contribution]),
@@ -196,8 +217,16 @@ describe('ExecutionPipeline', () => {
       const n = makeRule({ id: 'n', model: 'NAN' });
       const result = pipeline.execute([a, n], makeInput(), new TraceBuilder(), NONE);
       expect(result.skipped).toEqual([
-        { rule: a, reason: 'OUTPUT_MISMATCH', detail: 'output terms: the value is not JSON' },
-        { rule: n, reason: 'OUTPUT_MISMATCH', detail: 'output value: the value is not JSON' },
+        {
+          rule: a,
+          reason: 'OUTPUT_MISMATCH',
+          detail: 'output terms: the value is not JSON at $.at (Date)',
+        },
+        {
+          rule: n,
+          reason: 'OUTPUT_MISMATCH',
+          detail: 'output value: the value is not JSON at $ (NaN)',
+        },
       ]);
       expect(result.outputs).toEqual({
         value: { name: 'value', type: 'number', combine: 'sum', value: 0, contributors: [] },
@@ -261,12 +290,21 @@ describe('ExecutionPipeline', () => {
       expect(result.breakdown).toEqual([
         {
           ruleId: 'X',
+          ruleVersion: 1,
+          sourceRef: 'decree 7',
           output: 'risk',
           contribution: 'high',
           modelUsed: EXCEPTION_MODEL,
           detail: { shortCircuit: 'blacklisted' },
         },
-        { ruleId: 'v', output: 'value', contribution: 10, modelUsed: 'M', detail: undefined },
+        {
+          ruleId: 'v',
+          ruleVersion: 1,
+          output: 'value',
+          contribution: 10,
+          modelUsed: 'M',
+          detail: undefined,
+        },
       ]);
       const step = trace.build().steps[0]!;
       expect([
@@ -306,6 +344,7 @@ describe('ExecutionPipeline', () => {
       expect(result.breakdown).toEqual([
         {
           ruleId: 'C',
+          ruleVersion: 1,
           output: 'risk',
           contribution: 'high',
           modelUsed: 'RISK',
@@ -370,5 +409,89 @@ describe('ExecutionPipeline', () => {
         contributors: ['X'],
       });
     });
+  });
+
+  describe('behaviour changes on legacy number models', () => {
+    it('excludes NaN, Infinity, a string and a wrapped string with OUTPUT_MISMATCH', () => {
+      const cases: { value: OutputValue | CalculationOutput<OutputValue>; detail: string }[] = [
+        { value: NaN, detail: 'output value: the value is not JSON at $ (NaN)' },
+        { value: Infinity, detail: 'output value: the value is not JSON at $ (Infinity)' },
+        { value: '100', detail: 'output value: value "100" does not match type number' },
+        { value: { value: '5' }, detail: 'output value: value "5" does not match type number' },
+      ];
+      for (const { value, detail } of cases) {
+        const pipeline = pipelineWith(
+          new ValueModel('X', undefined, { x: value }),
+          new StubModel('Y', 2),
+        );
+        const x = makeRule({ id: 'x', model: 'X' });
+        const result = pipeline.execute(
+          [x, makeRule({ id: 'y', model: 'Y' })],
+          makeInput(),
+          new TraceBuilder(),
+          NONE,
+        );
+        expect(result.skipped).toEqual([{ rule: x, reason: 'OUTPUT_MISMATCH', detail }]);
+        expect(result.outputs.value.value).toBe(2);
+      }
+    });
+
+    it('names the path of a nested value that is not JSON', () => {
+      const object: OutputDeclaration = { type: 'object', combine: 'highestPriority' };
+      const pipeline = pipelineWith(new ValueModel('O', object, { a: { a: { b: [1] } } }));
+      // A JavaScript model can return undefined deep inside; typed code cannot.
+      const nested: OutputValue = Object.assign(Object.create(null), {
+        a: { b: [1, undefined] },
+      });
+      const holey = pipelineWith(new ValueModel('O', object, { a: nested }));
+      const rule = makeRule({ id: 'a', model: 'O', output: 'o' });
+      expect(pipeline.execute([rule], makeInput(), new TraceBuilder(), NONE).skipped).toEqual([]);
+      expect(holey.execute([rule], makeInput(), new TraceBuilder(), NONE).skipped).toEqual([
+        {
+          rule,
+          reason: 'OUTPUT_MISMATCH',
+          detail: 'output o: the value is not JSON at $.a.b[1] (undefined)',
+        },
+      ]);
+    });
+  });
+
+  it('excludes, without computing it, a rule feeding value with a declaration other than number', () => {
+    const flag = new ValueModel('FLAG', { type: 'boolean', combine: 'all' }, { a: true, b: true });
+    const pipeline = pipelineWith(flag, new StubModel('M', 3));
+    const a = makeRule({ id: 'a', model: 'FLAG' });
+    const result = pipeline.execute(
+      [a, makeRule({ id: 'b', model: 'FLAG', output: 'ok' }), makeRule({ id: 'm', model: 'M' })],
+      makeInput(),
+      new TraceBuilder(),
+      NONE,
+    );
+    expect(result.skipped).toEqual([
+      {
+        rule: a,
+        reason: 'OUTPUT_MISMATCH',
+        detail: 'output value must be a number: a@1 declares it boolean/all',
+      },
+    ]);
+    expect(result.outputs.value.value).toBe(3);
+    expect(result.outputs['ok']?.value).toBe(true);
+    expect(flag.calls).toBe(1);
+  });
+
+  it('throws OutputNotFiniteError when a sum overflows', () => {
+    const pipeline = pipelineWith(new StubModel('H', 1e308));
+    try {
+      pipeline.execute(
+        [makeRule({ id: 'b', model: 'H' }), makeRule({ id: 'a', model: 'H', priority: 900 })],
+        makeInput(),
+        new TraceBuilder(),
+        NONE,
+      );
+      expect.unreachable('should have thrown');
+    } catch (e) {
+      if (!(e instanceof OutputNotFiniteError)) throw e;
+      expect(e.output).toBe('value');
+      expect(e.contributors).toEqual(['a', 'b']);
+    }
   });
 });

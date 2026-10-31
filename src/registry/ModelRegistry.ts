@@ -1,14 +1,29 @@
 import type { CalculationModel } from '../types/model.js';
 import type { OutputValue } from '../types/output.js';
+import { validateOutputDeclaration } from '@run-iq/spec';
 import { ModelNotFoundError } from '../errors/ModelNotFoundError.js';
+import { InvalidModelError } from '../errors/InvalidModelError.js';
 
-/** The calculation models by name. Models of any output type register without a cast. */
+/**
+ * The calculation models by name. Models of any output type register without a cast; a model
+ * whose `output` declaration `validateOutputDeclaration` of `@run-iq/spec` refuses is refused
+ * with `InvalidModelError`.
+ */
 export class ModelRegistry {
   private readonly models = new Map<string, CalculationModel<OutputValue>>();
 
   register(model: CalculationModel<OutputValue>): void {
     if (this.models.has(model.name)) {
       throw new Error(`Model "${model.name}" is already registered`);
+    }
+    if (model.output !== undefined) {
+      const issues = validateOutputDeclaration(model.output);
+      if (issues.length > 0) {
+        throw new InvalidModelError(
+          model.name,
+          issues.map((issue) => issue.message),
+        );
+      }
     }
     this.models.set(model.name, model);
   }

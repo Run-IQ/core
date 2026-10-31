@@ -21,6 +21,8 @@ export {
   PPEError,
   RuleConflictError,
   ExceptionPrecedenceError,
+  OutputNotFiniteError,
+  InvalidModelError,
   ModelNotFoundError,
   DSLNotFoundError,
   SnapshotFailureError,

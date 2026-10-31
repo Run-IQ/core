@@ -8,6 +8,11 @@ export function compareRuleIdentity(a: Rule, b: Rule): number {
   return a.version - b.version;
 }
 
+/** The engine's processing order: priority descending, then `compareRuleIdentity`. */
+export function compareByPriorityThenIdentity(a: Rule, b: Rule): number {
+  return b.priority - a.priority || compareRuleIdentity(a, b);
+}
+
 /**
  * Resolves a tie between rules that share the same priority.
  * 'throw' raises a RuleConflictError naming every tied rule (in identity order); 'first' keeps the

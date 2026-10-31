@@ -33,3 +33,10 @@ export function describeDeclaration(declaration: OutputDeclaration): string {
   const values = declaration.values === undefined ? '' : ` (${declaration.values.join(', ')})`;
   return `${declaration.type}/${declaration.combine}${values}`;
 }
+
+/**
+ * True when `declaration` may not be that of output `name`: the default output `value` is a
+ * number (`result.value` stays one), whatever its combine strategy.
+ */
+export const refusesDeclaration = (name: string, declaration: OutputDeclaration): boolean =>
+  name === DEFAULT_OUTPUT && declaration.type !== 'number';

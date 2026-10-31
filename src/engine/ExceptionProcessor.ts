@@ -18,13 +18,15 @@ import type { SkippedRule } from '../types/result.js';
 import type { ModelRegistry } from '../registry/ModelRegistry.js';
 import { ExceptionPrecedenceError } from '../errors/ExceptionPrecedenceError.js';
 import { deepMerge } from '../utils/deepMerge.js';
-import { compareRuleIdentity, resolveTie } from './resolveTie.js';
+import { compareByPriorityThenIdentity, resolveTie } from './resolveTie.js';
+import { isPlainObject, ruleLabel } from '../utils/values.js';
 import {
   declarationKey,
   declarationOf,
   describeDeclaration,
   describeType,
   outputOf,
+  refusesDeclaration,
 } from './outputDeclaration.js';
 
 type Substitute = Extract<RuleException, { kind: 'substitute' }>;
@@ -76,15 +78,6 @@ interface Carrier {
   readonly targets: ReadonlyMap<number, readonly Rule[]>;
 }
 
-const byPriorityThenIdentity = (a: Rule, b: Rule): number =>
-  b.priority - a.priority || compareRuleIdentity(a, b);
-
-const label = (rule: Rule): string => `${rule.id}@${rule.version}`;
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 /** True when both params set one key path to values that differ (canonically). */
 function paramsConflict(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
   for (const key of Object.keys(a)) {
@@ -129,7 +122,7 @@ export class ExceptionProcessor {
   constructor(private readonly models: ModelRegistry) {}
 
   apply(rules: ReadonlyArray<Rule>, mode: 'throw' | 'first'): ExceptionResult {
-    const ordered = [...rules].sort(byPriorityThenIdentity);
+    const ordered = [...rules].sort(compareByPriorityThenIdentity);
     /** Exclusions decided during the pass: INHIBITED, RULE_CONFLICT, OUTPUT_MISMATCH. */
     const excluded = new Map<Rule, SkippedRule>();
     const inhibitedBy = new Map<Rule, { carrier: Rule; index: number }>();
@@ -153,12 +146,17 @@ export class ExceptionProcessor {
       const precedent = firedTargetOf(carrier, fired);
       if (precedent !== undefined) {
         if (mode === 'throw') {
-          throw new ExceptionPrecedenceError(rule.id, precedent.id, label(rule), label(precedent));
+          throw new ExceptionPrecedenceError(
+            rule.id,
+            precedent.id,
+            ruleLabel(rule),
+            ruleLabel(precedent),
+          );
         }
         excluded.set(rule, {
           rule,
           reason: 'RULE_CONFLICT',
-          detail: `inhibits ${label(precedent)}, which takes precedence and already fired`,
+          detail: `inhibits ${ruleLabel(precedent)}, which takes precedence and already fired`,
         });
         continue;
       }
@@ -187,7 +185,7 @@ export class ExceptionProcessor {
             excluded.set(target, {
               rule: target,
               reason: 'INHIBITED',
-              detail: `inhibited by ${label(rule)}`,
+              detail: `inhibited by ${ruleLabel(rule)}`,
             });
             inhibitedBy.set(target, { carrier: rule, index });
           }
@@ -205,7 +203,7 @@ export class ExceptionProcessor {
       const [declaration] = this.declarationsOf(output, ordered);
       if (declaration === undefined) {
         throw new Error(
-          `short-circuit of ${label(carrier)} on output ${output} has no declaration`,
+          `short-circuit of ${ruleLabel(carrier)} on output ${output} has no declaration`,
         );
       }
       shortCircuits.set(
@@ -226,8 +224,8 @@ export class ExceptionProcessor {
           rule: target,
           reason: 'SHORT_CIRCUITED',
           detail:
-            `output ${output} short-circuited by ${label(carrier)}` +
-            (inhibitor === undefined ? '' : `; also inhibited by ${label(inhibitor)}`),
+            `output ${output} short-circuited by ${ruleLabel(carrier)}` +
+            (inhibitor === undefined ? '' : `; also inhibited by ${ruleLabel(inhibitor)}`),
         });
       }
       shortCircuited.set(output, affected);
@@ -260,7 +258,7 @@ export class ExceptionProcessor {
       );
       const refusal = this.refuseParams(target, params);
       if (refusal !== undefined) {
-        const by = [...new Set(patches.map((p) => label(p.carrier)))].join(', ');
+        const by = [...new Set(patches.map((p) => ruleLabel(p.carrier)))].join(', ');
         final.set(target, {
           rule: target,
           reason: 'INVALID_PARAMS',
@@ -348,7 +346,7 @@ export class ExceptionProcessor {
     for (const exception of exceptions) {
       if (exception.kind !== 'shortCircuit') continue;
       const { output, value } = exception;
-      const at = `shortCircuit of ${label(rule)} on output ${output}`;
+      const at = `shortCircuit of ${ruleLabel(rule)} on output ${output}`;
       const declarations = this.declarationsOf(output, ordered);
       const [declaration] = declarations;
       if (declaration === undefined) return `${at}: no rule in play declares output ${output}`;
@@ -365,8 +363,9 @@ export class ExceptionProcessor {
 
   /**
    * The distinct declarations of `output` among the rules in play feeding it (whose model is
-   * registered), each `declarationOf` it, compared by `declarationKey`; for the default output
-   * with no such rule, `DEFAULT_OUTPUT_DECLARATION`.
+   * registered), each `declarationOf` it, compared by `declarationKey`, except those
+   * `refusesDeclaration` refuses; for the default output with no such rule,
+   * `DEFAULT_OUTPUT_DECLARATION`.
    */
   private declarationsOf(output: string, ordered: readonly Rule[]): OutputDeclaration[] {
     const declarations = new Map<string, OutputDeclaration>();
@@ -374,6 +373,8 @@ export class ExceptionProcessor {
       if (rule.model === EXCEPTION_MODEL || outputOf(rule) !== output) continue;
       if (!this.models.has(rule.model)) continue;
       const declaration = declarationOf(this.models, rule);
+      // Such a rule is excluded by the pipeline and does not type the output.
+      if (refusesDeclaration(output, declaration)) continue;
       declarations.set(declarationKey(declaration), declaration);
     }
     if (declarations.size === 0 && output === DEFAULT_OUTPUT) {

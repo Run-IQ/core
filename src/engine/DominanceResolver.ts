@@ -1,9 +1,6 @@
 import type { Rule } from '../types/rule.js';
 import type { SkippedRule } from '../types/result.js';
-import { compareRuleIdentity, resolveTie } from './resolveTie.js';
-
-const byPriorityThenIdentity = (a: Rule, b: Rule): number =>
-  b.priority - a.priority || compareRuleIdentity(a, b);
+import { compareByPriorityThenIdentity, resolveTie } from './resolveTie.js';
 
 export class DominanceResolver {
   /**
@@ -49,8 +46,8 @@ export class DominanceResolver {
       }
     }
 
-    kept.sort(byPriorityThenIdentity);
-    skipped.sort((a, b) => byPriorityThenIdentity(a.rule, b.rule));
+    kept.sort(compareByPriorityThenIdentity);
+    skipped.sort((a, b) => compareByPriorityThenIdentity(a.rule, b.rule));
     return { kept, skipped };
   }
 }

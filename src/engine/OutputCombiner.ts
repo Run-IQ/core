@@ -4,7 +4,9 @@ import type { JsonValue, OutputDeclaration } from '@run-iq/spec';
 import type { Rule } from '../types/rule.js';
 import type { SkippedRule } from '../types/result.js';
 import type { DecisionOutput } from '../types/output.js';
-import { compareRuleIdentity, resolveTie } from './resolveTie.js';
+import { OutputNotFiniteError } from '../errors/OutputNotFiniteError.js';
+import { describeValue } from '../utils/json.js';
+import { compareByPriorityThenIdentity, compareRuleIdentity, resolveTie } from './resolveTie.js';
 import { describeType } from './outputDeclaration.js';
 
 /** What a rule computed for an output. */
@@ -14,7 +16,7 @@ export interface Contribution {
 }
 
 const byPriorityThenIdentity = (a: { rule: Rule }, b: { rule: Rule }): number =>
-  b.rule.priority - a.rule.priority || compareRuleIdentity(a.rule, b.rule);
+  compareByPriorityThenIdentity(a.rule, b.rule);
 
 /** The ids of the rules, in order, each once. */
 const idsOf = (contributions: readonly Contribution[]): string[] => [
@@ -23,7 +25,7 @@ const idsOf = (contributions: readonly Contribution[]): string[] => [
 
 const decimalOf = (value: JsonValue): Decimal => new Decimal(String(value));
 
-/** The value `keepRight` prefers among numbers, compared exactly in `Decimal`; the first on a tie. */
+/** The value `keepRight` prefers among finite numbers, compared in `Decimal`; the first on a tie. */
 function extreme(values: readonly JsonValue[], keepRight: (cmp: number) => boolean): JsonValue {
   return values.reduce((best, value) =>
     keepRight(decimalOf(value).comparedTo(decimalOf(best))) ? value : best,
@@ -50,9 +52,14 @@ export const OutputCombiner = {
   /**
    * Combines the contributions of the rules feeding one output, as `declaration` says.
    *
+   * Precondition: the values are JSON (the pipeline checks it). A value reaching here that is not
+   * (`NaN`, `Infinity`) is still described without throwing.
+   *
    * A contribution whose value does not match the declared type is excluded with
    * `OUTPUT_MISMATCH`. With the remaining ones, in order of priority descending then id@version:
-   * - `sum`, `max`, `min` compute in `Decimal`, so `0.1 + 0.2` is `0.3`;
+   * - `sum`, `max`, `min` compute in `Decimal` (20 significant digits; exact decimal arithmetic
+   *   comes in phase 3), so `0.1 + 0.2` is `0.3`. A sum that is not a finite number (overflow)
+   *   throws `OutputNotFiniteError`: no decision is returned with a partial amount;
    * - `all` and `any` are the logical AND and OR;
    * - `union` concatenates the lists and keeps the first of the items with the same canonical
    *   form;
@@ -79,7 +86,7 @@ export const OutputCombiner = {
         skipped.push({
           rule: contribution.rule,
           reason: 'OUTPUT_MISMATCH',
-          detail: `output ${name}: value ${canonicalize(contribution.value)} does not match type ${describeType(declaration)}`,
+          detail: `output ${name}: value ${describeValue(contribution.value)} does not match type ${describeType(declaration)}`,
         });
       }
     }
@@ -90,11 +97,17 @@ export const OutputCombiner = {
     let value: JsonValue;
     let contributors: readonly Contribution[] = valid;
     switch (declaration.combine) {
-      case 'sum':
-        value = values
-          .reduce<Decimal>((total, v) => total.plus(decimalOf(v)), new Decimal(0))
+      case 'sum': {
+        const total = values
+          .reduce<Decimal>((sum, v) => sum.plus(decimalOf(v)), new Decimal(0))
           .toNumber();
+        if (!Number.isFinite(total)) {
+          const ids = [...valid].sort((a, b) => compareRuleIdentity(a.rule, b.rule));
+          throw new OutputNotFiniteError(name, idsOf(ids));
+        }
+        value = total;
         break;
+      }
       case 'max':
         value = extreme(values, (cmp) => cmp > 0);
         break;
@@ -131,6 +144,10 @@ export const OutputCombiner = {
         // identity order within a priority).
         value = (contributors[0] ?? head).value;
         break;
+      }
+      default: {
+        const unknown: never = declaration.combine;
+        throw new Error(`Unknown combine strategy ${describeValue(unknown)} for output ${name}`);
       }
     }
 

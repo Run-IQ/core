@@ -60,8 +60,12 @@ export type SkipReason =
   /** No model is registered for the rule's `model` (for plugins; core throws `ModelNotFoundError`). */
   | 'MODEL_NOT_FOUND';
 
+/** One contribution that entered the decision, as the trace step of the same rule records it. */
 export interface BreakdownItem {
   readonly ruleId: string;
+  readonly ruleVersion: number;
+  /** The rule's reference to its legal or business source, when it has one. */
+  readonly sourceRef?: string | undefined;
   /** The output the rule contributed to. */
   readonly output: string;
   readonly contribution: unknown;
