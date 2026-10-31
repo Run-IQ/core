@@ -13,10 +13,12 @@ import type {
   EvaluationInput,
   EvaluationResult,
   FactEncoder,
+  ModelRegistry,
   OutputDeclaration,
   OutputType,
   OutputValue,
   PPEPlugin,
+  PluginContext,
   Rule,
   SkippedRule,
   SkipReason,
@@ -91,6 +93,16 @@ describe('CalculationModel (outputs)', () => {
   it('refuses a value that is not JSON', () => {
     // @ts-expect-error a Date is not a JsonValue
     expectTypeOf<CalculationModel<Date>>().not.toBeNever();
+  });
+
+  it('registers models of any output type, directly and through the plugin context', () => {
+    type Registered = Parameters<ModelRegistry['register']>[0];
+    expectTypeOf(obligations).toMatchTypeOf<Registered>();
+    expectTypeOf<LegacyNumberModel>().toMatchTypeOf<Registered>();
+    expectTypeOf(obligations).toMatchTypeOf<
+      Parameters<PluginContext['modelRegistry']['register']>[0]
+    >();
+    expectTypeOf<ReturnType<ModelRegistry['get']>>().toEqualTypeOf<CalculationModel<OutputValue>>();
   });
 
   it('lets a plugin provide models of any output type', () => {

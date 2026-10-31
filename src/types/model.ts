@@ -7,7 +7,12 @@ export interface ValidationResult {
   readonly errors?: readonly string[] | undefined;
 }
 
-/** A computed value with an optional explanation, kept in the breakdown and the trace. */
+/**
+ * A computed value with an optional explanation, kept in the breakdown and the trace. The engine
+ * reads a plain object with an own `value` as a `CalculationOutput`; for an `object` output, only
+ * when `value` and `detail` are its only keys (return `{ value: { value: 1 } }` for the object
+ * `{ value: 1 }`).
+ */
 export interface CalculationOutput<V extends OutputValue = number> {
   readonly value: V;
   readonly detail?: unknown;

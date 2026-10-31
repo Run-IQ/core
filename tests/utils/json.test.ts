@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canonicalStringify } from '../../src/utils/json.js';
+import { canonicalStringify, isJsonValue } from '../../src/utils/json.js';
 import { canonicalize, SpecError } from '@run-iq/spec';
 
 describe('canonicalStringify', () => {
@@ -96,5 +96,31 @@ describe('canonicalStringify delegates to @run-iq/spec canonicalize', () => {
     ['a Map', { v: new Map() }],
   ])('throws SpecError on %s', (_name, value) => {
     expect(() => canonicalStringify(value)).toThrow(SpecError);
+  });
+});
+
+describe('isJsonValue', () => {
+  it('accepts JSON data, including null-prototype objects', () => {
+    const bare: Record<string, unknown> = Object.assign(Object.create(null), { a: [1, 'x'] });
+    for (const value of [null, true, 'x', 0, -1.5, [], {}, { a: [null, { b: false }] }, bare]) {
+      expect(isJsonValue(value)).toBe(true);
+    }
+  });
+
+  it('refuses non-finite numbers, undefined, Dates, Maps, class instances and cycles', () => {
+    const cycle: Record<string, unknown> = {};
+    cycle['self'] = cycle;
+    class Point {
+      x = 1;
+    }
+    for (const value of [NaN, Infinity, undefined, new Date(0), new Map(), new Point(), cycle]) {
+      expect(isJsonValue(value)).toBe(false);
+    }
+    expect(isJsonValue({ nested: [{ at: new Date(0) }] })).toBe(false);
+  });
+
+  it('accepts the same object twice when it is not a cycle', () => {
+    const shared = { k: 1 };
+    expect(isJsonValue([shared, shared, { again: shared }])).toBe(true);
   });
 });

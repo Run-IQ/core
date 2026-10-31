@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { EXCEPTION_MODEL } from '@run-iq/spec';
+import type { OutputDeclaration } from '@run-iq/spec';
 import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import { ValidationError } from '../../src/errors/ValidationError.js';
 import { VERSION } from '../../src/utils/version.js';
@@ -10,7 +11,13 @@ import {
   StubPlugin,
   StubDSL,
   InMemorySnapshotAdapter,
+  ValueModel,
+  permutations,
 } from '../helpers.js';
+import type { CalculationModel } from '../../src/types/model.js';
+import type { DSLEvaluator } from '../../src/types/dsl.js';
+import type { EvaluationResult } from '../../src/types/result.js';
+import type { OutputValue } from '../../src/types/output.js';
 
 describe('PPEEngine', () => {
   it('evaluates rules end-to-end', async () => {
@@ -215,5 +222,241 @@ describe('PPEEngine', () => {
       expect(result.skippedRules[0]!.reason).toBe('INVALID_RULE');
       expect(result.skippedRules[0]!.detail).toMatch(/^Invalid rule bad@1: .*window/);
     });
+  });
+
+  describe('typed outputs', () => {
+    const RISK: OutputDeclaration = {
+      type: 'enum',
+      combine: 'highestPriority',
+      values: ['low', 'high'],
+    };
+    const LIST: OutputDeclaration = { type: 'list', combine: 'union' };
+
+    function engineWith(models: CalculationModel<OutputValue>[], dsls: DSLEvaluator[] = []) {
+      return new PPEEngine({ plugins: [new StubPlugin('test', models)], dsls, strict: false });
+    }
+
+    it('combines every output by name and keeps value equal to outputs.value', async () => {
+      const engine = engineWith([
+        new StubModel('M', 0.1),
+        new ValueModel('RISK', RISK, { hi: 'high', lo: 'low' }),
+        new ValueModel('OBL', LIST, { o1: ['register'], o2: ['declare', 'register'] }),
+      ]);
+      const rules = [
+        makeRule({ id: 'v1', model: 'M' }),
+        makeRule({ id: 'v2', model: 'M' }),
+        makeRule({ id: 'lo', model: 'RISK', output: 'risk', priority: 100 }),
+        makeRule({ id: 'hi', model: 'RISK', output: 'risk', priority: 500 }),
+        makeRule({ id: 'o1', model: 'OBL', output: 'obligations', priority: 100 }),
+        makeRule({ id: 'o2', model: 'OBL', output: 'obligations', priority: 900 }),
+      ];
+      const result = await engine.evaluate(rules, makeInput());
+      expect(result.outputs).toEqual({
+        obligations: {
+          name: 'obligations',
+          type: 'list',
+          combine: 'union',
+          value: ['declare', 'register'],
+          contributors: ['o2', 'o1'],
+        },
+        risk: {
+          name: 'risk',
+          type: 'enum',
+          combine: 'highestPriority',
+          value: 'high',
+          contributors: ['hi'],
+        },
+        value: {
+          name: 'value',
+          type: 'number',
+          combine: 'sum',
+          value: 0.2,
+          contributors: ['v1', 'v2'],
+        },
+      });
+      expect(Object.keys(result.outputs)).toEqual(['obligations', 'risk', 'value']);
+      expect(result.value).toBe(0.2);
+      expect(result.appliedRules.map((r) => r.id)).toEqual(['o2', 'hi', 'lo', 'o1', 'v1', 'v2']);
+    });
+
+    it('gives value 0 and an empty value output when no rule feeds value', async () => {
+      const engine = engineWith([new ValueModel('RISK', RISK, { r: 'low' })]);
+      const result = await engine.evaluate(
+        [makeRule({ id: 'r', model: 'RISK', output: 'risk' })],
+        makeInput(),
+      );
+      expect(result.value).toBe(0);
+      expect(result.outputs['value']).toEqual({
+        name: 'value',
+        type: 'number',
+        combine: 'sum',
+        value: 0,
+        contributors: [],
+      });
+    });
+
+    it('applies a short-circuit to its output only, naming its carrier as contributor', async () => {
+      const engine = engineWith([
+        new StubModel('M', 10),
+        new ValueModel('RISK', RISK, { lo: 'low' }),
+      ]);
+      const rules = [
+        makeRule({
+          id: 'X',
+          model: EXCEPTION_MODEL,
+          priority: 9000,
+          exceptions: [{ kind: 'shortCircuit', output: 'risk', value: 'high' }],
+        }),
+        makeRule({ id: 'lo', model: 'RISK', output: 'risk' }),
+        makeRule({ id: 'v', model: 'M' }),
+      ];
+      const result = await engine.evaluate(rules, makeInput());
+      expect(result.outputs['risk']).toEqual({
+        name: 'risk',
+        type: 'enum',
+        combine: 'highestPriority',
+        value: 'high',
+        contributors: ['X'],
+      });
+      expect(result.value).toBe(10);
+      expect(result.appliedRules.map((r) => r.id)).toEqual(['v']);
+      expect(result.skippedRules.map((s) => [s.rule.id, s.reason, s.detail])).toEqual([
+        ['lo', 'SHORT_CIRCUITED', 'output risk short-circuited by X@1'],
+      ]);
+      expect(result.trace.steps.map((s) => [s.ruleId, s.output, s.contribution])).toEqual([
+        ['X', 'risk', 'high'],
+        ['v', 'value', 10],
+      ]);
+    });
+
+    it('excludes rules declaring one output differently, with both declarations in the detail', async () => {
+      const engine = engineWith([
+        new ValueModel('SCORED', RISK, { a: 'high' }),
+        new ValueModel('LABELLED', { type: 'string', combine: 'highestPriority' }, { b: 'x' }),
+      ]);
+      const result = await engine.evaluate(
+        [
+          makeRule({ id: 'b', model: 'LABELLED', output: 'risk' }),
+          makeRule({ id: 'a', model: 'SCORED', output: 'risk' }),
+        ],
+        makeInput(),
+      );
+      expect(result.outputs['risk']).toBeUndefined();
+      expect(result.skippedRules.map((s) => [s.rule.id, s.reason, s.detail])).toEqual([
+        [
+          'a',
+          'OUTPUT_MISMATCH',
+          'rules feeding output risk declare it differently: a@1 enum/highestPriority (low, high); b@1 string/highestPriority',
+        ],
+        [
+          'b',
+          'OUTPUT_MISMATCH',
+          'rules feeding output risk declare it differently: a@1 enum/highestPriority (low, high); b@1 string/highestPriority',
+        ],
+      ]);
+    });
+
+    it('reports the missing facts and the filter diagnostics', async () => {
+      const facts: DSLEvaluator = {
+        dsl: 'facts',
+        version: '1.0.0',
+        evaluate: () => true,
+        listVariables: (expression) => {
+          if (expression === 'broken') throw new Error('cannot parse');
+          return ['amount', 'income.total', 'household.size'];
+        },
+      };
+      const engine = engineWith([new StubModel('M', 1)], [facts]);
+      const result = await engine.evaluate(
+        [
+          makeRule({ id: 'a', model: 'M', condition: { dsl: 'facts', value: 'ok' } }),
+          makeRule({ id: 'b', model: 'M', condition: { dsl: 'facts', value: 'broken' } }),
+        ],
+        makeInput(),
+      );
+      expect(result.missingFacts).toEqual(['household.size', 'income.total']);
+      expect(result.diagnostics).toEqual([
+        { source: 'engine', message: 'listVariables failed for b@1 (facts): cannot parse' },
+      ]);
+    });
+
+    it('gives the same decision whatever the order of the rules', async () => {
+      const engine = engineWith(
+        [
+          new StubModel('M', 0.1),
+          new ValueModel('OBL', LIST, { d1: ['b', 'a'], d2: ['z'], o: ['a', 'c'] }),
+        ],
+        [new StubDSL('never', false)],
+      );
+      const rules = [
+        makeRule({
+          id: 'X',
+          model: EXCEPTION_MODEL,
+          priority: 9000,
+          exceptions: [{ kind: 'inhibit', targets: { ids: ['i'] } }],
+        }),
+        makeRule({ id: 'i', model: 'M' }),
+        makeRule({
+          id: 'd1',
+          model: 'OBL',
+          output: 'obligations',
+          dominanceGroup: 'g',
+          priority: 500,
+        }),
+        makeRule({
+          id: 'd2',
+          model: 'OBL',
+          output: 'obligations',
+          dominanceGroup: 'g',
+          priority: 100,
+        }),
+        makeRule({ id: 'o', model: 'OBL', output: 'obligations', priority: 500 }),
+        makeRule({ id: 'no', model: 'M', condition: { dsl: 'never', value: null } }),
+        makeRule({ id: 'v', model: 'M' }),
+      ];
+      const project = (r: EvaluationResult): unknown => ({
+        outputs: r.outputs,
+        outputNames: Object.keys(r.outputs),
+        applied: r.appliedRules.map((x) => x.id),
+        skipped: r.skippedRules.map((s) => [s.rule.id, s.reason, s.detail]),
+        breakdown: r.breakdown.map((b) => [b.ruleId, b.output, b.contribution]),
+        trace: r.trace.steps.map((s) => [s.ruleId, s.output, s.contribution]),
+        missingFacts: r.missingFacts,
+      });
+      const expected = project(await engine.evaluate(rules, makeInput()));
+      expect(expected).toEqual({
+        outputs: {
+          obligations: {
+            name: 'obligations',
+            type: 'list',
+            combine: 'union',
+            value: ['b', 'a', 'c'],
+            contributors: ['d1', 'o'],
+          },
+          value: { name: 'value', type: 'number', combine: 'sum', value: 0.1, contributors: ['v'] },
+        },
+        outputNames: ['obligations', 'value'],
+        applied: ['d1', 'o', 'v'],
+        skipped: [
+          ['d2', 'DOMINATED', 'dominated by d1@1 (priority 500) in group g'],
+          ['i', 'INHIBITED', 'inhibited by X@1'],
+          ['no', 'CONDITION_FALSE', 'condition evaluated to false'],
+        ],
+        breakdown: [
+          ['d1', 'obligations', ['b', 'a']],
+          ['o', 'obligations', ['a', 'c']],
+          ['v', 'value', 0.1],
+        ],
+        trace: [
+          ['d1', 'obligations', ['b', 'a']],
+          ['o', 'obligations', ['a', 'c']],
+          ['v', 'value', 0.1],
+        ],
+        missingFacts: [],
+      });
+      for (const order of permutations(rules)) {
+        expect(project(await engine.evaluate(order, makeInput()))).toEqual(expected);
+      }
+    }, 30_000);
   });
 });

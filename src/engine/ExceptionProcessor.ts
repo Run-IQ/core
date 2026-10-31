@@ -19,6 +19,13 @@ import type { ModelRegistry } from '../registry/ModelRegistry.js';
 import { ExceptionPrecedenceError } from '../errors/ExceptionPrecedenceError.js';
 import { deepMerge } from '../utils/deepMerge.js';
 import { compareRuleIdentity, resolveTie } from './resolveTie.js';
+import {
+  declarationKey,
+  declarationOf,
+  describeDeclaration,
+  describeType,
+  outputOf,
+} from './outputDeclaration.js';
 
 type Substitute = Extract<RuleException, { kind: 'substitute' }>;
 type ShortCircuitException = Extract<RuleException, { kind: 'shortCircuit' }>;
@@ -28,6 +35,8 @@ export interface ShortCircuit {
   readonly rule: Rule;
   readonly value: JsonValue;
   readonly reason?: string;
+  /** The declaration of the output, which `value` matches (see `ExceptionProcessor`). */
+  readonly declaration: OutputDeclaration;
 }
 
 /**
@@ -72,8 +81,6 @@ const byPriorityThenIdentity = (a: Rule, b: Rule): number =>
 
 const label = (rule: Rule): string => `${rule.id}@${rule.version}`;
 
-const outputOf = (rule: Rule): string => rule.output ?? DEFAULT_OUTPUT;
-
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -91,12 +98,6 @@ function paramsConflict(a: Record<string, unknown>, b: Record<string, unknown>):
     }
   }
   return false;
-}
-
-function describeDeclaration(declaration: OutputDeclaration): string {
-  return declaration.values === undefined
-    ? declaration.type
-    : `${declaration.type} (${declaration.values.join(', ')})`;
 }
 
 /**
@@ -200,11 +201,18 @@ export class ExceptionProcessor {
     const shortCircuits = new Map<string, ShortCircuit>();
     const shortCircuited = new Map<string, Rule[]>();
     for (const [output, { carrier, exception }] of claims) {
+      // A claim passed findOutputMismatch: its output has exactly one declaration.
+      const [declaration] = this.declarationsOf(output, ordered);
+      if (declaration === undefined) {
+        throw new Error(
+          `short-circuit of ${label(carrier)} on output ${output} has no declaration`,
+        );
+      }
       shortCircuits.set(
         output,
         exception.reason === undefined
-          ? { rule: carrier, value: exception.value }
-          : { rule: carrier, value: exception.value, reason: exception.reason },
+          ? { rule: carrier, value: exception.value, declaration }
+          : { rule: carrier, value: exception.value, reason: exception.reason, declaration },
       );
       const affected = ordered.filter((target) => {
         if (target === carrier || target.model === EXCEPTION_MODEL) return false;
@@ -345,13 +353,11 @@ export class ExceptionProcessor {
       const [declaration] = declarations;
       if (declaration === undefined) return `${at}: no rule in play declares output ${output}`;
       if (declarations.length > 1) {
-        const described = declarations
-          .map((d) => `${d.type}/${d.combine}${d.values ? ` (${d.values.join(', ')})` : ''}`)
-          .sort();
+        const described = declarations.map(describeDeclaration).sort();
         return `${at}: the rules feeding it declare it differently (${described.join(', ')})`;
       }
       if (!valueMatchesOutputType(value, declaration)) {
-        return `${at}: value ${canonicalize(value)} does not match type ${describeDeclaration(declaration)}`;
+        return `${at}: value ${canonicalize(value)} does not match type ${describeType(declaration)}`;
       }
     }
     return undefined;
@@ -359,17 +365,16 @@ export class ExceptionProcessor {
 
   /**
    * The distinct declarations of `output` among the rules in play feeding it (whose model is
-   * registered), each `model.output ?? DEFAULT_OUTPUT_DECLARATION`; for the default output with
-   * no such rule, `DEFAULT_OUTPUT_DECLARATION`.
+   * registered), each `declarationOf` it, compared by `declarationKey`; for the default output
+   * with no such rule, `DEFAULT_OUTPUT_DECLARATION`.
    */
   private declarationsOf(output: string, ordered: readonly Rule[]): OutputDeclaration[] {
-    // Compared by canonical form as-is: the order of enum `values` is part of the declaration.
     const declarations = new Map<string, OutputDeclaration>();
     for (const rule of ordered) {
       if (rule.model === EXCEPTION_MODEL || outputOf(rule) !== output) continue;
       if (!this.models.has(rule.model)) continue;
-      const declaration = this.models.get(rule.model).output ?? DEFAULT_OUTPUT_DECLARATION;
-      declarations.set(canonicalize(declaration), declaration);
+      const declaration = declarationOf(this.models, rule);
+      declarations.set(declarationKey(declaration), declaration);
     }
     if (declarations.size === 0 && output === DEFAULT_OUTPUT) {
       return [DEFAULT_OUTPUT_DECLARATION];

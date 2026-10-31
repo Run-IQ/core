@@ -16,6 +16,7 @@ import { RuleValidator } from '../security/RuleValidator.js';
 import { DominanceResolver } from './DominanceResolver.js';
 import { ExceptionProcessor } from './ExceptionProcessor.js';
 import { ExecutionPipeline } from './ExecutionPipeline.js';
+import { compareRuleIdentity } from './resolveTie.js';
 import { TraceBuilder } from './TraceBuilder.js';
 import { PluginSandbox } from '../security/PluginSandbox.js';
 import { SnapshotManager } from '../snapshot/SnapshotManager.js';
@@ -75,7 +76,7 @@ export class PPEEngine {
     this.ruleValidator = new RuleValidator(this.modelRegistry, config.onChecksumMismatch ?? 'skip');
     this.exceptionProcessor = new ExceptionProcessor(this.modelRegistry);
     this.dominanceResolver = new DominanceResolver();
-    this.executionPipeline = new ExecutionPipeline(this.modelRegistry);
+    this.executionPipeline = new ExecutionPipeline(this.modelRegistry, this.conflictMode);
 
     this.snapshotManager = new SnapshotManager(
       this.dryRun ? null : (config.snapshot ?? null),
@@ -176,8 +177,8 @@ export class PPEEngine {
     const filterResult = await this.ruleFilter.filter(currentRules, currentInput, now);
     allSkipped.push(...filterResult.skipped);
 
-    // Step 6: Native exceptions. The short-circuited values and the exception records are
-    // consumed by the output combination (Task 8) and the proof (Task 10).
+    // Step 6: Native exceptions. The short-circuited values feed the output combination; the
+    // exception records are for the proof (Task 10).
     const exceptionResult = this.exceptionProcessor.apply(filterResult.passed, this.conflictMode);
     allSkipped.push(...exceptionResult.skipped);
 
@@ -188,12 +189,17 @@ export class PPEEngine {
     );
     allSkipped.push(...dominanceSkipped);
 
-    // Step 8: Execution pipeline
+    // Step 8: Execution and combination, output by output
     const pipelineResult = this.executionPipeline.execute(
       resolvedRules,
       currentInput,
       traceBuilder,
+      exceptionResult.shortCircuits,
     );
+    allSkipped.push(...pipelineResult.skipped);
+    // Every stage lists its own exclusions; the decision lists them by id@version, whatever the
+    // order of the rules (the sort is stable: a rule's stages keep their order).
+    const skippedRules = [...allSkipped].sort((a, b) => compareRuleIdentity(a.rule, b.rule));
 
     // Build trace
     const trace = traceBuilder.build();
@@ -212,11 +218,14 @@ export class PPEEngine {
     // Build initial result
     let result: EvaluationResult = {
       requestId: input.requestId,
-      value: pipelineResult.value,
+      value: pipelineResult.outputs.value.value,
+      outputs: pipelineResult.outputs,
       breakdown: pipelineResult.breakdown,
-      appliedRules: pipelineResult.appliedRules,
-      skippedRules: allSkipped,
+      appliedRules: pipelineResult.applied,
+      skippedRules,
       trace,
+      diagnostics: filterResult.diagnostics,
+      missingFacts: filterResult.missingFacts,
       snapshotId: '',
       engineVersion: ENGINE_VERSION,
       pluginVersions,

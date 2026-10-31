@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { EXCEPTION_MODEL } from '@run-iq/spec';
+import { DEFAULT_OUTPUT_DECLARATION, EXCEPTION_MODEL } from '@run-iq/spec';
 import type { JsonValue, OutputDeclaration, ProofException, RuleException } from '@run-iq/spec';
 import { ExceptionProcessor } from '../../src/engine/ExceptionProcessor.js';
 import { ModelRegistry } from '../../src/registry/ModelRegistry.js';
@@ -10,15 +10,17 @@ import type { CalculationModel, ValidationResult } from '../../src/types/model.j
 import type { Rule } from '../../src/types/rule.js';
 import { makeRule, StubModel } from '../helpers.js';
 
+const RISK: OutputDeclaration = {
+  type: 'enum',
+  combine: 'highestPriority',
+  values: ['low', 'high'],
+};
+
 /** Declares an enum output; never calculated here, so it keeps the default number value type. */
 class RiskModel implements CalculationModel {
   readonly name = 'Risk';
   readonly version = '1.0.0';
-  readonly output: OutputDeclaration = {
-    type: 'enum',
-    combine: 'highestPriority',
-    values: ['low', 'high'],
-  };
+  readonly output: OutputDeclaration = RISK;
   validateParams(): ValidationResult {
     return { valid: true };
   }
@@ -561,7 +563,7 @@ describe('ExceptionProcessor', () => {
         },
       ]);
       expect([...result.shortCircuits.entries()]).toEqual([
-        ['riskLevel', { rule: sc, value: 'high', reason: 'blacklisted' }],
+        ['riskLevel', { rule: sc, value: 'high', reason: 'blacklisted', declaration: RISK }],
       ]);
       expect(result.applied).toEqual([
         { ruleId: 'SC', version: 1, kind: 'shortCircuit', affected: ['R1'] },
@@ -571,7 +573,11 @@ describe('ExceptionProcessor', () => {
     it('omits reason when the exception has none, and records an empty affected list', () => {
       const sc = carrier('SC', 9000, [{ kind: 'shortCircuit', output: 'value', value: 0 }]);
       const result = processor.apply([sc], 'throw');
-      expect(result.shortCircuits.get('value')).toEqual({ rule: sc, value: 0 });
+      expect(result.shortCircuits.get('value')).toEqual({
+        rule: sc,
+        value: 0,
+        declaration: DEFAULT_OUTPUT_DECLARATION,
+      });
       expect(Object.hasOwn(result.shortCircuits.get('value')!, 'reason')).toBe(false);
       expect(result.applied).toEqual([
         { ruleId: 'SC', version: 1, kind: 'shortCircuit', affected: [] },
@@ -602,7 +608,11 @@ describe('ExceptionProcessor', () => {
       ]);
       const r1 = risk('R1');
       const result = processor.apply([low, r1, high], 'throw');
-      expect(result.shortCircuits.get('riskLevel')).toEqual({ rule: high, value: 'high' });
+      expect(result.shortCircuits.get('riskLevel')).toEqual({
+        rule: high,
+        value: 'high',
+        declaration: RISK,
+      });
       expect(result.skipped).toEqual([
         {
           rule: r1,
@@ -682,7 +692,11 @@ describe('ExceptionProcessor', () => {
       const v = makeRule({ id: 'V', model: 'M' });
       const expected = processor.apply([b, r1, a, v], 'first');
       expect(expected.rules).toEqual([v]);
-      expect(expected.shortCircuits.get('riskLevel')).toEqual({ rule: a, value: 'high' });
+      expect(expected.shortCircuits.get('riskLevel')).toEqual({
+        rule: a,
+        value: 'high',
+        declaration: RISK,
+      });
       expect(expected.skipped).toEqual([
         {
           rule: b,

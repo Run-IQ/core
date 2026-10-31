@@ -1,7 +1,9 @@
 import { computeRuleChecksum } from '../src/utils/crypto.js';
 import type { Rule } from '../src/types/rule.js';
 import type { EvaluationInput } from '../src/types/input.js';
-import type { CalculationModel, ValidationResult } from '../src/types/model.js';
+import type { OutputDeclaration } from '@run-iq/spec';
+import type { CalculationModel, CalculationOutput, ValidationResult } from '../src/types/model.js';
+import type { OutputValue } from '../src/types/output.js';
 import type { DSLEvaluator } from '../src/types/dsl.js';
 import type { ISnapshotAdapter, Snapshot } from '../src/types/snapshot.js';
 import type { PPEPlugin, PluginContext } from '../src/types/plugin.js';
@@ -107,7 +109,7 @@ export class StubPlugin implements PPEPlugin {
 
   constructor(
     name: string,
-    private readonly models: CalculationModel[] = [],
+    private readonly models: CalculationModel<OutputValue>[] = [],
   ) {
     this.name = name;
   }
@@ -122,3 +124,43 @@ export class StubPlugin implements PPEPlugin {
     this.errors.push(error);
   }
 }
+
+/**
+ * A model that declares `output` and returns, for each rule, the value listed under its id
+ * (throws for an unlisted rule). `calls` counts the computations.
+ */
+export class ValueModel implements CalculationModel<OutputValue> {
+  readonly version = '1.0.0';
+  calls = 0;
+
+  constructor(
+    readonly name: string,
+    readonly output: OutputDeclaration | undefined,
+    private readonly values: Readonly<Record<string, OutputValue | CalculationOutput<OutputValue>>>,
+  ) {}
+
+  validateParams(_params: unknown): ValidationResult {
+    return { valid: true };
+  }
+
+  calculate(
+    _input: Record<string, unknown>,
+    matchedRule: Readonly<Rule>,
+    _params: unknown,
+  ): OutputValue | CalculationOutput<OutputValue> {
+    this.calls += 1;
+    const value = Object.hasOwn(this.values, matchedRule.id)
+      ? this.values[matchedRule.id]
+      : undefined;
+    if (value === undefined) throw new Error(`${this.name} has no value for ${matchedRule.id}`);
+    return value;
+  }
+}
+
+/** Every ordering of `items`. */
+export const permutations = <T>(items: readonly T[]): T[][] =>
+  items.length <= 1
+    ? [[...items]]
+    : items.flatMap((item, i) =>
+        permutations([...items.slice(0, i), ...items.slice(i + 1)]).map((rest) => [item, ...rest]),
+      );

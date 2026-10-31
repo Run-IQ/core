@@ -13,6 +13,10 @@ export interface DecisionOutput {
   readonly type: OutputType;
   readonly combine: CombineStrategy;
   readonly value: JsonValue;
-  /** Ids of the rules whose contribution entered `value`. */
+  /**
+   * Ids of the rules whose contribution entered `value`, by priority descending then id: for
+   * `highestPriority`, only those of the highest priority; for a short-circuited output, only
+   * the rule carrying the short-circuit.
+   */
   readonly contributors: readonly string[];
 }

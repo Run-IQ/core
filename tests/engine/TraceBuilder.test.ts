@@ -6,6 +6,8 @@ describe('TraceBuilder', () => {
     const builder = new TraceBuilder();
     builder.addStep({
       ruleId: 'r1',
+      ruleVersion: 1,
+      output: 'value',
       conditionResult: true,
       conditionDetail: null,
       modelUsed: 'FLAT_RATE',
