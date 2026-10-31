@@ -1,5 +1,5 @@
 import { DEFAULT_OUTPUT, DEFAULT_OUTPUT_DECLARATION } from '@run-iq/spec';
-import type { OutputDeclaration } from '@run-iq/spec';
+import type { JsonValue, OutputDeclaration } from '@run-iq/spec';
 import type { Rule } from '../types/rule.js';
 import type { EvaluationInput } from '../types/input.js';
 import type { BreakdownItem, SkippedRule } from '../types/result.js';
@@ -36,6 +36,8 @@ interface Step {
   readonly rule: Rule;
   readonly output: string;
   readonly contribution: unknown;
+  /** The contribution before rounding, when the output's rounding changed it. */
+  readonly unrounded?: JsonValue;
   readonly modelUsed: string;
   readonly detail: unknown;
   readonly durationMs: number;
@@ -81,6 +83,8 @@ const emptyDefaultOutput = (): DecisionOutput => ({
  * - A rule feeding `value` with a declaration other than a number is skipped with
  *   `OUTPUT_MISMATCH`, without being computed: `result.value` stays a number.
  * - A computed value that is not JSON is skipped with `OUTPUT_MISMATCH`, naming where.
+ * - A step records the contribution as it entered the output (canonical for a `decimal`,
+ *   rounded under `rounding.at: 'contribution'`), and `unrounded` only when rounding changed it.
  *
  * Applied rules, breakdown items and trace steps are by priority descending, then id@version,
  * then output name, whatever the order of `rules`.
@@ -203,11 +207,15 @@ export class ExecutionPipeline {
       const combined = OutputCombiner.combine(name, declaration, contributions, this.conflictMode);
       skipped.push(...combined.skipped);
       if (combined.output !== undefined) outputs.set(name, combined.output);
-      const excluded = new Set(combined.skipped.map((s) => s.rule));
       for (const [rule, step] of computed) {
-        if (excluded.has(rule)) continue;
+        const recorded = combined.recorded.get(rule);
+        if (recorded === undefined) continue; // skipped by the combination
         applied.push(rule);
-        steps.push(step);
+        steps.push({
+          ...step,
+          contribution: recorded.value,
+          ...(recorded.unrounded === undefined ? {} : { unrounded: recorded.unrounded }),
+        });
       }
     }
 
@@ -228,6 +236,7 @@ export class ExecutionPipeline {
         modelUsed: step.modelUsed,
         inputSnapshot: { ...input.data },
         contribution: step.contribution,
+        ...(step.unrounded === undefined ? {} : { unrounded: step.unrounded }),
         detail: step.detail,
         durationMs: step.durationMs,
         dslUsed: rule.condition?.dsl,
@@ -246,6 +255,7 @@ export class ExecutionPipeline {
         ...(step.rule.sourceRef === undefined ? {} : { sourceRef: step.rule.sourceRef }),
         output: step.output,
         contribution: step.contribution,
+        ...(step.unrounded === undefined ? {} : { unrounded: step.unrounded }),
         modelUsed: step.modelUsed,
         detail: step.detail,
       })),

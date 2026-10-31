@@ -69,6 +69,8 @@ export interface BreakdownItem {
   /** The output the rule contributed to. */
   readonly output: string;
   readonly contribution: unknown;
+  /** The contribution before rounding, present only when the output's rounding changed it. */
+  readonly unrounded?: JsonValue | undefined;
   readonly modelUsed: string;
   readonly label?: string | undefined;
   readonly detail?: unknown;

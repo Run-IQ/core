@@ -28,10 +28,18 @@ export function describeType(declaration: OutputDeclaration): string {
     : `${declaration.type} (${declaration.values.join(', ')})`;
 }
 
-/** A whole declaration, for messages: `number/sum`, `enum/highestPriority (low, high)`. */
+/**
+ * A whole declaration, for messages: `number/sum`, `enum/highestPriority (low, high)`,
+ * `decimal/sum rounding 2 halfUp at contribution` (`at` shown only when declared).
+ */
 export function describeDeclaration(declaration: OutputDeclaration): string {
-  const values = declaration.values === undefined ? '' : ` (${declaration.values.join(', ')})`;
-  return `${declaration.type}/${declaration.combine}${values}`;
+  const { values, rounding } = declaration;
+  const listed = values === undefined ? '' : ` (${values.join(', ')})`;
+  const rounded =
+    rounding === undefined
+      ? ''
+      : ` rounding ${rounding.scale} ${rounding.mode}${rounding.at === undefined ? '' : ` at ${rounding.at}`}`;
+  return `${declaration.type}/${declaration.combine}${listed}${rounded}`;
 }
 
 /**

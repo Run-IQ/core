@@ -1,3 +1,5 @@
+import type { JsonValue } from '@run-iq/spec';
+
 export interface TraceStep {
   readonly ruleId: string;
   readonly ruleVersion: number;
@@ -10,6 +12,8 @@ export interface TraceStep {
   readonly modelUsed: string;
   readonly inputSnapshot: unknown;
   readonly contribution: unknown;
+  /** The contribution before rounding, present only when the output's rounding changed it. */
+  readonly unrounded?: JsonValue | undefined;
   readonly detail?: unknown;
   readonly durationMs: number;
   readonly dslUsed?: string | undefined;

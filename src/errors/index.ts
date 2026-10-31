@@ -9,6 +9,7 @@ export { PipelineTimeoutError } from './PipelineTimeoutError.js';
 export { ValidationError } from './ValidationError.js';
 export { ExceptionPrecedenceError } from './ExceptionPrecedenceError.js';
 export { OutputNotFiniteError } from './OutputNotFiniteError.js';
+export { DecimalPrecisionError } from './DecimalPrecisionError.js';
 export { InvalidModelError } from './InvalidModelError.js';
 export { HookTimeoutError } from './HookTimeoutError.js';
 export { UnexpectedEngineError } from './UnexpectedEngineError.js';

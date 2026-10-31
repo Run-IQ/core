@@ -7,6 +7,7 @@ import { TraceBuilder } from '../../src/engine/TraceBuilder.js';
 import { ModelRegistry } from '../../src/registry/ModelRegistry.js';
 import type { CalculationModel, CalculationOutput } from '../../src/types/model.js';
 import { OutputNotFiniteError } from '../../src/errors/OutputNotFiniteError.js';
+import { DecimalPrecisionError } from '../../src/errors/DecimalPrecisionError.js';
 import type { OutputValue } from '../../src/types/output.js';
 import { makeRule, makeInput, StubModel, ValueModel } from '../helpers.js';
 
@@ -493,5 +494,160 @@ describe('ExecutionPipeline', () => {
       expect(e.output).toBe('value');
       expect(e.contributors).toEqual(['a', 'b']);
     }
+  });
+
+  describe('decimals and rounding', () => {
+    const TAX: OutputDeclaration = {
+      type: 'decimal',
+      combine: 'sum',
+      rounding: { scale: 2, mode: 'halfUp', at: 'contribution' },
+    };
+
+    it('records canonical, rounded contributions and unrounded only when rounding changed them', () => {
+      const pipeline = pipelineWith(
+        new ValueModel('TAX', TAX, { a: '1.005', b: { value: '0002.50', detail: 'flat' } }),
+      );
+      const trace = new TraceBuilder();
+      const result = pipeline.execute(
+        [
+          makeRule({ id: 'a', model: 'TAX', output: 'tax', priority: 200 }),
+          makeRule({ id: 'b', model: 'TAX', output: 'tax' }),
+        ],
+        makeInput(),
+        trace,
+        NONE,
+      );
+      expect(result.outputs['tax']).toEqual({
+        name: 'tax',
+        type: 'decimal',
+        combine: 'sum',
+        value: '3.51',
+        contributors: ['a', 'b'],
+      });
+      expect(result.breakdown).toStrictEqual([
+        {
+          ruleId: 'a',
+          ruleVersion: 1,
+          output: 'tax',
+          contribution: '1.01',
+          unrounded: '1.005',
+          modelUsed: 'TAX',
+          detail: undefined,
+        },
+        {
+          ruleId: 'b',
+          ruleVersion: 1,
+          output: 'tax',
+          contribution: '2.5',
+          modelUsed: 'TAX',
+          detail: 'flat',
+        },
+      ]);
+      const steps = trace.build().steps;
+      expect(steps.map((s) => [s.ruleId, s.contribution, s.unrounded])).toEqual([
+        ['a', '1.01', '1.005'],
+        ['b', '2.5', undefined],
+      ]);
+      expect(steps.map((s) => Object.hasOwn(s, 'unrounded'))).toEqual([true, false]);
+    });
+
+    it("rounds the combined value only at 'output', recording no unrounded", () => {
+      const pipeline = pipelineWith(
+        new ValueModel(
+          'TAX',
+          { type: 'decimal', combine: 'sum', rounding: { scale: 2, mode: 'halfUp' } },
+          { a: '1.005', b: '1.005' },
+        ),
+      );
+      const result = pipeline.execute(
+        [
+          makeRule({ id: 'a', model: 'TAX', output: 'tax' }),
+          makeRule({ id: 'b', model: 'TAX', output: 'tax' }),
+        ],
+        makeInput(),
+        new TraceBuilder(),
+        NONE,
+      );
+      expect(result.outputs['tax']?.value).toBe('2.01');
+      expect(result.breakdown.map((b) => [b.contribution, Object.hasOwn(b, 'unrounded')])).toEqual([
+        ['1.005', false],
+        ['1.005', false],
+      ]);
+    });
+
+    it('excludes rules declaring different roundings for one output, without computing them', () => {
+      const two = new ValueModel(
+        'TWO',
+        { type: 'decimal', combine: 'sum', rounding: { scale: 2, mode: 'halfUp' } },
+        { a: '1' },
+      );
+      const zero = new ValueModel(
+        'ZERO',
+        {
+          type: 'decimal',
+          combine: 'sum',
+          rounding: { scale: 0, mode: 'floor', at: 'contribution' },
+        },
+        { b: '1' },
+      );
+      const result = pipelineWith(two, zero).execute(
+        [
+          makeRule({ id: 'a', model: 'TWO', output: 'tax' }),
+          makeRule({ id: 'b', model: 'ZERO', output: 'tax' }),
+        ],
+        makeInput(),
+        new TraceBuilder(),
+        NONE,
+      );
+      const detail =
+        'rules feeding output tax declare it differently: ' +
+        'a@1 decimal/sum rounding 2 halfUp; b@1 decimal/sum rounding 0 floor at contribution';
+      expect(result.skipped.map((s) => [s.rule.id, s.reason, s.detail])).toEqual([
+        ['a', 'OUTPUT_MISMATCH', detail],
+        ['b', 'OUTPUT_MISMATCH', detail],
+      ]);
+      expect(result.outputs['tax']).toBeUndefined();
+      expect([two.calls, zero.calls]).toEqual([0, 0]);
+    });
+
+    it('excludes a rule feeding value with a decimal declaration', () => {
+      const amount = new ValueModel('AMOUNT', { type: 'decimal', combine: 'sum' }, { a: '1' });
+      const a = makeRule({ id: 'a', model: 'AMOUNT' });
+      const result = pipelineWith(amount).execute([a], makeInput(), new TraceBuilder(), NONE);
+      expect(result.skipped).toEqual([
+        {
+          rule: a,
+          reason: 'OUTPUT_MISMATCH',
+          detail: 'output value must be a number: a@1 declares it decimal/sum',
+        },
+      ]);
+      expect(result.outputs.value.value).toBe(0);
+      expect(amount.calls).toBe(0);
+    });
+
+    it('throws DecimalPrecisionError when an exact sum exceeds 1000 significant digits', () => {
+      const pipeline = pipelineWith(
+        new ValueModel(
+          'BIG',
+          { type: 'decimal', combine: 'sum' },
+          { a: `1${'0'.repeat(999)}`, b: '0.1' },
+        ),
+      );
+      try {
+        pipeline.execute(
+          [
+            makeRule({ id: 'a', model: 'BIG', output: 'amount' }),
+            makeRule({ id: 'b', model: 'BIG', output: 'amount' }),
+          ],
+          makeInput(),
+          new TraceBuilder(),
+          NONE,
+        );
+        expect.unreachable('should have thrown');
+      } catch (e) {
+        if (!(e instanceof DecimalPrecisionError)) throw e;
+        expect([e.code, e.output, e.limit]).toEqual(['DECIMAL_PRECISION', 'amount', 1000]);
+      }
+    });
   });
 });

@@ -48,10 +48,10 @@ describe('ModelRegistry', () => {
       expect(sum.code).toBe('INVALID_MODEL');
       expect(sum.modelName).toBe('BAD');
       expect(sum.issues).toEqual([
-        'output.combine "sum" cannot combine a string output: it applies to number',
+        'output.combine "sum" cannot combine a string output: it applies to number, decimal',
       ]);
       expect(sum.message).toBe(
-        'Model "BAD" declares an invalid output: output.combine "sum" cannot combine a string output: it applies to number',
+        'Model "BAD" declares an invalid output: output.combine "sum" cannot combine a string output: it applies to number, decimal',
       );
       expect(refusal({ type: 'number', combine: 'avg' }).issues).toEqual([
         'output.combine must be one of sum, max, min, highestPriority, union, all, any',
@@ -61,11 +61,39 @@ describe('ModelRegistry', () => {
       ]);
     });
 
+    it('refuses an invalid rounding, or a rounding on an output that is not a number', () => {
+      expect(
+        refusal({ type: 'string', combine: 'highestPriority', rounding: { scale: 2, mode: 'up' } })
+          .issues,
+      ).toEqual(['output.rounding applies only to a number or decimal output']);
+      expect(
+        refusal({ type: 'decimal', combine: 'sum', rounding: { scale: 21, mode: 'round' } }).issues,
+      ).toEqual([
+        'output.rounding.scale must be an integer from 0 to 20',
+        'output.rounding.mode must be one of halfUp, halfDown, halfEven, up, down, ceiling, floor',
+      ]);
+    });
+
     it('accepts a valid declaration and a model without one', () => {
       const registry = new ModelRegistry();
       registry.register(new ValueModel('LIST', { type: 'list', combine: 'union' }, {}));
+      registry.register(
+        new ValueModel(
+          'TAX',
+          {
+            type: 'decimal',
+            combine: 'sum',
+            rounding: { scale: 2, mode: 'halfEven', at: 'contribution' },
+          },
+          {},
+        ),
+      );
       registry.register(new StubModel('PLAIN'));
-      expect([registry.has('LIST'), registry.has('PLAIN')]).toEqual([true, true]);
+      expect([registry.has('LIST'), registry.has('TAX'), registry.has('PLAIN')]).toEqual([
+        true,
+        true,
+        true,
+      ]);
     });
   });
 });

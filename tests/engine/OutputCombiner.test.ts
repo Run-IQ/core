@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import type { JsonValue, OutputDeclaration } from '@run-iq/spec';
+import type { JsonValue, OutputDeclaration, OutputRounding, RoundingMode } from '@run-iq/spec';
 import { OutputCombiner } from '../../src/engine/OutputCombiner.js';
 import { RuleConflictError } from '../../src/errors/RuleConflictError.js';
 import { OutputNotFiniteError } from '../../src/errors/OutputNotFiniteError.js';
+import { DecimalPrecisionError } from '../../src/errors/DecimalPrecisionError.js';
 import type { Rule } from '../../src/types/rule.js';
 import { makeRule, permutations } from '../helpers.js';
 
@@ -259,6 +260,7 @@ describe('OutputCombiner', () => {
       expect(OutputCombiner.combine('value', NUMBER('sum'), [], 'throw')).toEqual({
         output: undefined,
         skipped: [],
+        recorded: new Map(),
       });
     });
   });
@@ -339,6 +341,338 @@ describe('OutputCombiner', () => {
       expect(() => OutputCombiner.combine('o', unknown, [of(rule('a'), 1)], 'throw')).toThrow(
         'Unknown combine strategy "avg" for output o',
       );
+    });
+  });
+
+  describe('decimal', () => {
+    const DECIMAL = (
+      combine: OutputDeclaration['combine'],
+      rounding?: OutputRounding,
+    ): OutputDeclaration =>
+      rounding === undefined
+        ? { type: 'decimal', combine }
+        : { type: 'decimal', combine, rounding };
+    const a = rule('a', 300);
+    const b = rule('b', 200);
+    const c = rule('c', 100);
+    const sumOf = (...values: JsonValue[]): JsonValue | undefined =>
+      OutputCombiner.combine(
+        'amount',
+        DECIMAL('sum'),
+        values.map((v, i) => of(rule(`r${String(i).padStart(5, '0')}`), v)),
+        'throw',
+      ).output?.value;
+
+    it('accepts a decimal string or a safe integer, in canonical form', () => {
+      const { output, skipped, recorded } = OutputCombiner.combine(
+        'amount',
+        DECIMAL('sum'),
+        [of(a, '0012.50'), of(b, 12), of(c, '-0.0')],
+        'throw',
+      );
+      expect(skipped).toEqual([]);
+      expect(output).toEqual({
+        name: 'amount',
+        type: 'decimal',
+        combine: 'sum',
+        value: '24.5',
+        contributors: ['a', 'b', 'c'],
+      });
+      expect(recorded).toStrictEqual(
+        new Map([
+          [a, { value: '12.5' }],
+          [b, { value: '12' }],
+          [c, { value: '0' }],
+        ]),
+      );
+    });
+
+    it('excludes a float, an unsafe integer, an exponent or text with OUTPUT_MISMATCH', () => {
+      const f = rule('f');
+      const u = rule('u');
+      const e = rule('e');
+      const t = rule('t');
+      const n = rule('n');
+      const { output, skipped, recorded } = OutputCombiner.combine(
+        'amount',
+        DECIMAL('sum'),
+        [of(f, 0.1), of(u, 2 ** 53), of(e, '1e3'), of(t, 'abc'), of(n, null), of(a, '1')],
+        'throw',
+      );
+      expect(output?.value).toBe('1');
+      expect(recorded).toStrictEqual(new Map([[a, { value: '1' }]]));
+      const expected =
+        'does not match type decimal: expected a decimal string (an optional "-", digits, ' +
+        'an optional "." and digits, no exponent) or a safe integer';
+      expect(skipped).toEqual([
+        { rule: e, reason: 'OUTPUT_MISMATCH', detail: `output amount: value "1e3" ${expected}` },
+        { rule: f, reason: 'OUTPUT_MISMATCH', detail: `output amount: value 0.1 ${expected}` },
+        { rule: n, reason: 'OUTPUT_MISMATCH', detail: `output amount: value null ${expected}` },
+        { rule: t, reason: 'OUTPUT_MISMATCH', detail: `output amount: value "abc" ${expected}` },
+        {
+          rule: u,
+          reason: 'OUTPUT_MISMATCH',
+          detail: `output amount: value 9007199254740992 ${expected}`,
+        },
+      ]);
+    });
+
+    it('gives no output, never null, when no contribution is a decimal', () => {
+      for (const combine of ['sum', 'max', 'min', 'highestPriority'] as const) {
+        const { output } = OutputCombiner.combine(
+          'amount',
+          DECIMAL(combine),
+          [of(a, 0.5), of(b, null)],
+          'throw',
+        );
+        expect(output).toBeUndefined();
+      }
+    });
+
+    it('sums exactly', () => {
+      expect(sumOf('0.1', '0.2')).toBe('0.3');
+      expect(sumOf(...Array.from({ length: 10_000 }, () => '0.01'))).toBe('100');
+      expect(sumOf('99999999999999999999999.99', '0.01')).toBe('100000000000000000000000');
+      expect(sumOf('-5', 5)).toBe('0');
+    });
+
+    it('takes the exact maximum and minimum beyond 17 digits', () => {
+      const contributions = [
+        of(a, '12345678901234567890.1'),
+        of(b, '12345678901234567890.2'),
+        of(c, '12345678901234567890.15'),
+      ];
+      for (const order of permutations(contributions)) {
+        expect(OutputCombiner.combine('m', DECIMAL('max'), order, 'throw').output).toEqual({
+          name: 'm',
+          type: 'decimal',
+          combine: 'max',
+          value: '12345678901234567890.2',
+          contributors: ['a', 'b', 'c'],
+        });
+        expect(OutputCombiner.combine('m', DECIMAL('min'), order, 'throw').output?.value).toBe(
+          '12345678901234567890.1',
+        );
+      }
+    });
+
+    it('compares canonical forms under highestPriority', () => {
+      const { output, skipped } = OutputCombiner.combine(
+        'rate',
+        DECIMAL('highestPriority'),
+        [of(rule('x', 500), '12.50'), of(rule('y', 500), '12.5')],
+        'throw',
+      );
+      expect(skipped).toEqual([]);
+      expect(output?.value).toBe('12.5');
+      expect(output?.contributors).toEqual(['x', 'y']);
+      expect(() =>
+        OutputCombiner.combine(
+          'rate',
+          DECIMAL('highestPriority'),
+          [of(rule('x', 500), '12.50'), of(rule('y', 500), '12.51')],
+          'throw',
+        ),
+      ).toThrow(RuleConflictError);
+    });
+
+    it('throws DecimalPrecisionError beyond 1000 significant digits, without a result', () => {
+      const under = `1${'0'.repeat(998)}`; // 999 integer digits: 1000 with the fraction
+      expect(sumOf(under, '0.1')).toBe(`${under}.1`);
+      const big = `${under}0`; // 1000 integer digits: 1001 with the fraction
+      try {
+        sumOf(big, '0.1');
+        expect.unreachable('should have thrown');
+      } catch (e) {
+        if (!(e instanceof DecimalPrecisionError)) throw e;
+        expect(e.code).toBe('DECIMAL_PRECISION');
+        expect(e.output).toBe('amount');
+        expect(e.limit).toBe(1000);
+        expect(e.message).toBe(
+          'Output amount needs more than 1000 significant digits: the exact sum is refused rather than rounded',
+        );
+      }
+    });
+  });
+
+  describe('rounding', () => {
+    const MODES: readonly RoundingMode[] = [
+      'halfUp',
+      'halfDown',
+      'halfEven',
+      'up',
+      'down',
+      'ceiling',
+      'floor',
+    ];
+    /** Expected results, in the order of MODES. */
+    const TABLE: readonly { value: string; scale: number; expected: readonly string[] }[] = [
+      { value: '2.5', scale: 0, expected: ['3', '2', '2', '3', '2', '3', '2'] },
+      { value: '-2.5', scale: 0, expected: ['-3', '-2', '-2', '-3', '-2', '-2', '-3'] },
+      { value: '2.45', scale: 0, expected: ['2', '2', '2', '3', '2', '3', '2'] },
+      { value: '-2.45', scale: 0, expected: ['-2', '-2', '-2', '-3', '-2', '-2', '-3'] },
+      { value: '0.5', scale: 0, expected: ['1', '0', '0', '1', '0', '1', '0'] },
+      { value: '-0.5', scale: 0, expected: ['-1', '0', '0', '-1', '0', '0', '-1'] },
+      { value: '2.5', scale: 1, expected: ['2.5', '2.5', '2.5', '2.5', '2.5', '2.5', '2.5'] },
+      { value: '2.45', scale: 1, expected: ['2.5', '2.4', '2.4', '2.5', '2.4', '2.5', '2.4'] },
+      {
+        value: '-2.45',
+        scale: 1,
+        expected: ['-2.5', '-2.4', '-2.4', '-2.5', '-2.4', '-2.4', '-2.5'],
+      },
+      { value: '0.5', scale: 1, expected: ['0.5', '0.5', '0.5', '0.5', '0.5', '0.5', '0.5'] },
+      {
+        value: '-0.5',
+        scale: 1,
+        expected: ['-0.5', '-0.5', '-0.5', '-0.5', '-0.5', '-0.5', '-0.5'],
+      },
+    ];
+
+    it("rounds the combined value in every mode at 'output' (the default), decimal and number", () => {
+      for (const { value, scale, expected } of TABLE) {
+        MODES.forEach((mode, i) => {
+          for (const at of [undefined, 'output'] as const) {
+            const rounding: OutputRounding =
+              at === undefined ? { scale, mode } : { scale, mode, at };
+            const decimal = OutputCombiner.combine(
+              'd',
+              { type: 'decimal', combine: 'sum', rounding },
+              [of(rule('a'), value)],
+              'throw',
+            );
+            expect([value, scale, mode, decimal.output?.value]).toEqual([
+              value,
+              scale,
+              mode,
+              expected[i],
+            ]);
+            expect([...decimal.recorded.values()]).toStrictEqual([{ value }]);
+            const number = OutputCombiner.combine(
+              'n',
+              { type: 'number', combine: 'highestPriority', rounding },
+              [of(rule('a'), Number(value))],
+              'throw',
+            ).output?.value;
+            expect(Object.is(number, Number(expected[i]))).toBe(true);
+          }
+        });
+      }
+    });
+
+    it('rounds to 20 places and to 0', () => {
+      const at20 = OutputCombiner.combine(
+        'd',
+        { type: 'decimal', combine: 'max', rounding: { scale: 20, mode: 'halfUp' } },
+        [of(rule('a'), '0.123456789012345678905'), of(rule('b'), '0.1')],
+        'throw',
+      );
+      expect(at20.output?.value).toBe('0.12345678901234567891');
+      const at0 = OutputCombiner.combine(
+        'd',
+        { type: 'decimal', combine: 'min', rounding: { scale: 0, mode: 'ceiling' } },
+        [of(rule('a'), '-7.9'), of(rule('b'), '3')],
+        'throw',
+      );
+      expect(at0.output?.value).toBe('-7');
+    });
+
+    it("rounds each contribution before combining at 'contribution', recording unrounded", () => {
+      const a = rule('a', 200);
+      const b = rule('b', 100);
+      const c = rule('c', 50);
+      const contributions = [of(a, '1.005'), of(b, '1.005'), of(c, '0.5')];
+      const perContribution = OutputCombiner.combine(
+        'tax',
+        {
+          type: 'decimal',
+          combine: 'sum',
+          rounding: { scale: 2, mode: 'halfUp', at: 'contribution' },
+        },
+        contributions,
+        'throw',
+      );
+      expect(perContribution.output?.value).toBe('2.52');
+      expect(perContribution.recorded).toStrictEqual(
+        new Map([
+          [a, { value: '1.01', unrounded: '1.005' }],
+          [b, { value: '1.01', unrounded: '1.005' }],
+          [c, { value: '0.5' }],
+        ]),
+      );
+      const perOutput = OutputCombiner.combine(
+        'tax',
+        { type: 'decimal', combine: 'sum', rounding: { scale: 2, mode: 'halfUp', at: 'output' } },
+        contributions,
+        'throw',
+      );
+      expect(perOutput.output?.value).toBe('2.51');
+      expect(perOutput.recorded).toStrictEqual(
+        new Map([
+          [a, { value: '1.005' }],
+          [b, { value: '1.005' }],
+          [c, { value: '0.5' }],
+        ]),
+      );
+    });
+
+    it('gives 2.02 for 1.005 + 1.005 at 2 places halfUp per contribution, 2.01 per output', () => {
+      const pair = [of(rule('a'), '1.005'), of(rule('b'), '1.005')];
+      const at = (where: 'output' | 'contribution'): JsonValue | undefined =>
+        OutputCombiner.combine(
+          'tax',
+          { type: 'decimal', combine: 'sum', rounding: { scale: 2, mode: 'halfUp', at: where } },
+          pair,
+          'throw',
+        ).output?.value;
+      expect(at('contribution')).toBe('2.02');
+      expect(at('output')).toBe('2.01');
+    });
+
+    it('computes a rounded number in Decimal, then converts it to a number', () => {
+      const a = rule('a', 200);
+      const b = rule('b', 100);
+      // In floating point, 1.005 is below 1.005 and Math.round(1.005 * 100) / 100 gives 1.
+      expect(
+        OutputCombiner.combine(
+          'n',
+          { type: 'number', combine: 'sum', rounding: { scale: 2, mode: 'halfUp' } },
+          [of(a, 1.005)],
+          'throw',
+        ).output?.value,
+      ).toBe(1.01);
+      const perContribution = OutputCombiner.combine(
+        'n',
+        {
+          type: 'number',
+          combine: 'sum',
+          rounding: { scale: 0, mode: 'floor', at: 'contribution' },
+        },
+        [of(a, 2.7), of(b, 3)],
+        'throw',
+      );
+      expect(perContribution.output?.value).toBe(5);
+      expect(perContribution.recorded).toStrictEqual(
+        new Map([
+          [a, { value: 2, unrounded: 2.7 }],
+          [b, { value: 3 }],
+        ]),
+      );
+    });
+
+    it('agrees contributions equal once rounded under highestPriority', () => {
+      const { output, skipped } = OutputCombiner.combine(
+        'rate',
+        {
+          type: 'decimal',
+          combine: 'highestPriority',
+          rounding: { scale: 2, mode: 'halfUp', at: 'contribution' },
+        },
+        [of(rule('x', 500), '0.181'), of(rule('y', 500), '0.18')],
+        'throw',
+      );
+      expect(skipped).toEqual([]);
+      expect(output?.value).toBe('0.18');
+      expect(output?.contributors).toEqual(['x', 'y']);
     });
   });
 });

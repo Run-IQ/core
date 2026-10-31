@@ -4,7 +4,7 @@ import type { OutputDeclaration } from '@run-iq/spec';
 import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import { ValidationError } from '../../src/errors/ValidationError.js';
 // Imported from the package entry: both errors are public.
-import { InvalidModelError, OutputNotFiniteError } from '../../src/index.js';
+import { DecimalPrecisionError, InvalidModelError, OutputNotFiniteError } from '../../src/index.js';
 import { VERSION } from '../../src/utils/version.js';
 import {
   makeRule,
@@ -387,6 +387,42 @@ describe('PPEEngine', () => {
       // onError receives the engine error itself, once per failed evaluation.
       expect(plugin.errors).toHaveLength(2);
       expect(plugin.errors.every((e) => e instanceof OutputNotFiniteError)).toBe(true);
+    });
+
+    it('refuses an exact sum beyond 1000 significant digits instead of a partial decision', async () => {
+      const big = new ValueModel(
+        'BIG',
+        { type: 'decimal', combine: 'sum' },
+        { a: `1${'0'.repeat(999)}`, b: '0.1' },
+      );
+      const plugin = new StubPlugin('test', [big]);
+      const afterEvaluate = vi.fn((_input: EvaluationInput, result: EvaluationResult) => result);
+      const watcher: PPEPlugin = {
+        name: 'watcher',
+        version: '1.0.0',
+        onInit: () => {},
+        afterEvaluate,
+      };
+      const adapter = new InMemorySnapshotAdapter();
+      const engine = new PPEEngine({
+        plugins: [plugin, watcher],
+        dsls: [],
+        strict: false,
+        snapshot: adapter,
+      });
+      const rules = [
+        makeRule({ id: 'b', model: 'BIG', output: 'amount' }),
+        makeRule({ id: 'a', model: 'BIG', output: 'amount' }),
+      ];
+      const input = makeInput();
+      await expect(engine.evaluate(rules, input)).rejects.toThrow(DecimalPrecisionError);
+      await expect(engine.evaluate(rules, input)).rejects.toThrow(
+        'Output amount needs more than 1000 significant digits: the exact sum is refused rather than rounded',
+      );
+      expect(afterEvaluate).not.toHaveBeenCalled();
+      expect(await adapter.exists(input.requestId)).toBe(false);
+      expect(plugin.errors).toHaveLength(2);
+      expect(plugin.errors.every((e) => e instanceof DecimalPrecisionError)).toBe(true);
     });
 
     it('rethrows the engine error when onError itself fails', async () => {

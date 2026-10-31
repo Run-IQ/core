@@ -22,6 +22,7 @@ export {
   RuleConflictError,
   ExceptionPrecedenceError,
   OutputNotFiniteError,
+  DecimalPrecisionError,
   InvalidModelError,
   ModelNotFoundError,
   DSLNotFoundError,
