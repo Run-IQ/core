@@ -23,7 +23,6 @@ function setOwn(target: Record<string, unknown>, key: string, value: unknown): v
 }
 
 /** A copy of the arrays and plain objects of `value`; other values are kept as they are. */
-function clone<T>(value: T): T;
 function clone(value: unknown): unknown {
   if (Array.isArray(value)) return value.map((item: unknown) => clone(item));
   if (isPlainObject(value)) {

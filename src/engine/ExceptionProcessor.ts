@@ -301,6 +301,9 @@ export class ExceptionProcessor {
   /**
    * Every rule of the tie `seed` belongs to: the carriers of the same priority, not excluded,
    * that conflict with one of its rules, transitively. Only `throw` mode needs it, to name them.
+   * Candidates not yet reached count as they stand now, so the error may name a same-priority
+   * rival that a later same-priority rule would have inhibited: deterministic, it errs on naming
+   * more.
    */
   private wholeTie(
     seed: readonly Rule[],
@@ -360,6 +363,7 @@ export class ExceptionProcessor {
    * no such rule, `DEFAULT_OUTPUT_DECLARATION`.
    */
   private declarationsOf(output: string, ordered: readonly Rule[]): OutputDeclaration[] {
+    // Compared by canonical form as-is: the order of enum `values` is part of the declaration.
     const declarations = new Map<string, OutputDeclaration>();
     for (const rule of ordered) {
       if (rule.model === EXCEPTION_MODEL || outputOf(rule) !== output) continue;

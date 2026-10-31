@@ -88,6 +88,7 @@ const key = (rule: Rule): string => `${rule.id}@${rule.version}`;
  * with at least one applied record. No rule both is INHIBITED and has an applied record.
  */
 function expectInvariants(input: readonly Rule[], result: ExceptionResult): void {
+  expect(result.rules.filter((rule) => rule.model === EXCEPTION_MODEL)).toEqual([]);
   const passed = result.rules.map(key);
   const skipped = result.skipped.map((s) => key(s.rule));
   const recorded = result.applied.map((a) => `${a.ruleId}@${a.version}`);
@@ -784,6 +785,7 @@ describe('ExceptionProcessor', () => {
         makeRule({ id: 'R1', model: 'Risk', output: 'riskLevel', priority: 300 }),
       ];
       const expected = processor.apply(fixture, 'first');
+      expectInvariants(fixture, expected);
       expect(expected.rules.map((r) => r.id)).toEqual(['B']);
       expect(expected.rules[0]!.params).toEqual({ rate: 0.2, more: [1] });
       expect(expected.skipped.map((s) => `${s.rule.id}:${s.reason}`)).toEqual([
@@ -801,8 +803,7 @@ describe('ExceptionProcessor', () => {
         const result = processor.apply(order, 'first');
         expect(result).toEqual(expected);
         expect([...result.shortCircuits.keys()]).toEqual([...expected.shortCircuits.keys()]);
-        expectInvariants(order, result);
       }
-    }, 60_000);
+    });
   });
 });
