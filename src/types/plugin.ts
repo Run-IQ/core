@@ -35,11 +35,14 @@ export interface PPEPlugin {
    * Runs before the rules are filtered, in registration order; each plugin gets the input and
    * rules the previous one returned.
    *
-   * - The returned value is read once (its own enumerable fields, then a deep copy) and checked
+   * - The returned value is read once (`input`, `rules`, `skipped` and `state` by name, own,
+   *   non-enumerable or inherited, then a deep copy) and checked
    *   as a whole: `input` an object with object `data` and `meta`, `rules` an array of objects,
    *   `skipped` absent or an array of `{ rule: object, reason: string, detail?: string }`. A
    *   result that fails a check, or a getter that throws, is a hook error (below): nothing of it
    *   is used. A skip without `detail` gets `skipped by plugin <name>`.
+   * - Rules dropped from `rules` without being listed in `skipped` are named in a diagnostic,
+   *   `plugin <name> removed rules without a skip: <id@version, ...>`.
    * - A `state` that is JSON is kept, as a copy, in `result.pluginState[name]`. Any other
    *   `state` is dropped with a diagnostic naming the first non-JSON path (`$.a[1] (Date)`); the
    *   returned input and rules are still used.
@@ -55,7 +58,8 @@ export interface PPEPlugin {
   /**
    * Runs after the decision is computed, in registration order, on a copy of the result: writing
    * to it in place never reaches the engine's records or the caller's rules. The result it
-   * returns is read once (own enumerable fields, then a deep copy) and replaces the decision,
+   * returns is read once (each field it may change by name, own, non-enumerable or inherited,
+   * then a deep copy) and replaces the decision,
    * except that:
    *
    * - only `value`, `appliedRules`, `skippedRules`, `trace`, `breakdown` and `meta` may change.
@@ -70,7 +74,8 @@ export interface PPEPlugin {
    *   engine ignore the whole result, with a diagnostic;
    * - rules added to, removed from, or changed in `appliedRules` or `skippedRules` (same id,
    *   different entry) are named in diagnostics;
-   * - a returned value that is not an object, or with malformed lists, `trace` or `meta`, is a
+   * - a returned value that is not an object, or with malformed lists, `trace` (its `steps`
+   *   must be an array of objects) or `meta`, is a
    *   hook error (`plugin <name> afterEvaluate returned 42, not a result; ignored`).
    *
    * If it throws (or exceeds `timeout.hook`: `HookTimeoutError`), its error becomes a diagnostic with

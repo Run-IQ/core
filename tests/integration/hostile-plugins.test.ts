@@ -376,3 +376,174 @@ describe('pipeline timeout abort', () => {
     expect(onError).not.toHaveBeenCalled();
   });
 });
+
+describe('fields read by name', () => {
+  it('keeps a non-enumerable state', async () => {
+    const p = pluginWith('p', {
+      beforeEvaluate(input, rules): BeforeEvaluateResult {
+        const out: BeforeEvaluateResult = { input, rules };
+        Object.defineProperty(out, 'state', { value: { a: 1 } });
+        return out;
+      },
+    });
+    const result = await engineWith([p]).evaluate([rule()], makeInput());
+    expect(result.pluginState).toEqual({ p: { a: 1 } });
+  });
+
+  it('uses a non-enumerable skipped', async () => {
+    const p = pluginWith('p', {
+      beforeEvaluate(input, rules): BeforeEvaluateResult {
+        const out: BeforeEvaluateResult = { input, rules: [] };
+        Object.defineProperty(out, 'skipped', {
+          value: rules.map((r) => ({ rule: r, reason: 'SHORT_CIRCUITED' })),
+        });
+        return out;
+      },
+    });
+    const result = await engineWith([p]).evaluate([rule()], makeInput());
+    expect(result.skippedRules.map((s) => [s.rule.id, s.reason, s.detail])).toEqual([
+      ['r1', 'SHORT_CIRCUITED', 'skipped by plugin p'],
+    ]);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it('accepts a class result whose fields are prototype getters, reading each once', async () => {
+    const reads: string[] = [];
+    class Result implements BeforeEvaluateResult {
+      constructor(
+        private readonly given: BeforeEvaluateResult['input'],
+        private readonly source: BeforeEvaluateResult['rules'],
+      ) {}
+      get input(): BeforeEvaluateResult['input'] {
+        reads.push('input');
+        return this.given;
+      }
+      get rules(): BeforeEvaluateResult['rules'] {
+        reads.push('rules');
+        return [];
+      }
+      get skipped(): BeforeEvaluateResult['skipped'] {
+        reads.push('skipped');
+        return this.source.map((r) => ({ rule: r, reason: 'SHORT_CIRCUITED' as const }));
+      }
+      get state(): BeforeEvaluateResult['state'] {
+        reads.push('state');
+        return { cls: true };
+      }
+    }
+    const p = pluginWith('p', { beforeEvaluate: (input, rules) => new Result(input, rules) });
+    const result = await engineWith([p]).evaluate([rule()], makeInput());
+    expect(reads.sort()).toEqual(['input', 'rules', 'skipped', 'state']);
+    expect(result.pluginState).toEqual({ p: { cls: true } });
+    expect(result.skippedRules.map((s) => s.rule.id)).toEqual(['r1']);
+    expect(result.appliedRules).toEqual([]);
+  });
+
+  it('keeps a non-enumerable meta and reads each afterEvaluate field once', async () => {
+    const reads = new Map<string, number>();
+    const p = pluginWith('p', {
+      afterEvaluate(_input, result): EvaluationResult {
+        const out = { ...result };
+        for (const key of [
+          'value',
+          'appliedRules',
+          'skippedRules',
+          'trace',
+          'breakdown',
+        ] as const) {
+          const current: unknown = out[key];
+          Object.defineProperty(out, key, {
+            enumerable: true,
+            get: () => {
+              reads.set(key, (reads.get(key) ?? 0) + 1);
+              return current;
+            },
+          });
+        }
+        Object.defineProperty(out, 'meta', { value: { m: 1 } });
+        return out;
+      },
+    });
+    const result = await engineWith([p]).evaluate([rule()], makeInput());
+    expect(result.meta).toEqual({ m: 1 });
+    expect(Object.fromEntries(reads)).toEqual({
+      value: 1,
+      appliedRules: 1,
+      skippedRules: 1,
+      trace: 1,
+      breakdown: 1,
+    });
+    expect(result.diagnostics).toEqual([]);
+  });
+});
+
+describe('trace and breakdown shapes', () => {
+  for (const [label, change, field] of [
+    ['trace.steps: 5', { trace: { steps: 5 } }, 'trace'],
+    ['trace.steps: [5]', { trace: { steps: [5] } }, 'trace'],
+    ['breakdown: [null, 5]', { breakdown: [null, 5] }, 'breakdown'],
+  ] as const) {
+    it(`ignores a result with ${label}`, async () => {
+      const bad = pluginWith('bad', {
+        afterEvaluate: (_input, result) => untyped<EvaluationResult>({ ...result, ...change }),
+      });
+      const result = await engineWith([bad]).evaluate([rule()], makeInput());
+      expect(result.trace.steps).toHaveLength(1);
+      expect(result.breakdown).toHaveLength(1);
+      expect(result.diagnostics.map((d) => d.message)).toEqual([
+        `plugin bad afterEvaluate returned a malformed ${field}; ignored`,
+      ]);
+    });
+  }
+});
+
+describe('rules removed without a skip', () => {
+  it('names them, by id then version', async () => {
+    const p = pluginWith('p', {
+      beforeEvaluate: (input, rules) => ({
+        input,
+        rules: rules.filter((r) => r.id === 'keep'),
+        skipped: rules
+          .filter((r) => r.id === 'listed')
+          .map((r) => ({ rule: r, reason: 'SHORT_CIRCUITED' as const })),
+      }),
+    });
+    const result = await engineWith([p]).evaluate(
+      [
+        makeRule({ id: 'b', model: 'M', version: 2 }),
+        makeRule({ id: 'keep', model: 'M' }),
+        makeRule({ id: 'listed', model: 'M' }),
+        makeRule({ id: 'b', model: 'M', version: 1 }),
+        makeRule({ id: 'a', model: 'M' }),
+      ],
+      makeInput(),
+    );
+    expect(result.diagnostics).toEqual([
+      {
+        source: 'hook',
+        plugin: 'p',
+        hook: 'beforeEvaluate',
+        message: 'plugin p removed rules without a skip: a@1, b@1, b@2',
+      },
+    ]);
+  });
+});
+
+describe('hook timer on abort', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('clears the in-flight hook timer when the pipeline times out', async () => {
+    vi.useFakeTimers();
+    const hang = pluginWith('hang', {
+      beforeEvaluate: () => new Promise<BeforeEvaluateResult>(() => undefined),
+    });
+    const engine = engineWith([hang], { timeout: { hook: 10_000, pipeline: 20 } });
+    const outcome = engine.evaluate([rule()], makeInput());
+    const settled = expect(outcome).rejects.toThrow(PipelineTimeoutError);
+    await vi.advanceTimersByTimeAsync(20);
+    await settled;
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});

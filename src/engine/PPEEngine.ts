@@ -24,7 +24,7 @@ import { PluginSandbox } from '../security/PluginSandbox.js';
 import { SnapshotManager } from '../snapshot/SnapshotManager.js';
 import { SnapshotSerializer } from '../snapshot/SnapshotSerializer.js';
 import { VERSION } from '../utils/version.js';
-import { copyData, describeThrown } from '../utils/values.js';
+import { copyData, describeThrown, ruleLabel } from '../utils/values.js';
 import { acceptAfterEvaluate } from './afterEvaluateTransition.js';
 import { readBeforeEvaluate } from './beforeEvaluateResult.js';
 import type { BeforeEvaluateReading } from './beforeEvaluateResult.js';
@@ -214,6 +214,7 @@ export class PPEEngine {
             () => hook.call(plugin, currentInput, currentRules),
             plugin.name,
             'beforeEvaluate',
+            signal,
           ),
         );
       } catch (error) {
@@ -222,10 +223,20 @@ export class PPEEngine {
         continue;
       }
       signal.throwIfAborted();
+      const dropped = removedWithoutSkip(currentRules, reading);
       currentInput = reading.input;
       currentRules = reading.rules;
       allSkipped.push(...reading.skipped);
       if (reading.state !== undefined) pluginState[plugin.name] = reading.state;
+      if (dropped.length > 0) {
+        hookDiagnostics.push(
+          hookDiagnostic(
+            plugin,
+            'beforeEvaluate',
+            `plugin ${plugin.name} removed rules without a skip: ${dropped.join(', ')}`,
+          ),
+        );
+      }
       if (reading.stateNotJson !== undefined) {
         hookDiagnostics.push(
           hookDiagnostic(
@@ -313,6 +324,7 @@ export class PPEEngine {
           () => hook.call(plugin, currentInput, handed),
           plugin.name,
           'afterEvaluate',
+          signal,
         );
         signal.throwIfAborted();
         const transition = acceptAfterEvaluate(plugin.name, before, returned);
@@ -363,6 +375,22 @@ export class PPEEngine {
 }
 
 type HookName = 'beforeEvaluate' | 'afterEvaluate';
+
+/**
+ * The rules a `beforeEvaluate` dropped from `rules` without listing them in `skipped`, as
+ * `id@version` sorted by `compareRuleIdentity`. Rules are matched by `id@version`: the plugin's
+ * copies, possibly rewritten, count as kept.
+ */
+function removedWithoutSkip(given: ReadonlyArray<Rule>, reading: BeforeEvaluateReading): string[] {
+  const accounted = new Set([
+    ...reading.rules.map(ruleLabel),
+    ...reading.skipped.map((skip) => ruleLabel(skip.rule)),
+  ]);
+  return given
+    .filter((rule) => !accounted.has(ruleLabel(rule)))
+    .sort(compareRuleIdentity)
+    .map(ruleLabel);
+}
 
 function hookDiagnostic(plugin: PPEPlugin, hook: HookName, message: string): Diagnostic {
   return { source: 'hook', plugin: plugin.name, hook, message };

@@ -19,9 +19,9 @@ export interface BeforeEvaluateReading {
 }
 
 /**
- * Reads what a plugin's `beforeEvaluate` returned, once: every field is copied (`copyData` of a
- * shallow copy, so getters and proxy traps run a single time) before any check, and the engine
- * uses only that copy.
+ * Reads what a plugin's `beforeEvaluate` returned, once: `input`, `rules`, `skipped` and `state`
+ * are read by name, once each (an own, non-enumerable or inherited getter runs a single time),
+ * and copied (`copyData`) before any check; the engine uses only that copy.
  *
  * Throws `TypeError` (`plugin <name> beforeEvaluate returned ...; ignored`), and the engine then
  * commits nothing of the result, when it is not an object, when `input` is not an object with
@@ -38,7 +38,13 @@ export function readBeforeEvaluate(
     new TypeError(`plugin ${pluginName} beforeEvaluate returned ${what}; ignored`);
   const raw: unknown = returned;
   if (!isObject(raw)) throw refuse(`${describeValue(raw)}, not a result`);
-  const snapshot = copyData({ ...returned });
+  // Read by name, once each (own, non-enumerable or inherited getters alike), then copied.
+  const snapshot = copyData({
+    input: returned.input,
+    rules: returned.rules,
+    skipped: returned.skipped,
+    state: returned.state,
+  });
 
   const given = snapshot.input;
   if (!isObject(given) || !isObject(given.data) || !isObject(given.meta)) {

@@ -26,12 +26,15 @@ export const PLUGIN_EDITABLE_FIELDS: ReadonlySet<string> = new Set([
  * Accepts the result a plugin's `afterEvaluate` returned in place of `before`, the result the
  * plugin was handed a copy of (`before` itself is never written to).
  *
- * - **Single read.** The returned result is read once: a shallow copy (each getter or proxy
- *   trap runs once), then `copyData`. Every check runs on that snapshot, and the new result is
- *   built from it only.
+ * - **Single read.** `value`, `appliedRules`, `skippedRules`, `trace`, `breakdown` and `meta`
+ *   are read by name, once each (an own, non-enumerable or inherited getter runs once), then
+ *   copied (`copyData`). Every check runs on that copy, and the new result is built from it
+ *   only. Engine-owned fields (those of `before` and the result's own enumerable keys) are read
+ *   once each too, only to report changes.
  * - **Shape.** A result that is not an object, or whose `appliedRules` is not an array of
  *   objects, `skippedRules` not an array of `{ rule: object, reason: string, detail?: string }`,
- *   `breakdown` not an array, `trace` not an object or `meta` neither absent nor an object, throws
+ *   `breakdown` not an array of objects, `trace` not an object whose `steps` is an array of
+ *   objects, or `meta` neither absent nor an object, throws
  *   `TypeError` (`plugin <name> afterEvaluate returned ...; ignored`): a hook error.
  * - **Engine-owned fields** are every field but `value`, `appliedRules`, `skippedRules`, `trace`,
  *   `breakdown` and `meta`: `requestId`, `engineVersion`, `outputs`, `diagnostics`,
@@ -59,8 +62,33 @@ export function acceptAfterEvaluate(
   const refuse = (what: string): TypeError =>
     new TypeError(`plugin ${pluginName} afterEvaluate returned ${what}; ignored`);
   const raw: unknown = returned;
-  if (!isObject(raw)) throw refuse(`${describeValue(raw)}, not a result`);
-  const snapshot = copyData({ ...returned });
+  if (!isObject(raw) || typeof raw !== 'object' || raw === null) {
+    throw refuse(`${describeValue(raw)}, not a result`);
+  }
+  // The fields the engine uses: read by name, once each (own, non-enumerable or inherited
+  // getters alike), then copied. Nothing is read from `returned` again.
+  const snapshot = copyData({
+    value: returned.value,
+    appliedRules: returned.appliedRules,
+    skippedRules: returned.skippedRules,
+    trace: returned.trace,
+    breakdown: returned.breakdown,
+    meta: returned.meta,
+  });
+  // The engine-owned fields: those of `before` and the plugin's own enumerable ones, once each.
+  const ownedFields = new Set([...Object.keys(before), ...Object.keys(raw)]);
+  const owned: Record<string, unknown> = {};
+  for (const field of ownedFields) {
+    if (PLUGIN_EDITABLE_FIELDS.has(field)) continue;
+    // defineProperty: a field named `__proto__` stays a field.
+    Object.defineProperty(owned, field, {
+      value: Reflect.get(raw, field),
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+  const ownedCopy = copyData(owned);
 
   if (!Array.isArray(snapshot.appliedRules) || !snapshot.appliedRules.every(isObject)) {
     throw refuse('a malformed appliedRules');
@@ -68,8 +96,11 @@ export function acceptAfterEvaluate(
   if (!Array.isArray(snapshot.skippedRules) || !snapshot.skippedRules.every(isSkip)) {
     throw refuse('a malformed skippedRules');
   }
-  if (!Array.isArray(snapshot.breakdown)) throw refuse('a malformed breakdown');
-  if (!isObject(snapshot.trace)) throw refuse('a malformed trace');
+  if (!Array.isArray(snapshot.breakdown) || !snapshot.breakdown.every(isObject)) {
+    throw refuse('a malformed breakdown');
+  }
+  const steps: unknown = isObject(snapshot.trace) ? snapshot.trace.steps : undefined;
+  if (!Array.isArray(steps) || !steps.every(isObject)) throw refuse('a malformed trace');
   if (snapshot.meta !== undefined && !isObject(snapshot.meta)) throw refuse('a malformed meta');
 
   const messages: string[] = [];
@@ -96,11 +127,11 @@ export function acceptAfterEvaluate(
     }
   }
 
-  const owned = changedEngineFields(before, snapshot, outputs);
-  if (owned.length > 0) {
-    const hint = owned.includes('outputs') ? ' (rewrite value instead)' : '';
+  const changedOwned = changedEngineFields(before, ownedCopy, outputs);
+  if (changedOwned.length > 0) {
+    const hint = changedOwned.includes('outputs') ? ' (rewrite value instead)' : '';
     messages.push(
-      `plugin ${pluginName} changed engine-owned fields ${owned.join(', ')}; ignored${hint}`,
+      `plugin ${pluginName} changed engine-owned fields ${changedOwned.join(', ')}; ignored${hint}`,
     );
   }
 
@@ -138,18 +169,15 @@ export function acceptAfterEvaluate(
   };
 }
 
-/** The engine-owned fields the snapshot changed, sorted. */
+/** The engine-owned fields whose returned values (read once, in `owned`) differ, sorted. */
 function changedEngineFields(
   before: EvaluationResult,
-  snapshot: EvaluationResult,
+  owned: Readonly<Record<string, unknown>>,
   syncedOutputs: EvaluationResult['outputs'],
 ): string[] {
-  const fields = new Set([...Object.keys(before), ...Object.keys(snapshot)]);
   const changed: string[] = [];
-  for (const field of fields) {
-    if (PLUGIN_EDITABLE_FIELDS.has(field)) continue;
+  for (const [field, theirs] of Object.entries(owned)) {
     const mine: unknown = Reflect.get(before, field);
-    const theirs: unknown = Reflect.get(snapshot, field);
     // Outputs left as handed, or synced with the rewritten value by the plugin itself.
     const same = sameData(mine, theirs) || (field === 'outputs' && sameData(syncedOutputs, theirs));
     if (!same) changed.push(field);

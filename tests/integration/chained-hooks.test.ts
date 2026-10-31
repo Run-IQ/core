@@ -313,6 +313,12 @@ describe('Plugin state', () => {
     expect(result.diagnostics).toEqual([
       {
         source: 'hook',
+        plugin: 'valid',
+        hook: 'beforeEvaluate',
+        message: 'plugin valid removed rules without a skip: r1@1',
+      },
+      {
+        source: 'hook',
         plugin: 'dated',
         hook: 'beforeEvaluate',
         message: 'state is not JSON at $.list[1] (Date): state dropped',
