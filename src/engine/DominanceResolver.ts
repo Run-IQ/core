@@ -1,15 +1,15 @@
 import type { Rule } from '../types/rule.js';
 import type { SkippedRule } from '../types/result.js';
-import { resolveTie } from './resolveTie.js';
+import { compareRuleIdentity, resolveTie } from './resolveTie.js';
 
-const byPriorityThenId = (a: Rule, b: Rule): number =>
-  b.priority - a.priority || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+const byPriorityThenIdentity = (a: Rule, b: Rule): number =>
+  b.priority - a.priority || compareRuleIdentity(a, b);
 
 export class DominanceResolver {
   /**
    * Within a dominanceGroup only the highest priority applies; the others are DOMINATED.
    * A tie at the top of a group is a conflict (see resolveTie). Rules without a group are never
-   * dominated and never in conflict. Kept rules are ordered by priority descending, then id.
+   * dominated and never in conflict. Kept rules are ordered by priority descending, then id@version.
    */
   resolve(
     rules: ReadonlyArray<Rule>,
@@ -29,8 +29,10 @@ export class DominanceResolver {
       groups.set(rule.dominanceGroup, members);
     }
 
-    for (const [group, members] of groups) {
-      const top = Math.max(...members.map((r) => r.priority));
+    const groupNames = [...groups.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    for (const group of groupNames) {
+      const members = groups.get(group) ?? [];
+      const top = members.reduce((max, r) => Math.max(max, r.priority), -Infinity);
       const head = members.filter((r) => r.priority === top);
       const tie = resolveTie(head, mode);
       const winner = tie.winner;
@@ -47,7 +49,8 @@ export class DominanceResolver {
       }
     }
 
-    kept.sort(byPriorityThenId);
+    kept.sort(byPriorityThenIdentity);
+    skipped.sort((a, b) => byPriorityThenIdentity(a.rule, b.rule));
     return { kept, skipped };
   }
 }

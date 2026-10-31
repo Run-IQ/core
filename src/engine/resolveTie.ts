@@ -2,34 +2,41 @@ import type { Rule } from '../types/rule.js';
 import type { SkippedRule } from '../types/result.js';
 import { RuleConflictError } from '../errors/RuleConflictError.js';
 
+/** The one rule-identity order of the engine: id by code-unit order, then version ascending. */
+export function compareRuleIdentity(a: Rule, b: Rule): number {
+  if (a.id !== b.id) return a.id < b.id ? -1 : 1;
+  return a.version - b.version;
+}
+
 /**
  * Resolves a tie between rules that share the same priority.
- * 'throw' raises a RuleConflictError naming every tied rule; 'first' keeps the smallest id
- * (code-unit order) and skips the others with RULE_CONFLICT.
+ * 'throw' raises a RuleConflictError naming every tied rule (in identity order); 'first' keeps the
+ * lowest id@version and skips the others with RULE_CONFLICT. Rules of different priorities are a
+ * programming error, not a rule conflict.
  */
 export function resolveTie(
   rules: readonly Rule[],
   mode: 'throw' | 'first',
 ): { winner: Rule; losers: SkippedRule[] } {
-  const [head] = rules;
-  if (head === undefined) {
-    throw new Error('resolveTie requires at least one rule');
-  }
-  if (mode === 'throw' && rules.length > 1) {
-    throw new RuleConflictError(
-      rules.map((r) => r.id),
-      head.priority,
-    );
-  }
-  const sorted = [...rules].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  const [winner, ...others] = sorted;
+  const [winner, ...losersRules] = [...rules].sort(compareRuleIdentity);
   if (winner === undefined) {
     throw new Error('resolveTie requires at least one rule');
   }
-  const losers: SkippedRule[] = others.map((rule) => ({
+  if (rules.some((r) => r.priority !== winner.priority)) {
+    throw new Error(
+      `resolveTie requires rules sharing one priority: ${[winner, ...losersRules].map((r) => r.id).join(', ')}`,
+    );
+  }
+  if (mode === 'throw' && losersRules.length > 0) {
+    throw new RuleConflictError(
+      [winner, ...losersRules].map((r) => r.id),
+      winner.priority,
+    );
+  }
+  const losers: SkippedRule[] = losersRules.map((rule) => ({
     rule,
     reason: 'RULE_CONFLICT',
-    detail: `tied with ${winner.id}@${winner.version} at priority ${winner.priority}; the smallest id wins`,
+    detail: `tied with ${winner.id}@${winner.version} at priority ${winner.priority}; the lowest id@version wins`,
   }));
   return { winner, losers };
 }
