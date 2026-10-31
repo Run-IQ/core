@@ -2,7 +2,7 @@ import Decimal from 'decimal.js';
 import { SpecError, toCanonicalDecimal } from '@run-iq/spec';
 import type { JsonValue, OutputRounding, RoundingMode } from '@run-iq/spec';
 
-/** The most significant digits the exact sum of a `decimal` output may have. */
+/** The most significant digits a decimal handled by the engine may have. */
 export const DECIMAL_DIGITS_LIMIT = 1000;
 
 /**
@@ -73,13 +73,18 @@ export function numberOf(value: Decimal): number {
 export const compareNumeric = (a: Numeric, b: Numeric): number => exact(a).comparedTo(exact(b));
 
 /**
- * The exact sum of decimals, or `undefined` when it has more than `DECIMAL_DIGITS_LIMIT`
- * significant digits. The precision is sized to the operands: every digit of every partial
- * sum lies between the highest digit of the operands plus one per power of ten of their count
- * and their lowest digit, so no partial sum is rounded and only the result is held to the
- * limit, whatever the order of the operands.
+ * The significant digits of a decimal, from its first to its last non-zero digit (`"1000"` has
+ * 1, `"-0.00120"` has 2, `"0"` has 1), as decimal.js counts them.
  */
-export function exactSum(values: readonly string[]): Decimal | undefined {
+export const significantDigits = (value: string): number => exact(value).sd();
+
+/**
+ * The exact sum of decimals. The precision is sized to the operands: every digit of every
+ * partial sum lies between the highest digit of the operands plus one per power of ten of their
+ * count and their lowest digit, so no partial sum is rounded, whatever the order of the
+ * operands. The caller holds the result to `DECIMAL_DIGITS_LIMIT`.
+ */
+export function exactSum(values: readonly string[]): Decimal {
   const terms = values.map(exact).filter((term) => !term.isZero());
   let highest = -Infinity;
   let lowest = Infinity;
@@ -89,8 +94,7 @@ export function exactSum(values: readonly string[]): Decimal | undefined {
   }
   if (terms.length === 0) return new Exact(0);
   const Sized = Exact.clone({ precision: highest + String(terms.length).length - lowest + 1 });
-  const sum = terms.reduce<Decimal>((total, term) => total.plus(term), new Sized(0));
-  return sum.sd() > DECIMAL_DIGITS_LIMIT ? undefined : sum;
+  return terms.reduce<Decimal>((total, term) => total.plus(term), new Sized(0));
 }
 
 /** The sum of numbers in Decimal to 20 significant digits (`0.1 + 0.2` is `0.3`). */

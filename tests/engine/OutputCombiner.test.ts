@@ -489,7 +489,7 @@ describe('OutputCombiner', () => {
         expect(e.output).toBe('amount');
         expect(e.limit).toBe(1000);
         expect(e.message).toBe(
-          'Output amount needs more than 1000 significant digits: the exact sum is refused rather than rounded',
+          'Output amount holds a decimal of more than 1000 significant digits: the decision is refused rather than rounded',
         );
       }
     });
@@ -673,6 +673,195 @@ describe('OutputCombiner', () => {
       expect(skipped).toEqual([]);
       expect(output?.value).toBe('0.18');
       expect(output?.contributors).toEqual(['x', 'y']);
+    });
+  });
+
+  describe('the limit of 1000 significant digits on every decimal (R39)', () => {
+    const over = `1${'0'.repeat(999)}.1`; // 1001 significant digits
+    const at = `1${'0'.repeat(998)}.1`; // 1000 significant digits
+    const declare = (
+      combine: OutputDeclaration['combine'],
+      rounding?: OutputRounding,
+    ): OutputDeclaration =>
+      rounding === undefined
+        ? { type: 'decimal', combine }
+        : { type: 'decimal', combine, rounding };
+    const refusal = (run: () => unknown): DecimalPrecisionError => {
+      try {
+        run();
+      } catch (e) {
+        if (e instanceof DecimalPrecisionError) return e;
+        throw e;
+      }
+      return expect.unreachable('should have thrown');
+    };
+
+    it('refuses a contribution beyond the limit under max, min and highestPriority', () => {
+      for (const combine of ['max', 'min', 'highestPriority'] as const) {
+        const e = refusal(() =>
+          OutputCombiner.combine(
+            'amount',
+            declare(combine),
+            [of(rule('a', 900), '1'), of(rule('b'), over)],
+            'throw',
+          ),
+        );
+        expect([e.code, e.output, e.limit]).toEqual(['DECIMAL_PRECISION', 'amount', 1000]);
+      }
+    });
+
+    it('accepts a contribution of exactly 1000 significant digits', () => {
+      for (const combine of ['max', 'min', 'highestPriority', 'sum'] as const) {
+        expect(
+          OutputCombiner.combine('amount', declare(combine), [of(rule('a'), at)], 'throw').output
+            ?.value,
+        ).toBe(at);
+      }
+    });
+
+    it('refuses a contribution beyond the limit even when rounding would shorten it', () => {
+      for (const where of ['output', 'contribution'] as const) {
+        refusal(() =>
+          OutputCombiner.combine(
+            'amount',
+            declare('max', { scale: 0, mode: 'down', at: where }),
+            [of(rule('a'), over)],
+            'throw',
+          ),
+        );
+      }
+    });
+
+    it('does not limit number outputs', () => {
+      expect(
+        OutputCombiner.combine('n', NUMBER('max'), [of(rule('a'), 1e300)], 'throw').output?.value,
+      ).toBe(1e300);
+    });
+  });
+
+  describe('impose (a short-circuit value, R38)', () => {
+    const x = rule('X', 9000);
+
+    it('takes a decimal string or a safe integer in canonical form', () => {
+      expect(
+        OutputCombiner.impose('amount', { type: 'decimal', combine: 'sum' }, x, '0012.50'),
+      ).toStrictEqual({
+        output: {
+          name: 'amount',
+          type: 'decimal',
+          combine: 'sum',
+          value: '12.5',
+          contributors: ['X'],
+        },
+        recorded: { value: '12.5' },
+      });
+      expect(
+        OutputCombiner.impose('amount', { type: 'decimal', combine: 'max' }, x, 12).output.value,
+      ).toBe('12');
+    });
+
+    it("rounds it at 'output' without recording unrounded", () => {
+      for (const rounding of [
+        { scale: 2, mode: 'halfUp' },
+        { scale: 2, mode: 'halfUp', at: 'output' },
+      ] as const) {
+        expect(
+          OutputCombiner.impose(
+            'amount',
+            { type: 'decimal', combine: 'sum', rounding },
+            x,
+            '1.005',
+          ),
+        ).toStrictEqual({
+          output: {
+            name: 'amount',
+            type: 'decimal',
+            combine: 'sum',
+            value: '1.01',
+            contributors: ['X'],
+          },
+          recorded: { value: '1.005' },
+        });
+      }
+    });
+
+    it("rounds it as the only contribution at 'contribution', recording unrounded", () => {
+      const imposed = OutputCombiner.impose(
+        'amount',
+        {
+          type: 'decimal',
+          combine: 'sum',
+          rounding: { scale: 2, mode: 'halfUp', at: 'contribution' },
+        },
+        x,
+        '1.005',
+      );
+      expect(imposed.output.value).toBe('1.01');
+      expect(imposed.recorded).toStrictEqual({ value: '1.01', unrounded: '1.005' });
+      const unchanged = OutputCombiner.impose(
+        'amount',
+        {
+          type: 'decimal',
+          combine: 'sum',
+          rounding: { scale: 2, mode: 'halfUp', at: 'contribution' },
+        },
+        x,
+        '1.5',
+      );
+      expect(unchanged.recorded).toStrictEqual({ value: '1.5' });
+    });
+
+    it('rounds a number output the same way', () => {
+      expect(
+        OutputCombiner.impose(
+          'n',
+          { type: 'number', combine: 'sum', rounding: { scale: 0, mode: 'floor' } },
+          x,
+          2.7,
+        ),
+      ).toStrictEqual({
+        output: { name: 'n', type: 'number', combine: 'sum', value: 2, contributors: ['X'] },
+        recorded: { value: 2.7 },
+      });
+      expect(
+        OutputCombiner.impose(
+          'n',
+          {
+            type: 'number',
+            combine: 'sum',
+            rounding: { scale: 0, mode: 'floor', at: 'contribution' },
+          },
+          x,
+          2.7,
+        ).recorded,
+      ).toStrictEqual({ value: 2, unrounded: 2.7 });
+    });
+
+    it('keeps other types as they are', () => {
+      expect(OutputCombiner.impose('risk', RISK, x, 'high').output.value).toBe('high');
+    });
+
+    it('refuses a decimal beyond the limit', () => {
+      try {
+        OutputCombiner.impose(
+          'amount',
+          { type: 'decimal', combine: 'highestPriority' },
+          x,
+          `1${'0'.repeat(999)}.1`,
+        );
+        expect.unreachable('should have thrown');
+      } catch (e) {
+        if (!(e instanceof DecimalPrecisionError)) throw e;
+        expect([e.output, e.limit]).toEqual(['amount', 1000]);
+      }
+    });
+
+    it('throws on a value the declaration refuses (the exception processor excluded it)', () => {
+      expect(() =>
+        OutputCombiner.impose('amount', { type: 'decimal', combine: 'sum' }, x, 0.1),
+      ).toThrow(
+        'short-circuit of X@1 on output amount: value 0.1 does not match type decimal: expected a decimal string (an optional "-", digits, an optional "." and digits, no exponent) or a safe integer',
+      );
     });
   });
 });

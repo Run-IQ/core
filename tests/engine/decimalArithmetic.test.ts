@@ -10,6 +10,7 @@ import {
   readDecimal,
   roundDecimal,
   roundNumber,
+  significantDigits,
 } from '../../src/engine/decimalArithmetic.js';
 
 /** decimal.js's own constant for each mode, written independently of the implementation. */
@@ -51,11 +52,8 @@ const TABLE: readonly { value: string; scale: number; expected: readonly string[
   { value: '-0.5', scale: 1, expected: ['-0.5', '-0.5', '-0.5', '-0.5', '-0.5', '-0.5', '-0.5'] },
 ];
 
-/** The canonical text of an exact sum, or undefined beyond the limit. */
-function sumText(values: readonly string[]): string | undefined {
-  const sum = exactSum(values);
-  return sum === undefined ? undefined : decimalText(sum);
-}
+/** The canonical text of an exact sum. */
+const sumText = (values: readonly string[]): string => decimalText(exactSum(values));
 
 describe('decimalArithmetic', () => {
   describe('rounding modes', () => {
@@ -116,13 +114,10 @@ describe('decimalArithmetic', () => {
       expect(sumText(['0', '-5', '5'])).toBe('0');
     });
 
-    it('accepts up to the limit of significant digits and gives undefined beyond', () => {
-      const big = `1${'0'.repeat(DECIMAL_DIGITS_LIMIT - 2)}`; // 999 integer digits
-      expect(DECIMAL_DIGITS_LIMIT).toBe(1000);
+    it('stays exact beyond the limit: the combiner holds results to it', () => {
+      const big = `1${'0'.repeat(DECIMAL_DIGITS_LIMIT - 1)}`; // 1000 integer digits
       expect(sumText([big, '0.1'])).toBe(`${big}.1`);
-      expect(exactSum([`${big}0`, '0.1'])).toBeUndefined();
-      // Intermediate sums do not count: only the result does.
-      expect(sumText([`${big}0`, '0.1', `-${big}0`])).toBe('0.1');
+      expect(sumText([big, '0.1', `-${big}`])).toBe('0.1');
     });
 
     it('uses its own decimal.js constructor: the global configuration changes nothing', () => {
@@ -136,6 +131,17 @@ describe('decimalArithmetic', () => {
       }
       exactSum(['1', '2']);
       expect(Decimal.precision).toBe(saved);
+    });
+  });
+
+  describe('significantDigits', () => {
+    it('counts the digits from the first to the last non-zero one', () => {
+      expect(DECIMAL_DIGITS_LIMIT).toBe(1000);
+      expect(significantDigits('0')).toBe(1);
+      expect(significantDigits('12.5')).toBe(3);
+      expect(significantDigits('-0.00120')).toBe(2);
+      expect(significantDigits('1000')).toBe(1);
+      expect(significantDigits(`1${'0'.repeat(999)}.1`)).toBe(1001);
     });
   });
 

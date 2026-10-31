@@ -74,7 +74,8 @@ const emptyDefaultOutput = (): DecisionOutput => ({
 /**
  * Computes the rules and combines their contributions output by output (see `OutputCombiner`).
  *
- * - A short-circuited output takes the imposed value, with its carrier as only contributor. A
+ * - A short-circuited output takes the imposed value, read and rounded as a contribution would
+ *   be (`OutputCombiner.impose`), with its carrier as only contributor. A
  *   carrier feeding its own short-circuited output is applied without being computed; any other
  *   rule left feeding it is skipped with `SHORT_CIRCUITED`.
  * - Rules feeding one output with different declarations (`model.output`, compared by
@@ -110,17 +111,15 @@ export class ExecutionPipeline {
     // exceptions fired and are final. `detail.shortCircuit` marks these steps.
     for (const [name, shortCircuit] of shortCircuits) {
       const { rule, value, reason, declaration } = shortCircuit;
-      outputs.set(name, {
-        name,
-        type: declaration.type,
-        combine: declaration.combine,
-        value,
-        contributors: [rule.id],
-      });
+      const imposed = OutputCombiner.impose(name, declaration, rule, value);
+      outputs.set(name, imposed.output);
       steps.push({
         rule,
         output: name,
-        contribution: value,
+        contribution: imposed.recorded.value,
+        ...(imposed.recorded.unrounded === undefined
+          ? {}
+          : { unrounded: imposed.recorded.unrounded }),
         modelUsed: rule.model,
         detail: { shortCircuit: reason ?? null },
         durationMs: 0,

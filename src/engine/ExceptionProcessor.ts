@@ -4,7 +4,6 @@ import {
   EXCEPTION_MODEL,
   canonicalize,
   matchesSelector,
-  valueMatchesOutputType,
 } from '@run-iq/spec';
 import type {
   JsonValue,
@@ -24,8 +23,9 @@ import {
   declarationKey,
   declarationOf,
   describeDeclaration,
-  describeType,
+  describeMismatch,
   outputOf,
+  readOutputValue,
   refusesDeclaration,
 } from './outputDeclaration.js';
 
@@ -37,7 +37,11 @@ export interface ShortCircuit {
   readonly rule: Rule;
   readonly value: JsonValue;
   readonly reason?: string;
-  /** The declaration of the output, which `value` matches (see `ExceptionProcessor`). */
+  /**
+   * The declaration of the output, which accepts `value` (`readOutputValue`; see
+   * `ExceptionProcessor`). The value is as the exception wrote it: the pipeline normalizes and
+   * rounds it (`OutputCombiner.impose`).
+   */
   readonly declaration: OutputDeclaration;
 }
 
@@ -103,7 +107,8 @@ function paramsConflict(a: Record<string, unknown>, b: Record<string, unknown>):
  * - one of its short-circuit values does not match the declaration of that output (the
  *   declaration of the rules in play feeding it; `DEFAULT_OUTPUT_DECLARATION` for `value` when
  *   none does), or no rule in play declares that output, or they declare it differently: it is
- *   skipped with `OUTPUT_MISMATCH`;
+ *   skipped with `OUTPUT_MISMATCH`. A value matches as a contribution would
+ *   (`readOutputValue`: a `decimal` takes a decimal string or a safe integer);
  * - it inhibits a carrier that already fired, i.e. one that takes precedence over it: this is a
  *   precedence conflict, which throws `ExceptionPrecedenceError` in `throw` mode and skips it with
  *   `RULE_CONFLICT` in `first` mode. Inhibiting a rule without exceptions, or a carrier not yet
@@ -354,8 +359,8 @@ export class ExceptionProcessor {
         const described = declarations.map(describeDeclaration).sort();
         return `${at}: the rules feeding it declare it differently (${described.join(', ')})`;
       }
-      if (!valueMatchesOutputType(value, declaration)) {
-        return `${at}: value ${canonicalize(value)} does not match type ${describeType(declaration)}`;
+      if (readOutputValue(value, declaration) === undefined) {
+        return `${at}: ${describeMismatch(value, declaration)}`;
       }
     }
     return undefined;

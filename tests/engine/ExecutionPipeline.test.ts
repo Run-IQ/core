@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { EXCEPTION_MODEL } from '@run-iq/spec';
-import type { OutputDeclaration } from '@run-iq/spec';
+import type { JsonValue, OutputDeclaration } from '@run-iq/spec';
 import { ExecutionPipeline } from '../../src/engine/ExecutionPipeline.js';
 import type { ShortCircuit } from '../../src/engine/ExceptionProcessor.js';
 import { TraceBuilder } from '../../src/engine/TraceBuilder.js';
@@ -648,6 +648,90 @@ describe('ExecutionPipeline', () => {
         if (!(e instanceof DecimalPrecisionError)) throw e;
         expect([e.code, e.output, e.limit]).toEqual(['DECIMAL_PRECISION', 'amount', 1000]);
       }
+    });
+  });
+
+  describe('short-circuits on rounded outputs (R38, R39)', () => {
+    const carrier = makeRule({
+      id: 'X',
+      model: EXCEPTION_MODEL,
+      priority: 9000,
+      exceptions: [{ kind: 'shortCircuit', output: 'amount', value: '0001.005' }],
+    });
+    const imposing = (declaration: OutputDeclaration, value: JsonValue) =>
+      pipelineWith().execute(
+        [],
+        makeInput(),
+        new TraceBuilder(),
+        new Map<string, ShortCircuit>([['amount', { rule: carrier, value, declaration }]]),
+      );
+
+    it("normalizes and rounds the imposed value at 'output', recording it unrounded in the step", () => {
+      const result = imposing(
+        { type: 'decimal', combine: 'sum', rounding: { scale: 2, mode: 'halfUp' } },
+        '0001.005',
+      );
+      expect(result.outputs['amount']).toEqual({
+        name: 'amount',
+        type: 'decimal',
+        combine: 'sum',
+        value: '1.01',
+        contributors: ['X'],
+      });
+      expect(result.breakdown).toStrictEqual([
+        {
+          ruleId: 'X',
+          ruleVersion: 1,
+          output: 'amount',
+          contribution: '1.005',
+          modelUsed: EXCEPTION_MODEL,
+          detail: { shortCircuit: null },
+        },
+      ]);
+    });
+
+    it("rounds the imposed value as the only contribution at 'contribution'", () => {
+      const trace = new TraceBuilder();
+      const result = pipelineWith().execute(
+        [],
+        makeInput(),
+        trace,
+        new Map<string, ShortCircuit>([
+          [
+            'amount',
+            {
+              rule: carrier,
+              value: '0001.005',
+              declaration: {
+                type: 'decimal',
+                combine: 'sum',
+                rounding: { scale: 2, mode: 'halfUp', at: 'contribution' },
+              },
+            },
+          ],
+        ]),
+      );
+      expect(result.outputs['amount']?.value).toBe('1.01');
+      expect(result.breakdown.map((b) => [b.contribution, b.unrounded])).toEqual([
+        ['1.01', '1.005'],
+      ]);
+      expect(trace.build().steps.map((s) => [s.contribution, s.unrounded])).toEqual([
+        ['1.01', '1.005'],
+      ]);
+    });
+
+    it('rounds an imposed number', () => {
+      const result = imposing(
+        { type: 'number', combine: 'max', rounding: { scale: 1, mode: 'ceiling' } },
+        2.71,
+      );
+      expect(result.outputs['amount']?.value).toBe(2.8);
+    });
+
+    it('throws DecimalPrecisionError on an imposed decimal beyond 1000 significant digits', () => {
+      expect(() =>
+        imposing({ type: 'decimal', combine: 'highestPriority' }, `1${'0'.repeat(999)}.1`),
+      ).toThrow(DecimalPrecisionError);
     });
   });
 });

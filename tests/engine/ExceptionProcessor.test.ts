@@ -8,7 +8,7 @@ import { ExceptionPrecedenceError } from '../../src/errors/ExceptionPrecedenceEr
 import type { ExceptionResult } from '../../src/engine/ExceptionProcessor.js';
 import type { CalculationModel, ValidationResult } from '../../src/types/model.js';
 import type { Rule } from '../../src/types/rule.js';
-import { makeRule, StubModel } from '../helpers.js';
+import { makeRule, StubModel, ValueModel } from '../helpers.js';
 
 const RISK: OutputDeclaration = {
   type: 'enum',
@@ -819,5 +819,50 @@ describe('ExceptionProcessor', () => {
         expect([...result.shortCircuits.keys()]).toEqual([...expected.shortCircuits.keys()]);
       }
     });
+  });
+});
+
+describe('ExceptionProcessor short-circuits on decimal outputs (R38)', () => {
+  const registry = makeRegistry();
+  registry.register(
+    new ValueModel(
+      'Amount',
+      { type: 'decimal', combine: 'sum', rounding: { scale: 2, mode: 'halfUp' } },
+      {},
+    ),
+  );
+  const processor = new ExceptionProcessor(registry);
+  const amount = makeRule({ id: 'A', model: 'Amount', output: 'amount' });
+  const expected =
+    'does not match type decimal: expected a decimal string (an optional "-", digits, ' +
+    'an optional "." and digits, no exponent) or a safe integer';
+
+  it('accepts a decimal string or a safe integer', () => {
+    for (const value of ['0012.50', 12, '-3']) {
+      const sc = carrier('SC', 9000, [{ kind: 'shortCircuit', output: 'amount', value }]);
+      const result = processor.apply([sc, amount], 'throw');
+      expect(result.shortCircuits.get('amount')?.value).toBe(value);
+      expect(result.skipped.map((s) => s.reason)).toEqual(['SHORT_CIRCUITED']);
+    }
+  });
+
+  it('skips the carrier with OUTPUT_MISMATCH on a float, an exponent or text', () => {
+    for (const [value, written] of [
+      [0.5, '0.5'],
+      ['1e3', '"1e3"'],
+      ['abc', '"abc"'],
+    ] as const) {
+      const sc = carrier('SC', 9000, [{ kind: 'shortCircuit', output: 'amount', value }]);
+      const result = processor.apply([sc, amount], 'throw');
+      expect(result.shortCircuits.size).toBe(0);
+      expect(result.rules).toEqual([amount]);
+      expect(result.skipped).toEqual([
+        {
+          rule: sc,
+          reason: 'OUTPUT_MISMATCH',
+          detail: `shortCircuit of SC@1 on output amount: value ${written} ${expected}`,
+        },
+      ]);
+    }
   });
 });

@@ -417,12 +417,72 @@ describe('PPEEngine', () => {
       const input = makeInput();
       await expect(engine.evaluate(rules, input)).rejects.toThrow(DecimalPrecisionError);
       await expect(engine.evaluate(rules, input)).rejects.toThrow(
-        'Output amount needs more than 1000 significant digits: the exact sum is refused rather than rounded',
+        'Output amount holds a decimal of more than 1000 significant digits: the decision is refused rather than rounded',
       );
       expect(afterEvaluate).not.toHaveBeenCalled();
       expect(await adapter.exists(input.requestId)).toBe(false);
       expect(plugin.errors).toHaveLength(2);
       expect(plugin.errors.every((e) => e instanceof DecimalPrecisionError)).toBe(true);
+    });
+
+    it('refuses a short-circuit beyond 1000 significant digits instead of a partial decision', async () => {
+      const amount = new ValueModel('AMOUNT', { type: 'decimal', combine: 'max' }, { a: '1' });
+      const afterEvaluate = vi.fn((_input: EvaluationInput, result: EvaluationResult) => result);
+      const watcher: PPEPlugin = {
+        name: 'watcher',
+        version: '1.0.0',
+        onInit: () => {},
+        afterEvaluate,
+      };
+      const adapter = new InMemorySnapshotAdapter();
+      const engine = new PPEEngine({
+        plugins: [new StubPlugin('test', [amount]), watcher],
+        dsls: [],
+        strict: false,
+        snapshot: adapter,
+      });
+      const rules = [
+        makeRule({
+          id: 'X',
+          model: EXCEPTION_MODEL,
+          priority: 9000,
+          exceptions: [{ kind: 'shortCircuit', output: 'amount', value: `1${'0'.repeat(999)}.1` }],
+        }),
+        makeRule({ id: 'a', model: 'AMOUNT', output: 'amount' }),
+      ];
+      const input = makeInput();
+      await expect(engine.evaluate(rules, input)).rejects.toThrow(DecimalPrecisionError);
+      expect(afterEvaluate).not.toHaveBeenCalled();
+      expect(await adapter.exists(input.requestId)).toBe(false);
+    });
+
+    it('normalizes and rounds a short-circuit of a decimal output', async () => {
+      const amount = new ValueModel(
+        'AMOUNT',
+        { type: 'decimal', combine: 'sum', rounding: { scale: 1, mode: 'halfEven' } },
+        { a: '1' },
+      );
+      const engine = engineWith([amount]);
+      const result = await engine.evaluate(
+        [
+          makeRule({
+            id: 'X',
+            model: EXCEPTION_MODEL,
+            priority: 9000,
+            exceptions: [{ kind: 'shortCircuit', output: 'amount', value: '0002.25' }],
+          }),
+          makeRule({ id: 'a', model: 'AMOUNT', output: 'amount' }),
+        ],
+        makeInput(),
+      );
+      expect(result.outputs['amount']).toEqual({
+        name: 'amount',
+        type: 'decimal',
+        combine: 'sum',
+        value: '2.2',
+        contributors: ['X'],
+      });
+      expect(result.trace.steps.map((s) => [s.ruleId, s.contribution])).toEqual([['X', '2.25']]);
     });
 
     it('rethrows the engine error when onError itself fails', async () => {
