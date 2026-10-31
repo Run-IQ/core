@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import { PipelineTimeoutError } from '../../src/errors/PipelineTimeoutError.js';
+import { ValidationError } from '../../src/errors/ValidationError.js';
 import type { DSLEvaluator } from '../../src/types/dsl.js';
 import { makeRule, makeInput, StubModel, StubPlugin } from '../helpers.js';
 
@@ -67,5 +68,34 @@ describe('Pipeline-level timeout', () => {
     const result = await engine.evaluate([rule], makeInput());
 
     expect(result.value).toBe(100);
+  });
+});
+
+describe('Pipeline timeout timer', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function engine(): PPEEngine {
+    return new PPEEngine({
+      plugins: [new StubPlugin('test', [new StubModel('M', 100)])],
+      dsls: [],
+      strict: false,
+      timeout: { pipeline: 5000 },
+    });
+  }
+
+  it('leaves no timer pending after a successful evaluation', async () => {
+    vi.useFakeTimers();
+    const result = await engine().evaluate([makeRule({ id: 'r1', model: 'M' })], makeInput());
+    expect(result.value).toBe(100);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('leaves no timer pending after a failed evaluation', async () => {
+    vi.useFakeTimers();
+    const invalid = makeInput({ requestId: '' });
+    await expect(engine().evaluate([], invalid)).rejects.toThrow(ValidationError);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

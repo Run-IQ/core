@@ -7,6 +7,7 @@ import type { PluginSandbox } from '../security/PluginSandbox.js';
 import { isEffectiveAt } from '@run-iq/spec';
 import { DSLEvaluationError } from '../errors/DSLEvaluationError.js';
 import { DSLTimeoutError } from '../errors/DSLTimeoutError.js';
+import { describeThrown } from '../utils/values.js';
 
 export interface FilterResult {
   readonly passed: readonly Rule[];
@@ -32,15 +33,6 @@ function resolvePath(data: Record<string, unknown>, path: string): unknown {
     current = Reflect.get(current, key);
   }
   return current;
-}
-
-function describeThrown(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  try {
-    return String(error);
-  } catch {
-    return '(unprintable error)';
-  }
 }
 
 function formatDate(date: Date): string {

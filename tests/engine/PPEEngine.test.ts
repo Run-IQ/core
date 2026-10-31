@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { EXCEPTION_MODEL } from '@run-iq/spec';
 import type { OutputDeclaration } from '@run-iq/spec';
 import { PPEEngine } from '../../src/engine/PPEEngine.js';
@@ -20,6 +20,8 @@ import type { CalculationModel } from '../../src/types/model.js';
 import type { DSLEvaluator } from '../../src/types/dsl.js';
 import type { EvaluationResult } from '../../src/types/result.js';
 import type { OutputValue } from '../../src/types/output.js';
+import type { EvaluationInput } from '../../src/types/input.js';
+import type { PPEPlugin } from '../../src/types/plugin.js';
 
 describe('PPEEngine', () => {
   it('evaluates rules end-to-end', async () => {
@@ -359,12 +361,46 @@ describe('PPEEngine', () => {
     });
 
     it('refuses an overflowing amount instead of returning a partial decision', async () => {
-      const engine = engineWith([new StubModel('H', 1e308)]);
+      const plugin = new StubPlugin('test', [new StubModel('H', 1e308)]);
+      const afterEvaluate = vi.fn((_input: EvaluationInput, result: EvaluationResult) => result);
+      const watcher: PPEPlugin = {
+        name: 'watcher',
+        version: '1.0.0',
+        onInit: () => {},
+        afterEvaluate,
+      };
+      const adapter = new InMemorySnapshotAdapter();
+      const engine = new PPEEngine({
+        plugins: [plugin, watcher],
+        dsls: [],
+        strict: false,
+        snapshot: adapter,
+      });
       const rules = [makeRule({ id: 'b', model: 'H' }), makeRule({ id: 'a', model: 'H' })];
-      await expect(engine.evaluate(rules, makeInput())).rejects.toThrow(OutputNotFiniteError);
-      await expect(engine.evaluate(rules, makeInput())).rejects.toThrow(
+      const input = makeInput();
+      await expect(engine.evaluate(rules, input)).rejects.toThrow(OutputNotFiniteError);
+      await expect(engine.evaluate(rules, input)).rejects.toThrow(
         'Output value is not a finite number; contributors: a, b',
       );
+      expect(afterEvaluate).not.toHaveBeenCalled();
+      expect(await adapter.exists(input.requestId)).toBe(false);
+      // onError receives the engine error itself, once per failed evaluation.
+      expect(plugin.errors).toHaveLength(2);
+      expect(plugin.errors.every((e) => e instanceof OutputNotFiniteError)).toBe(true);
+    });
+
+    it('rethrows the engine error when onError itself fails', async () => {
+      const failing: PPEPlugin = {
+        name: 'failing',
+        version: '1.0.0',
+        onInit: (context) => context.modelRegistry.register(new StubModel('H', 1e308)),
+        onError: () => {
+          throw new Error('onError crash');
+        },
+      };
+      const engine = new PPEEngine({ plugins: [failing], dsls: [], strict: false });
+      const rules = [makeRule({ id: 'b', model: 'H' }), makeRule({ id: 'a', model: 'H' })];
+      await expect(engine.evaluate(rules, makeInput())).rejects.toThrow(OutputNotFiniteError);
     });
 
     it('refuses at construction a plugin model with an invalid output declaration', () => {

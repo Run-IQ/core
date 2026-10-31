@@ -1,9 +1,11 @@
+import type { JsonValue } from '@run-iq/spec';
 import type { Rule } from '../types/rule.js';
 import type { EvaluationInput } from '../types/input.js';
 import type { EvaluationResult, SkippedRule } from '../types/result.js';
 import type { PPEPlugin, PluginContext } from '../types/plugin.js';
 import type { DSLEvaluator } from '../types/dsl.js';
 import type { ISnapshotAdapter } from '../types/snapshot.js';
+import type { Diagnostic } from '../types/diagnostic.js';
 import type { PPEError } from '../errors/PPEError.js';
 import { ValidationError } from '../errors/ValidationError.js';
 import { PipelineTimeoutError } from '../errors/PipelineTimeoutError.js';
@@ -22,6 +24,9 @@ import { PluginSandbox } from '../security/PluginSandbox.js';
 import { SnapshotManager } from '../snapshot/SnapshotManager.js';
 import { SnapshotSerializer } from '../snapshot/SnapshotSerializer.js';
 import { VERSION } from '../utils/version.js';
+import { findNonJson } from '../utils/json.js';
+import { copyData, describeThrown } from '../utils/values.js';
+import { acceptAfterEvaluate } from './afterEvaluateTransition.js';
 
 export interface PPEEngineConfig {
   readonly plugins: PPEPlugin[];
@@ -103,21 +108,55 @@ export class PPEEngine {
     }
   }
 
+  /**
+   * Evaluates `rules` against `input`.
+   *
+   * `result.diagnostics` lists, in this order: the engine's own diagnostics (rule filter), then
+   * the `beforeEvaluate` diagnostics by plugin in registration order, then the `afterEvaluate`
+   * ones by plugin in registration order (see `PPEPlugin` for what each hook reports).
+   *
+   * With `timeout.pipeline`, rejects with `PipelineTimeoutError` past that delay; its timer is
+   * cleared whatever the outcome.
+   */
   async evaluate(rules: ReadonlyArray<Rule>, input: EvaluationInput): Promise<EvaluationResult> {
-    if (this.pipelineTimeout !== undefined) {
-      return Promise.race([
-        this.executeEvaluation(rules, input),
-        new Promise<never>((_resolve, reject) => {
-          setTimeout(() => {
-            reject(new PipelineTimeoutError(this.pipelineTimeout!)); // justification: guarded by undefined check above
-          }, this.pipelineTimeout); // justification: guarded by undefined check above
-        }),
-      ]);
+    const timeoutMs = this.pipelineTimeout;
+    if (timeoutMs === undefined) return this.executeEvaluation(rules, input);
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        reject(new PipelineTimeoutError(timeoutMs));
+      }, timeoutMs);
+    });
+    try {
+      return await Promise.race([this.executeEvaluation(rules, input), timeout]);
+    } finally {
+      clearTimeout(timer);
     }
-    return this.executeEvaluation(rules, input);
   }
 
+  /** Runs the pipeline; an error it throws goes to every plugin's `onError`, then to the caller. */
   private async executeEvaluation(
+    rules: ReadonlyArray<Rule>,
+    input: EvaluationInput,
+  ): Promise<EvaluationResult> {
+    try {
+      return await this.runPipeline(rules, input);
+    } catch (error) {
+      for (const plugin of this.plugins) {
+        if (!plugin.onError) continue;
+        try {
+          // justification: the contract types errors as PPEError; see PPEPlugin.onError.
+          plugin.onError(error as PPEError, input);
+        } catch {
+          // Contract of PPEPlugin.onError: the evaluation's own error reaches the caller.
+        }
+      }
+      throw error;
+    }
+  }
+
+  private async runPipeline(
     rules: ReadonlyArray<Rule>,
     input: EvaluationInput,
   ): Promise<EvaluationResult> {
@@ -148,27 +187,42 @@ export class PPEEngine {
     // Continue with valid source rules
     let currentRules: ReadonlyArray<Rule> = initialValidation.valid;
 
-    // Step 4: Plugin beforeEvaluate hooks
+    // Step 4: Plugin beforeEvaluate hooks. Their diagnostics follow the engine's own ones.
+    const hookDiagnostics: Diagnostic[] = [];
+    const pluginState: Record<string, JsonValue> = {};
     let currentInput = input;
     for (const plugin of this.plugins) {
-      if (plugin.beforeEvaluate) {
-        try {
-          const hookResult = await this.sandbox.runHook(
-            () => plugin.beforeEvaluate!(currentInput, currentRules),
-            plugin.name,
-          );
-          currentInput = hookResult.input;
-          currentRules = hookResult.rules;
+      const hook = plugin.beforeEvaluate;
+      if (!hook) continue;
+      try {
+        const hookResult = await this.sandbox.runHook(
+          () => hook.call(plugin, currentInput, currentRules),
+          plugin.name,
+        );
+        currentInput = hookResult.input;
+        currentRules = hookResult.rules;
 
-          // Collect rules explicitly skipped by the plugin
-          if (hookResult.skipped) {
-            allSkipped.push(...hookResult.skipped);
-          }
-        } catch (error) {
-          if (plugin.onError) {
-            plugin.onError(error as PPEError, currentInput);
+        // Collect rules explicitly skipped by the plugin
+        if (hookResult.skipped) {
+          allSkipped.push(...hookResult.skipped);
+        }
+
+        if (hookResult.state !== undefined) {
+          const notJson = findNonJson(hookResult.state);
+          if (notJson === undefined) {
+            pluginState[plugin.name] = copyData(hookResult.state);
+          } else {
+            hookDiagnostics.push(
+              hookDiagnostic(
+                plugin,
+                'beforeEvaluate',
+                `state is not JSON at ${notJson}: state dropped`,
+              ),
+            );
           }
         }
+      } catch (error) {
+        reportHookError(plugin, 'beforeEvaluate', error, currentInput, hookDiagnostics);
       }
     }
 
@@ -224,8 +278,9 @@ export class PPEEngine {
       appliedRules: pipelineResult.applied,
       skippedRules,
       trace,
-      diagnostics: filterResult.diagnostics,
+      diagnostics: [...filterResult.diagnostics, ...hookDiagnostics],
       missingFacts: filterResult.missingFacts,
+      pluginState,
       snapshotId: '',
       engineVersion: ENGINE_VERSION,
       pluginVersions,
@@ -233,27 +288,27 @@ export class PPEEngine {
       timestamp: new Date(),
     };
 
-    // Step 9: Plugin afterEvaluate hooks
+    // Step 9: Plugin afterEvaluate hooks. Each one gets a copy, so that nothing it writes reaches
+    // the engine's records; acceptAfterEvaluate says what the engine keeps of what it returns.
     for (const plugin of this.plugins) {
-      if (plugin.afterEvaluate) {
-        try {
-          const hookResult = await this.sandbox.runHook(
-            () => plugin.afterEvaluate!(currentInput, result),
-            plugin.name,
-          );
-
-          // Validate invariants: requestId and engineVersion must not change
-          result = {
-            ...hookResult,
-            requestId: result.requestId,
-            engineVersion: result.engineVersion,
-          };
-        } catch (error) {
-          if (plugin.onError) {
-            plugin.onError(error as PPEError, currentInput);
-          }
+      const hook = plugin.afterEvaluate;
+      if (!hook) continue;
+      const before = result;
+      const handed = copyData(before);
+      try {
+        const returned = await this.sandbox.runHook(
+          () => hook.call(plugin, currentInput, handed),
+          plugin.name,
+        );
+        const transition = acceptAfterEvaluate(plugin.name, before, returned);
+        for (const message of transition.messages) {
+          hookDiagnostics.push(hookDiagnostic(plugin, 'afterEvaluate', message));
         }
+        if (transition.result) result = transition.result;
+      } catch (error) {
+        reportHookError(plugin, 'afterEvaluate', error, currentInput, hookDiagnostics);
       }
+      result = { ...result, diagnostics: [...filterResult.diagnostics, ...hookDiagnostics] };
     }
 
     // Step 10: Snapshot — use the rules that actually executed (post-plugin)
@@ -287,5 +342,32 @@ export class PPEEngine {
       dslVersions: {},
       timestamp: new Date(),
     };
+  }
+}
+
+type HookName = 'beforeEvaluate' | 'afterEvaluate';
+
+function hookDiagnostic(plugin: PPEPlugin, hook: HookName, message: string): Diagnostic {
+  return { source: 'hook', plugin: plugin.name, hook, message };
+}
+
+/**
+ * A hook threw: the error becomes a diagnostic, then goes to the plugin's `onError`, whose own
+ * failure becomes a second diagnostic. The evaluation goes on.
+ */
+function reportHookError(
+  plugin: PPEPlugin,
+  hook: HookName,
+  error: unknown,
+  input: EvaluationInput,
+  diagnostics: Diagnostic[],
+): void {
+  diagnostics.push(hookDiagnostic(plugin, hook, describeThrown(error)));
+  if (!plugin.onError) return;
+  try {
+    // justification: the contract types errors as PPEError; see PPEPlugin.onError.
+    plugin.onError(error as PPEError, input);
+  } catch (failure) {
+    diagnostics.push(hookDiagnostic(plugin, hook, `onError failed: ${describeThrown(failure)}`));
   }
 }

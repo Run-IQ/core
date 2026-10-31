@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { EXCEPTION_MODEL } from '@run-iq/spec';
 import { RuleValidator } from '../../src/security/RuleValidator.js';
 import { ModelRegistry } from '../../src/registry/ModelRegistry.js';
 import { makeRule, StubModel } from '../helpers.js';
@@ -46,6 +47,61 @@ describe('RuleValidator', () => {
     const result = validator.validate([rule]);
     expect(result.invalid).toHaveLength(1);
     expect(result.invalid[0]!.reason).toBe('INVALID_PARAMS');
+    expect(result.invalid[0]!.detail).toBe('Invalid params for rule r1@1 (model BAD): bad param');
+  });
+
+  it('says so when a model refuses params without giving errors', () => {
+    const registry = new ModelRegistry();
+    registry.register({
+      name: 'MUTE',
+      version: '1.0.0',
+      validateParams: (): ValidationResult => ({ valid: false }),
+      calculate: () => 0,
+    });
+    const result = new RuleValidator(registry).validate([makeRule({ id: 'r1', model: 'MUTE' })]);
+    expect(result.invalid.map((s) => [s.reason, s.detail])).toEqual([
+      ['INVALID_PARAMS', 'Invalid params for rule r1@1 (model MUTE): the model gave no error'],
+    ]);
+  });
+
+  it('names the rule in the detail of a checksum mismatch', () => {
+    const rule = { ...makeRule({ id: 'r1', model: 'M' }), checksum: 'f'.repeat(64) };
+    const result = new RuleValidator(new ModelRegistry()).validate([rule]);
+    expect(result.invalid.map((s) => [s.reason, s.detail])).toEqual([
+      ['CHECKSUM_MISMATCH', 'Checksum mismatch for rule r1@1'],
+    ]);
+  });
+
+  it('excludes an exception carrier without exceptions as INVALID_RULE with the spec message', () => {
+    const carrier = { ...makeRule({ id: 'X', model: 'M' }), model: EXCEPTION_MODEL };
+    const result = new RuleValidator(new ModelRegistry()).validate([carrier]);
+    expect(result.valid).toEqual([]);
+    expect(result.invalid.map((s) => [s.reason, s.detail])).toEqual([
+      [
+        'INVALID_RULE',
+        'Invalid rule X@1: exceptions must list at least one exception: ' +
+          'a rule of model "@run-iq/exception" only carries exceptions',
+      ],
+    ]);
+  });
+
+  it('never validates the params of an exception carrier', () => {
+    const registry = new ModelRegistry();
+    // A plugin registering the reserved name does not make core validate carrier params.
+    registry.register({
+      name: EXCEPTION_MODEL,
+      version: '1.0.0',
+      validateParams: (): ValidationResult => ({ valid: false, errors: ['refused'] }),
+      calculate: () => 0,
+    });
+    const carrier = makeRule({
+      id: 'X',
+      model: EXCEPTION_MODEL,
+      exceptions: [{ kind: 'inhibit', targets: { ids: ['a'] } }],
+    });
+    const result = new RuleValidator(registry).validate([carrier]);
+    expect(result.valid).toEqual([carrier]);
+    expect(result.invalid).toEqual([]);
   });
 
   it('skips a malformed rule as INVALID_RULE with the spec error as detail', () => {
