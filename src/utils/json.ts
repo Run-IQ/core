@@ -66,11 +66,18 @@ export function isJsonValue(value: unknown): value is JsonValue {
   return findNonJson(value) === undefined;
 }
 
-/** `canonicalize` of a value for messages, or `String(value)` when it is not JSON (`NaN`...). */
+/**
+ * `canonicalize` of a value for messages, or `String(value)` when it is not JSON (`NaN`...), or
+ * `(unprintable value)` when even that throws. Never throws.
+ */
 export function describeValue(value: unknown): string {
   try {
     return canonicalize(value);
   } catch {
-    return String(value);
+    try {
+      return String(value);
+    } catch {
+      return '(unprintable value)';
+    }
   }
 }

@@ -17,6 +17,11 @@ export class UnexpectedEngineError extends PPEError {
 
   /** `error` itself when it is a `PPEError`, else `error` wrapped. */
   static wrap(error: unknown): PPEError {
-    return error instanceof PPEError ? error : new UnexpectedEngineError(error);
+    try {
+      if (error instanceof PPEError) return error;
+    } catch {
+      // A hostile value (revoked proxy...) whose prototype cannot be read: wrapped below.
+    }
+    return new UnexpectedEngineError(error);
   }
 }

@@ -8,13 +8,27 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
 /** A rule as messages name it: `id@version`. */
 export const ruleLabel = (rule: Rule): string => `${rule.id}@${rule.version}`;
 
-/** What a thrown value says, for messages: its `message` for an `Error`, else `String(error)`. */
+/**
+ * What a thrown value says, for messages: its `message` for an `Error`, else `String(error)`,
+ * or `(unprintable error)` when even that throws. Never throws.
+ */
 export function describeThrown(error: unknown): string {
-  if (error instanceof Error) return error.message;
+  // Everything inside the try: `instanceof` and `message` run traps of hostile proxies.
   try {
+    if (error instanceof Error) return String(error.message);
     return String(error);
   } catch {
     return '(unprintable error)';
+  }
+}
+
+/** True for an object that is neither `null` nor an array; never throws (no prototype read). */
+export function isObject(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false;
+  try {
+    return !Array.isArray(value);
+  } catch {
+    return false;
   }
 }
 

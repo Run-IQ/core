@@ -35,6 +35,11 @@ export interface PPEPlugin {
    * Runs before the rules are filtered, in registration order; each plugin gets the input and
    * rules the previous one returned.
    *
+   * - The returned value is read once (its own enumerable fields, then a deep copy) and checked
+   *   as a whole: `input` an object with object `data` and `meta`, `rules` an array of objects,
+   *   `skipped` absent or an array of `{ rule: object, reason: string, detail?: string }`. A
+   *   result that fails a check, or a getter that throws, is a hook error (below): nothing of it
+   *   is used. A skip without `detail` gets `skipped by plugin <name>`.
    * - A `state` that is JSON is kept, as a copy, in `result.pluginState[name]`. Any other
    *   `state` is dropped with a diagnostic naming the first non-JSON path (`$.a[1] (Date)`); the
    *   returned input and rules are still used.
@@ -50,16 +55,23 @@ export interface PPEPlugin {
   /**
    * Runs after the decision is computed, in registration order, on a copy of the result: writing
    * to it in place never reaches the engine's records or the caller's rules. The result it
-   * returns replaces the decision, except that:
+   * returns is read once (own enumerable fields, then a deep copy) and replaces the decision,
+   * except that:
    *
-   * - `requestId`, `engineVersion`, `outputs`, `diagnostics` and `pluginState` stay the engine's;
-   *   a direct change of `outputs` is ignored with the diagnostic
-   *   `plugin <name> changed outputs directly; ignored (rewrite value instead)`;
+   * - only `value`, `appliedRules`, `skippedRules`, `trace`, `breakdown` and `meta` may change.
+   *   The other fields are the engine's (`requestId`, `engineVersion`, `outputs`, `diagnostics`,
+   *   `missingFacts`, `pluginState`, `pluginVersions`, `dslVersions`, `timestamp`, `proof`,
+   *   `fromStore`, and any added field): changes to them are ignored and named in one diagnostic,
+   *   `plugin <name> changed engine-owned fields <a, b>; ignored`, which ends with
+   *   ` (rewrite value instead)` when `outputs` is among them;
    * - rewriting `value` is the only way to change an output: it must be a finite number;
    *   `outputs.value.value` is set to it and a diagnostic says
    *   `plugin <name> rewrote output value from <old> to <new>`. Any other `value` makes the
    *   engine ignore the whole result, with a diagnostic;
-   * - rules added to or removed from `appliedRules` or `skippedRules` are named in diagnostics.
+   * - rules added to, removed from, or changed in `appliedRules` or `skippedRules` (same id,
+   *   different entry) are named in diagnostics;
+   * - a returned value that is not an object, or with malformed lists, `trace` or `meta`, is a
+   *   hook error (`plugin <name> afterEvaluate returned 42, not a result; ignored`).
    *
    * If it throws (or exceeds `timeout.hook`: `HookTimeoutError`), its error becomes a diagnostic with
    * `hook: 'afterEvaluate'`, `onError` is called, and the previous result is kept.
@@ -82,8 +94,9 @@ export interface PPEPlugin {
    *   conflicts...): called on every plugin, in registration order, with that error and the input
    *   given to `evaluate`. `afterEvaluate` is not called and nothing is saved. If `onError`
    *   throws, its failure is dropped: the evaluation's own error always reaches the caller.
-   * - Not called for `PipelineTimeoutError`, which `evaluate` raises while the pipeline may
-   *   still be running; a pipeline that fails after that delay still calls `onError`.
+   * - Not called for `PipelineTimeoutError`, nor for anything that happens after it: the
+   *   pipeline still running is aborted at its next step (no further hook, no save, no
+   *   `onError`).
    */
   onError?(error: PPEError, input: EvaluationInput): void;
 

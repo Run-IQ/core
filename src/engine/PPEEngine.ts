@@ -24,9 +24,10 @@ import { PluginSandbox } from '../security/PluginSandbox.js';
 import { SnapshotManager } from '../snapshot/SnapshotManager.js';
 import { SnapshotSerializer } from '../snapshot/SnapshotSerializer.js';
 import { VERSION } from '../utils/version.js';
-import { findNonJson } from '../utils/json.js';
 import { copyData, describeThrown } from '../utils/values.js';
 import { acceptAfterEvaluate } from './afterEvaluateTransition.js';
+import { readBeforeEvaluate } from './beforeEvaluateResult.js';
+import type { BeforeEvaluateReading } from './beforeEvaluateResult.js';
 
 export interface PPEEngineConfig {
   readonly plugins: PPEPlugin[];
@@ -116,33 +117,42 @@ export class PPEEngine {
    * ones by plugin in registration order (see `PPEPlugin` for what each hook reports).
    *
    * With `timeout.pipeline`, rejects with `PipelineTimeoutError` past that delay; its timer is
-   * cleared whatever the outcome.
+   * cleared whatever the outcome. The pipeline still running then is aborted: it stops at its
+   * next step, before any further hook, before saving, and without calling `onError`.
    */
   async evaluate(rules: ReadonlyArray<Rule>, input: EvaluationInput): Promise<EvaluationResult> {
+    const abort = new AbortController();
     const timeoutMs = this.pipelineTimeout;
-    if (timeoutMs === undefined) return this.executeEvaluation(rules, input);
+    if (timeoutMs === undefined) return this.executeEvaluation(rules, input, abort.signal);
 
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {
-        reject(new PipelineTimeoutError(timeoutMs));
+        const error = new PipelineTimeoutError(timeoutMs);
+        abort.abort(error);
+        reject(error);
       }, timeoutMs);
     });
     try {
-      return await Promise.race([this.executeEvaluation(rules, input), timeout]);
+      return await Promise.race([this.executeEvaluation(rules, input, abort.signal), timeout]);
     } finally {
       clearTimeout(timer);
     }
   }
 
-  /** Runs the pipeline; an error it throws goes to every plugin's `onError`, then to the caller. */
+  /**
+   * Runs the pipeline; an error it throws goes to every plugin's `onError`, then to the caller,
+   * unless the evaluation was aborted (its caller already has a `PipelineTimeoutError`).
+   */
   private async executeEvaluation(
     rules: ReadonlyArray<Rule>,
     input: EvaluationInput,
+    signal: AbortSignal,
   ): Promise<EvaluationResult> {
     try {
-      return await this.runPipeline(rules, input);
+      return await this.runPipeline(rules, input, signal);
     } catch (error) {
+      if (signal.aborted) throw error;
       for (const plugin of this.plugins) {
         if (!plugin.onError) continue;
         try {
@@ -158,6 +168,7 @@ export class PPEEngine {
   private async runPipeline(
     rules: ReadonlyArray<Rule>,
     input: EvaluationInput,
+    signal: AbortSignal,
   ): Promise<EvaluationResult> {
     const traceBuilder = new TraceBuilder();
     const allSkipped: SkippedRule[] = [];
@@ -193,40 +204,41 @@ export class PPEEngine {
     for (const plugin of this.plugins) {
       const hook = plugin.beforeEvaluate;
       if (!hook) continue;
+      signal.throwIfAborted();
+      let reading: BeforeEvaluateReading;
       try {
-        const hookResult = await this.sandbox.runHook(
-          () => hook.call(plugin, currentInput, currentRules),
+        // Read once and checked as a whole: nothing is committed unless every check passes.
+        reading = readBeforeEvaluate(
           plugin.name,
-          'beforeEvaluate',
+          await this.sandbox.runHook(
+            () => hook.call(plugin, currentInput, currentRules),
+            plugin.name,
+            'beforeEvaluate',
+          ),
         );
-        currentInput = hookResult.input;
-        currentRules = hookResult.rules;
-
-        // Collect rules explicitly skipped by the plugin
-        if (hookResult.skipped) {
-          allSkipped.push(...hookResult.skipped);
-        }
-
-        if (hookResult.state !== undefined) {
-          const notJson = findNonJson(hookResult.state);
-          if (notJson === undefined) {
-            pluginState[plugin.name] = copyData(hookResult.state);
-          } else {
-            hookDiagnostics.push(
-              hookDiagnostic(
-                plugin,
-                'beforeEvaluate',
-                `state is not JSON at ${notJson}: state dropped`,
-              ),
-            );
-          }
-        }
       } catch (error) {
+        signal.throwIfAborted();
         reportHookError(plugin, 'beforeEvaluate', error, currentInput, hookDiagnostics);
+        continue;
+      }
+      signal.throwIfAborted();
+      currentInput = reading.input;
+      currentRules = reading.rules;
+      allSkipped.push(...reading.skipped);
+      if (reading.state !== undefined) pluginState[plugin.name] = reading.state;
+      if (reading.stateNotJson !== undefined) {
+        hookDiagnostics.push(
+          hookDiagnostic(
+            plugin,
+            'beforeEvaluate',
+            `state is not JSON at ${reading.stateNotJson}: state dropped`,
+          ),
+        );
       }
     }
 
     // Step 5: Rule filtering (on potentially mutated rules)
+    signal.throwIfAborted();
     const now = currentInput.meta.effectiveDate ?? new Date();
     const filterResult = await this.ruleFilter.filter(currentRules, currentInput, now);
     allSkipped.push(...filterResult.skipped);
@@ -293,6 +305,7 @@ export class PPEEngine {
     for (const plugin of this.plugins) {
       const hook = plugin.afterEvaluate;
       if (!hook) continue;
+      signal.throwIfAborted();
       const before = result;
       const handed = copyData(before);
       try {
@@ -301,12 +314,14 @@ export class PPEEngine {
           plugin.name,
           'afterEvaluate',
         );
+        signal.throwIfAborted();
         const transition = acceptAfterEvaluate(plugin.name, before, returned);
         for (const message of transition.messages) {
           hookDiagnostics.push(hookDiagnostic(plugin, 'afterEvaluate', message));
         }
         if (transition.result) result = transition.result;
       } catch (error) {
+        signal.throwIfAborted();
         reportHookError(plugin, 'afterEvaluate', error, currentInput, hookDiagnostics);
       }
       result = { ...result, diagnostics: [...filterResult.diagnostics, ...hookDiagnostics] };
@@ -323,6 +338,7 @@ export class PPEEngine {
       dslVersions,
     );
 
+    signal.throwIfAborted();
     const snapshotId = await this.snapshotManager.save(snapshot);
 
     // Step 11: Return with snapshotId

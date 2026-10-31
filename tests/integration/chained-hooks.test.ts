@@ -289,7 +289,10 @@ describe('Plugin state', () => {
           rules,
         };
         // The type forbids a Date in the state; a plugin can still return one at runtime.
-        Object.defineProperty(result, 'state', { value: { list: [1, new Date(0)] } });
+        Object.defineProperty(result, 'state', {
+          enumerable: true,
+          value: { list: [1, new Date(0)] },
+        });
         return result;
       },
     });
@@ -431,8 +434,9 @@ describe('afterEvaluate transitions', () => {
     });
     expect(result.diagnostics.map((d) => d.message)).toEqual([
       'plugin careless rewrote output value from 100 to 0',
-      'plugin careless changed outputs directly; ignored (rewrite value instead)',
+      'plugin careless changed engine-owned fields outputs; ignored (rewrite value instead)',
       'plugin careless added applied rules: SC',
+      'plugin careless changed applied rules: r1',
     ]);
   });
 });
@@ -472,7 +476,8 @@ describe('Outputs belong to the engine', () => {
         source: 'hook',
         plugin: 'sneaky',
         hook: 'afterEvaluate',
-        message: 'plugin sneaky changed outputs directly; ignored (rewrite value instead)',
+        message:
+          'plugin sneaky changed engine-owned fields outputs; ignored (rewrite value instead)',
       },
     ]);
   });
@@ -493,7 +498,7 @@ describe('Outputs belong to the engine', () => {
     expect(Object.keys(result.outputs).sort()).toEqual(['risk', 'value']);
     expect(result.outputs['risk']!.value).toBe('low');
     expect(result.diagnostics.map((d) => d.message)).toEqual([
-      'plugin sneaky changed outputs directly; ignored (rewrite value instead)',
+      'plugin sneaky changed engine-owned fields outputs; ignored (rewrite value instead)',
     ]);
   });
 

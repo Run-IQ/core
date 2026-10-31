@@ -1,0 +1,80 @@
+import type { JsonValue } from '@run-iq/spec';
+import type { EvaluationInput } from '../types/input.js';
+import type { BeforeEvaluateResult } from '../types/plugin.js';
+import type { Rule } from '../types/rule.js';
+import type { SkippedRule } from '../types/result.js';
+import { describeValue, findNonJson } from '../utils/json.js';
+import { copyData, isObject } from '../utils/values.js';
+
+/** What the engine takes from a `beforeEvaluate` result, read once and checked. */
+export interface BeforeEvaluateReading {
+  readonly input: EvaluationInput;
+  readonly rules: readonly Rule[];
+  /** The plugin's skips, each with a `detail` (`skipped by plugin <name>` when it gave none). */
+  readonly skipped: readonly SkippedRule[];
+  /** The JSON state to keep, when the plugin returned one. */
+  readonly state?: JsonValue | undefined;
+  /** Where the returned state stops being JSON (`$.a[1] (Date)`), when it does; it is dropped. */
+  readonly stateNotJson?: string | undefined;
+}
+
+/**
+ * Reads what a plugin's `beforeEvaluate` returned, once: every field is copied (`copyData` of a
+ * shallow copy, so getters and proxy traps run a single time) before any check, and the engine
+ * uses only that copy.
+ *
+ * Throws `TypeError` (`plugin <name> beforeEvaluate returned ...; ignored`), and the engine then
+ * commits nothing of the result, when it is not an object, when `input` is not an object with
+ * object `data` and `meta`, when `rules` is not an array of objects, or when `skipped` is
+ * neither absent nor an array of `{ rule: object, reason: string, detail?: string }`. A getter
+ * that throws while the result is read throws too. A state that is not JSON is not an error: it
+ * is reported in `stateNotJson`.
+ */
+export function readBeforeEvaluate(
+  pluginName: string,
+  returned: BeforeEvaluateResult,
+): BeforeEvaluateReading {
+  const refuse = (what: string): TypeError =>
+    new TypeError(`plugin ${pluginName} beforeEvaluate returned ${what}; ignored`);
+  const raw: unknown = returned;
+  if (!isObject(raw)) throw refuse(`${describeValue(raw)}, not a result`);
+  const snapshot = copyData({ ...returned });
+
+  const given = snapshot.input;
+  if (!isObject(given) || !isObject(given.data) || !isObject(given.meta)) {
+    throw refuse('a malformed input');
+  }
+  const input: EvaluationInput = { ...given, data: { ...given.data }, meta: { ...given.meta } };
+
+  const rules = snapshot.rules;
+  if (!Array.isArray(rules) || !rules.every(isObject)) throw refuse('a malformed rules');
+
+  const skipped = snapshot.skipped ?? [];
+  if (!Array.isArray(skipped) || !skipped.every(isSkip)) throw refuse('a malformed skipped');
+
+  const state = snapshot.state;
+  const stateNotJson = state === undefined ? undefined : findNonJson(state);
+  return {
+    input,
+    rules: [...rules],
+    skipped: skipped.map((skip) => withDetail(skip, pluginName)),
+    state: stateNotJson === undefined ? state : undefined,
+    stateNotJson,
+  };
+}
+
+/** True for `{ rule: object, reason: string, detail?: string }`. */
+export function isSkip(value: unknown): boolean {
+  if (!isObject(value) || typeof value !== 'object' || value === null) return false;
+  const detail: unknown = Reflect.get(value, 'detail');
+  return (
+    isObject(Reflect.get(value, 'rule')) &&
+    typeof Reflect.get(value, 'reason') === 'string' &&
+    (detail === undefined || typeof detail === 'string')
+  );
+}
+
+/** The skip, with `detail: 'skipped by plugin <name>'` when it has none. */
+export function withDetail(skip: SkippedRule, pluginName: string): SkippedRule {
+  return skip.detail === undefined ? { ...skip, detail: `skipped by plugin ${pluginName}` } : skip;
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { copyData } from '../../src/utils/values.js';
+import { copyData, describeThrown } from '../../src/utils/values.js';
 
 describe('copyData', () => {
   it('copies arrays, plain objects and dates at every depth', () => {
@@ -32,5 +32,14 @@ describe('copyData', () => {
     expect(copy.a).toBe(copy.b);
     expect(copy.a).not.toBe(shared);
     expect(copy.self).toBe(copy);
+  });
+});
+
+describe('describeThrown', () => {
+  it('never throws, even on a revoked proxy', () => {
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+    expect(describeThrown(proxy)).toBe('(unprintable error)');
+    expect(describeThrown(new Error('boom'))).toBe('boom');
   });
 });
