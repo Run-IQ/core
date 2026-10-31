@@ -1,5 +1,10 @@
 export interface TraceStep {
   readonly ruleId: string;
+  readonly ruleVersion: number;
+  /** The output the rule contributed to. */
+  readonly output: string;
+  /** The rule's reference to its legal or business source, when it has one. */
+  readonly sourceRef?: string | undefined;
   readonly conditionResult: boolean;
   readonly conditionDetail: unknown;
   readonly modelUsed: string;

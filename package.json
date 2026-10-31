@@ -56,13 +56,13 @@
     "vitest": "^4.1.0"
   },
   "dependencies": {
-    "@run-iq/spec": "^1.0.0-next.0",
+    "@run-iq/spec": "^1.0.0-next.1",
     "decimal.js": "^10.4.3"
   },
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=20.19.0"
   }
 }

@@ -1,5 +1,8 @@
+import type { DecisionProof, JsonValue } from '@run-iq/spec';
 import type { Rule } from './rule.js';
 import type { EvaluationTrace } from './trace.js';
+import type { DecisionOutput } from './output.js';
+import type { Diagnostic } from './diagnostic.js';
 
 export type SkipReason =
   /** `meta.effectiveDate` is outside `[effectiveFrom, effectiveUntil]` (both inclusive in core). */
@@ -24,11 +27,33 @@ export type SkipReason =
   | 'INVALID_PARAMS'
   /** The rule's tags do not intersect the input's `meta.tags`. */
   | 'TAG_MISMATCH'
-  /** A plugin meta-rule inhibited the rule. */
+  /** One of the rule's dimensions differs from, or is absent in, the input's `meta.dimensions`. */
+  | 'DIMENSION_MISMATCH'
+  /**
+   * A higher-priority rule of the same `dominanceGroup` applies; `detail` names it (`id@version`).
+   */
+  | 'DOMINATED'
+  /** A rule's `inhibit` exception targeted the rule; `detail` names the inhibiting rule. */
+  | 'INHIBITED'
+  /**
+   * The rule's output declaration differs from another rule's for the same output, or the value it
+   * computed does not match the declared type; `detail` says which.
+   */
+  | 'OUTPUT_MISMATCH'
+  /**
+   * A plugin meta-rule inhibited the rule.
+   * @deprecated Use `INHIBITED`; retirés quand plugin-fiscal migre (phase 3).
+   */
   | 'INHIBITED_BY_META_RULE'
-  /** The rule does not apply to the input's country (set by plugins). */
+  /**
+   * The rule does not apply to the input's country (set by plugins).
+   * @deprecated Use `DIMENSION_MISMATCH`; retirés quand plugin-fiscal migre (phase 3).
+   */
   | 'COUNTRY_MISMATCH'
-  /** A plugin short-circuited the evaluation, so the rule was not run. */
+  /**
+   * A `shortCircuit` exception imposed the value of the rule's output, so the rule was not run;
+   * `detail` names the short-circuiting rule. Also set by plugins that short-circuit.
+   */
   | 'SHORT_CIRCUITED'
   /** Another rule with the same priority won the conflict (`onConflict: 'first'`). */
   | 'RULE_CONFLICT'
@@ -37,6 +62,8 @@ export type SkipReason =
 
 export interface BreakdownItem {
   readonly ruleId: string;
+  /** The output the rule contributed to. */
+  readonly output: string;
   readonly contribution: unknown;
   readonly modelUsed: string;
   readonly label?: string | undefined;
@@ -46,18 +73,33 @@ export interface BreakdownItem {
 export interface SkippedRule {
   readonly rule: Rule;
   readonly reason: SkipReason;
-  /** Why, when the reason alone does not say it (e.g. the `SpecError` of an `INVALID_RULE`). */
+  /**
+   * Why, when the reason alone does not say it (e.g. the `SpecError` of an `INVALID_RULE`). The
+   * engine always sets it; it stays optional for the skips plugins return.
+   */
   readonly detail?: string | undefined;
 }
 
 export interface EvaluationResult {
   readonly requestId: string;
+  /** The default output `value`, i.e. `outputs.value.value` (0 when no rule feeds it). */
   readonly value: unknown;
+  /** Every output of the decision, by name. */
+  readonly outputs: Readonly<Record<string, DecisionOutput>>;
   readonly breakdown: readonly BreakdownItem[];
   readonly appliedRules: readonly Rule[];
   readonly skippedRules: readonly SkippedRule[];
   readonly trace: EvaluationTrace;
-  readonly snapshotId: string;
+  /** What went wrong without stopping the evaluation (hook errors...). */
+  readonly diagnostics: readonly Diagnostic[];
+  /** Sorted dotted paths read by the conditions but absent from `input.data`. */
+  readonly missingFacts: readonly string[];
+  /** The `state` each plugin returned from `beforeEvaluate`, by plugin name. */
+  readonly pluginState: Readonly<Record<string, JsonValue>>;
+  /** The sealed proof of the decision, verifiable with `verifyProof` of `@run-iq/spec`. */
+  readonly proof: DecisionProof;
+  /** `true` when the decision was returned by the `DecisionStore` for an already seen `requestId`. */
+  readonly fromStore: boolean;
   readonly engineVersion: string;
   readonly pluginVersions: Record<string, string>;
   readonly dslVersions: Record<string, string>;

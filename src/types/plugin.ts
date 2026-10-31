@@ -1,7 +1,9 @@
+import type { JsonValue } from '@run-iq/spec';
 import type { EvaluationInput } from './input.js';
 import type { EvaluationResult, SkippedRule } from './result.js';
 import type { Rule } from './rule.js';
 import type { CalculationModel } from './model.js';
+import type { OutputValue } from './output.js';
 import type { PPEError } from '../errors/PPEError.js';
 import type { ModelRegistry } from '../registry/ModelRegistry.js';
 import type { DSLRegistry } from '../registry/DSLRegistry.js';
@@ -16,6 +18,11 @@ export interface BeforeEvaluateResult {
   readonly input: EvaluationInput;
   readonly rules: ReadonlyArray<Rule>;
   readonly skipped?: ReadonlyArray<SkippedRule>;
+  /**
+   * The plugin's own state for this evaluation, kept in `EvaluationResult.pluginState[name]` and
+   * visible to `afterEvaluate`.
+   */
+  readonly state?: JsonValue | undefined;
 }
 
 export interface PPEPlugin {
@@ -36,7 +43,8 @@ export interface PPEPlugin {
 
   onError?(error: PPEError, input: EvaluationInput): void;
 
-  getModels?(): readonly CalculationModel[];
+  /** Models of any output type; those without a type argument compute numbers. */
+  getModels?(): readonly CalculationModel<OutputValue>[];
 
   teardown?(): void;
 }

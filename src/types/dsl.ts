@@ -22,5 +22,11 @@ export interface DSLEvaluator {
 
   evaluate(expression: unknown, context: Record<string, unknown>): boolean;
 
+  /**
+   * The dotted paths of the facts the expression reads (e.g. `revenue.total`). The engine reports
+   * those absent from `input.data` in `EvaluationResult.missingFacts`.
+   */
+  listVariables?(expression: unknown): string[];
+
   describeSyntax?(): DSLSyntaxDoc;
 }
