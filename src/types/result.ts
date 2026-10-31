@@ -5,7 +5,7 @@ import type { DecisionOutput } from './output.js';
 import type { Diagnostic } from './diagnostic.js';
 
 export type SkipReason =
-  /** `meta.effectiveDate` is outside `[effectiveFrom, effectiveUntil]` (both inclusive in core). */
+  /** `meta.effectiveDate` is outside the half-open window `[effectiveFrom, effectiveUntil)`. */
   | 'INACTIVE_DATE'
   /** The rule's DSL condition evaluated to false. */
   | 'CONDITION_FALSE'

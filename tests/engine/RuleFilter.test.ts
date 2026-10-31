@@ -145,4 +145,267 @@ describe('RuleFilter', () => {
     expect(result.skipped).toHaveLength(1);
     expect(result.skipped[0]!.reason).toBe('DSL_ERROR');
   });
+
+  describe('half-open window', () => {
+    it('excludes a rule whose effectiveUntil equals the evaluated date', async () => {
+      const rule = makeRule({
+        id: 'r1',
+        model: 'M',
+        effectiveFrom: new Date('2024-01-01T00:00:00.000Z'),
+        effectiveUntil: new Date('2024-06-01T00:00:00.000Z'),
+      });
+      const result = await createFilter().filter(
+        [rule],
+        makeInput(),
+        new Date('2024-06-01T00:00:00.000Z'),
+      );
+      expect(result.passed).toEqual([]);
+      expect(result.skipped).toEqual([
+        {
+          rule,
+          reason: 'INACTIVE_DATE',
+          detail:
+            'window [2024-01-01T00:00:00.000Z, 2024-06-01T00:00:00.000Z), evaluated at 2024-06-01T00:00:00.000Z',
+        },
+      ]);
+    });
+
+    it('includes a rule whose effectiveFrom equals the evaluated date', async () => {
+      const rule = makeRule({
+        id: 'r1',
+        model: 'M',
+        effectiveFrom: new Date('2024-06-01T00:00:00.000Z'),
+      });
+      const result = await createFilter().filter(
+        [rule],
+        makeInput(),
+        new Date('2024-06-01T00:00:00.000Z'),
+      );
+      expect(result.passed).toEqual([rule]);
+    });
+
+    it('states an open-ended window in the detail', async () => {
+      const rule = makeRule({
+        id: 'r1',
+        model: 'M',
+        effectiveFrom: new Date('2025-01-01T00:00:00.000Z'),
+      });
+      const result = await createFilter().filter(
+        [rule],
+        makeInput(),
+        new Date('2024-06-01T00:00:00.000Z'),
+      );
+      expect(result.skipped[0]!.detail).toBe(
+        'window [2025-01-01T00:00:00.000Z, infinity), evaluated at 2024-06-01T00:00:00.000Z',
+      );
+    });
+  });
+
+  describe('dimensions', () => {
+    const at = new Date('2024-06-01');
+
+    it('does not filter by dimensions when meta.dimensions is undefined', async () => {
+      const rule = makeRule({ id: 'r1', model: 'M', dimensions: { country: 'TG' } });
+      const result = await createFilter().filter([rule], makeInput(), at);
+      expect(result.passed).toEqual([rule]);
+      expect(result.skipped).toEqual([]);
+    });
+
+    it('excludes a rule whose dimension value differs', async () => {
+      const rule = makeRule({ id: 'r1', model: 'M', dimensions: { country: 'BJ' } });
+      const input = makeInput({ meta: { tenantId: 't', dimensions: { country: 'TG' } } });
+      const result = await createFilter().filter([rule], input, at);
+      expect(result.passed).toEqual([]);
+      expect(result.skipped).toEqual([
+        { rule, reason: 'DIMENSION_MISMATCH', detail: 'country: rule BJ, input TG' },
+      ]);
+    });
+
+    it('excludes a rule whose dimension key is absent from the input', async () => {
+      const rule = makeRule({
+        id: 'r1',
+        model: 'M',
+        dimensions: { country: 'TG', region: 'X' },
+      });
+      const input = makeInput({ meta: { tenantId: 't', dimensions: { country: 'TG' } } });
+      const result = await createFilter().filter([rule], input, at);
+      expect(result.skipped).toEqual([
+        { rule, reason: 'DIMENSION_MISMATCH', detail: 'region: rule X, input (absent)' },
+      ]);
+    });
+
+    it('passes matching and dimensionless rules', async () => {
+      const matching = makeRule({ id: 'r1', model: 'M', dimensions: { country: 'TG' } });
+      const free = makeRule({ id: 'r2', model: 'M' });
+      const input = makeInput({ meta: { tenantId: 't', dimensions: { country: 'TG' } } });
+      const result = await createFilter().filter([matching, free], input, at);
+      expect(result.passed).toEqual([matching, free]);
+    });
+
+    it('checks tags before dimensions', async () => {
+      const rule = makeRule({
+        id: 'r1',
+        model: 'M',
+        tags: ['tax'],
+        dimensions: { country: 'BJ' },
+      });
+      const input = makeInput({
+        meta: { tenantId: 't', tags: ['payroll'], dimensions: { country: 'TG' } },
+      });
+      const result = await createFilter().filter([rule], input, at);
+      expect(result.skipped.map((s) => s.reason)).toEqual(['TAG_MISMATCH']);
+    });
+  });
+
+  describe('missing facts', () => {
+    const at = new Date('2024-06-01');
+
+    class ListingDSL implements DSLEvaluator {
+      readonly dsl = 'listing';
+      readonly version = '1.0.0';
+      evaluate(): boolean {
+        return true;
+      }
+      listVariables(expression: unknown): string[] {
+        return Array.isArray(expression) ? expression.map(String) : [];
+      }
+    }
+
+    function listingFilter(): RuleFilter {
+      const registry = new DSLRegistry();
+      registry.register(new ListingDSL());
+      return new RuleFilter(registry, new PluginSandbox(500, 100));
+    }
+
+    it('reports dotted paths absent from data, sorted and unique', async () => {
+      const rules = [
+        makeRule({
+          id: 'r1',
+          model: 'M',
+          condition: { dsl: 'listing', value: ['revenue.total', 'amount', 'zone'] },
+        }),
+        makeRule({
+          id: 'r2',
+          model: 'M',
+          condition: { dsl: 'listing', value: ['revenue.total', 'a.b.c'] },
+        }),
+      ];
+      const input = makeInput({ data: { amount: 5, zone: undefined, a: { b: {} } } });
+      const result = await listingFilter().filter(rules, input, at);
+      expect(result.missingFacts).toEqual(['a.b.c', 'revenue.total', 'zone']);
+    });
+
+    it('resolves a present dotted path object by object', async () => {
+      const rule = makeRule({
+        id: 'r1',
+        model: 'M',
+        condition: { dsl: 'listing', value: ['revenue.total'] },
+      });
+      const input = makeInput({ data: { revenue: { total: 0 } } });
+      const result = await listingFilter().filter([rule], input, at);
+      expect(result.missingFacts).toEqual([]);
+    });
+
+    it('ignores conditions of rules excluded before evaluation', async () => {
+      const rule = makeRule({
+        id: 'r1',
+        model: 'M',
+        dimensions: { country: 'BJ' },
+        condition: { dsl: 'listing', value: ['revenue.total'] },
+      });
+      const input = makeInput({ meta: { tenantId: 't', dimensions: { country: 'TG' } } });
+      const result = await listingFilter().filter([rule], input, at);
+      expect(result.missingFacts).toEqual([]);
+    });
+
+    it('stays empty when the DSL has no listVariables', async () => {
+      const rule = makeRule({
+        id: 'r1',
+        model: 'M',
+        condition: { dsl: 'jsonlogic', value: { var: 'revenue.total' } },
+      });
+      const result = await createFilter([{ name: 'jsonlogic', result: true }]).filter(
+        [rule],
+        makeInput(),
+        at,
+      );
+      expect(result.missingFacts).toEqual([]);
+      expect(result.passed).toEqual([rule]);
+    });
+  });
+
+  describe('exclusion detail', () => {
+    const at = new Date('2024-06-01');
+
+    it('names the tags on TAG_MISMATCH', async () => {
+      const rule = makeRule({ id: 'r1', model: 'M', tags: ['tax', 'vat'] });
+      const input = makeInput({ meta: { tenantId: 't', tags: ['payroll'] } });
+      const result = await createFilter().filter([rule], input, at);
+      expect(result.skipped[0]!.detail).toBe('rule tags [tax, vat], input tags [payroll]');
+    });
+
+    it('sets a detail on CONDITION_FALSE', async () => {
+      const rule = makeRule({
+        id: 'r1',
+        model: 'M',
+        condition: { dsl: 'jsonlogic', value: {} },
+      });
+      const result = await createFilter([{ name: 'jsonlogic', result: false }]).filter(
+        [rule],
+        makeInput(),
+        at,
+      );
+      expect(result.skipped[0]!.detail).toBe('condition evaluated to false');
+    });
+
+    it('carries the DSL error message on DSL_ERROR', async () => {
+      const registry = new DSLRegistry();
+      registry.register({
+        dsl: 'broken',
+        version: '1.0.0',
+        evaluate: () => {
+          throw new Error('invalid expression');
+        },
+      });
+      const filter = new RuleFilter(registry, new PluginSandbox(500, 100));
+      const rule = makeRule({ id: 'r1', model: 'M', condition: { dsl: 'broken', value: 'x' } });
+      const result = await filter.filter([rule], makeInput(), at);
+      expect(result.skipped[0]).toMatchObject({
+        reason: 'DSL_ERROR',
+        detail: 'invalid expression',
+      });
+    });
+
+    it('names the DSL on DSL_NOT_FOUND', async () => {
+      const rule = makeRule({
+        id: 'r1',
+        model: 'M',
+        condition: { dsl: 'unknown_dsl', value: {} },
+      });
+      const result = await createFilter().filter([rule], makeInput(), at);
+      expect(result.skipped[0]).toMatchObject({
+        reason: 'DSL_NOT_FOUND',
+        detail: 'DSL not found: unknown_dsl',
+      });
+    });
+
+    it('describes the timeout on CONDITION_TIMEOUT', async () => {
+      const registry = new DSLRegistry();
+      registry.register({
+        dsl: 'slow',
+        version: '1.0.0',
+        evaluate: () =>
+          new Promise<boolean>((resolve) => {
+            setTimeout(() => resolve(true), 200);
+          }),
+      });
+      const filter = new RuleFilter(registry, new PluginSandbox(500, 20));
+      const rule = makeRule({ id: 'r1', model: 'M', condition: { dsl: 'slow', value: {} } });
+      const result = await filter.filter([rule], makeInput(), at);
+      expect(result.skipped[0]).toMatchObject({
+        reason: 'CONDITION_TIMEOUT',
+        detail: 'DSL "slow" evaluation timed out after 20ms',
+      });
+    });
+  });
 });
