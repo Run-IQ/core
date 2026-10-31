@@ -1,6 +1,8 @@
 import type { DSLEvaluator } from '../types/dsl.js';
 import { DSLTimeoutError } from '../errors/DSLTimeoutError.js';
 import { DSLEvaluationError } from '../errors/DSLEvaluationError.js';
+import { HookTimeoutError } from '../errors/HookTimeoutError.js';
+import type { PPEError } from '../errors/PPEError.js';
 
 export class PluginSandbox {
   constructor(
@@ -8,8 +10,17 @@ export class PluginSandbox {
     private readonly dslTimeout: number = 100,
   ) {}
 
-  async runHook<T>(fn: () => T, _pluginName: string): Promise<T> {
-    return this.withTimeout(fn, this.hookTimeout);
+  /** Runs a plugin hook; past the hook timeout, rejects with `HookTimeoutError`. */
+  async runHook<T>(
+    fn: () => T,
+    pluginName: string,
+    hook: 'beforeEvaluate' | 'afterEvaluate',
+  ): Promise<T> {
+    return this.withTimeout(
+      fn,
+      this.hookTimeout,
+      () => new HookTimeoutError(pluginName, hook, this.hookTimeout),
+    );
   }
 
   async runDSL(
@@ -21,7 +32,7 @@ export class PluginSandbox {
       return await this.withTimeout(
         () => evaluator.evaluate(expression, context),
         this.dslTimeout,
-        evaluator.dsl,
+        () => new DSLTimeoutError(evaluator.dsl, this.dslTimeout),
       );
     } catch (error) {
       if (error instanceof DSLTimeoutError) {
@@ -34,11 +45,11 @@ export class PluginSandbox {
   private withTimeout<T>(
     fn: () => T | Promise<T>,
     timeoutMs: number,
-    label = 'unknown',
+    timedOut: () => PPEError,
   ): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
-        reject(new DSLTimeoutError(label, timeoutMs));
+        reject(timedOut());
       }, timeoutMs);
 
       Promise.resolve()

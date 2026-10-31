@@ -1,4 +1,4 @@
-import { DEFAULT_OUTPUT } from '@run-iq/spec';
+import { DEFAULT_OUTPUT, canonicalize } from '@run-iq/spec';
 import type { EvaluationResult } from '../types/result.js';
 import { describeValue } from '../utils/json.js';
 
@@ -14,14 +14,19 @@ export interface AfterEvaluateTransition {
  * Accepts the result a plugin's `afterEvaluate` returned in place of `before`, the result the
  * plugin was handed a copy of (`before` itself is never written to).
  *
- * - `requestId`, `engineVersion`, `diagnostics` and `pluginState` belong to the engine: the
- *   values of `before` are kept, whatever the plugin returned.
- * - A rewritten `value` must be a finite number (the default output is a number); the output
- *   `value` of `outputs` is set to it, so that `value === outputs.value.value` holds. Any other
- *   rewritten value refuses the whole result (`result: null`).
- * - The messages say, in this order: the rewrite of `value`, then the rule ids added to and
- *   removed from `appliedRules`, then those added to and removed from `skippedRules` (ids sorted,
- *   compared as multisets, so a pseudo-rule without a version is named too).
+ * - `requestId`, `engineVersion`, `outputs`, `diagnostics` and `pluginState` belong to the
+ *   engine: the values of `before` are kept, whatever the plugin returned.
+ * - The only way to change an output is to rewrite `value`, which must be a finite number (the
+ *   default output is a number): the output `value` of `outputs` is set to it, so that
+ *   `value === outputs.value.value` holds. Any other rewritten value refuses the whole result
+ *   (`result: null`).
+ * - Returned `outputs` that differ (canonical form) both from those handed to the plugin and from
+ *   those the engine keeps, e.g. an `outputs.value.value` changed without `value`, are ignored,
+ *   with a message.
+ * - The messages say, in this order: the rewrite of `value`, the ignored change of `outputs`,
+ *   then the rule ids added to and removed from `appliedRules`, then those added to and removed
+ *   from `skippedRules` (ids sorted, compared as multisets, so a pseudo-rule without a version is
+ *   named too).
  *
  * Throws (`TypeError`...) when the plugin returned something that is not a result; the engine
  * reports it as an error of the hook.
@@ -32,7 +37,7 @@ export function acceptAfterEvaluate(
   returned: EvaluationResult,
 ): AfterEvaluateTransition {
   const messages: string[] = [];
-  let outputs = returned.outputs;
+  let outputs = before.outputs;
 
   if (returned.value !== before.value) {
     const value: unknown = returned.value;
@@ -48,10 +53,14 @@ export function acceptAfterEvaluate(
     messages.push(
       `plugin ${pluginName} rewrote output value from ${describeValue(before.value)} to ${describeValue(value)}`,
     );
-    const declared = returned.outputs[DEFAULT_OUTPUT] ?? before.outputs[DEFAULT_OUTPUT];
+    const declared = before.outputs[DEFAULT_OUTPUT];
     if (declared !== undefined) {
-      outputs = { ...returned.outputs, [DEFAULT_OUTPUT]: { ...declared, value } };
+      outputs = { ...before.outputs, [DEFAULT_OUTPUT]: { ...declared, value } };
     }
+  }
+  // Left as handed, or synced with the rewritten value by the plugin itself: no change of its own.
+  if (!sameData(returned.outputs, before.outputs) && !sameData(returned.outputs, outputs)) {
+    messages.push(`plugin ${pluginName} changed outputs directly; ignored (rewrite value instead)`);
   }
 
   const applied = changes(
@@ -81,6 +90,15 @@ export function acceptAfterEvaluate(
     },
     messages,
   };
+}
+
+/** True when both values have the same canonical form; a value without one differs. */
+function sameData(a: unknown, b: unknown): boolean {
+  try {
+    return canonicalize(a) === canonicalize(b);
+  } catch {
+    return false;
+  }
 }
 
 /** The ids of `after` not in `before`, and of `before` not in `after`, as multisets, sorted. */

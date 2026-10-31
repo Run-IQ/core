@@ -6,9 +6,9 @@ import type { PPEPlugin, PluginContext } from '../types/plugin.js';
 import type { DSLEvaluator } from '../types/dsl.js';
 import type { ISnapshotAdapter } from '../types/snapshot.js';
 import type { Diagnostic } from '../types/diagnostic.js';
-import type { PPEError } from '../errors/PPEError.js';
 import { ValidationError } from '../errors/ValidationError.js';
 import { PipelineTimeoutError } from '../errors/PipelineTimeoutError.js';
+import { UnexpectedEngineError } from '../errors/UnexpectedEngineError.js';
 import { ModelRegistry } from '../registry/ModelRegistry.js';
 import { PluginRegistry } from '../registry/PluginRegistry.js';
 import { DSLRegistry } from '../registry/DSLRegistry.js';
@@ -146,8 +146,7 @@ export class PPEEngine {
       for (const plugin of this.plugins) {
         if (!plugin.onError) continue;
         try {
-          // justification: the contract types errors as PPEError; see PPEPlugin.onError.
-          plugin.onError(error as PPEError, input);
+          plugin.onError(UnexpectedEngineError.wrap(error), input);
         } catch {
           // Contract of PPEPlugin.onError: the evaluation's own error reaches the caller.
         }
@@ -198,6 +197,7 @@ export class PPEEngine {
         const hookResult = await this.sandbox.runHook(
           () => hook.call(plugin, currentInput, currentRules),
           plugin.name,
+          'beforeEvaluate',
         );
         currentInput = hookResult.input;
         currentRules = hookResult.rules;
@@ -299,6 +299,7 @@ export class PPEEngine {
         const returned = await this.sandbox.runHook(
           () => hook.call(plugin, currentInput, handed),
           plugin.name,
+          'afterEvaluate',
         );
         const transition = acceptAfterEvaluate(plugin.name, before, returned);
         for (const message of transition.messages) {
@@ -365,8 +366,7 @@ function reportHookError(
   diagnostics.push(hookDiagnostic(plugin, hook, describeThrown(error)));
   if (!plugin.onError) return;
   try {
-    // justification: the contract types errors as PPEError; see PPEPlugin.onError.
-    plugin.onError(error as PPEError, input);
+    plugin.onError(UnexpectedEngineError.wrap(error), input);
   } catch (failure) {
     diagnostics.push(hookDiagnostic(plugin, hook, `onError failed: ${describeThrown(failure)}`));
   }

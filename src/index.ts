@@ -29,6 +29,8 @@ export {
   DSLTimeoutError,
   DSLEvaluationError,
   PipelineTimeoutError,
+  HookTimeoutError,
+  UnexpectedEngineError,
   ValidationError,
 } from './errors/index.js';
 export { ModelRegistry } from './registry/ModelRegistry.js';

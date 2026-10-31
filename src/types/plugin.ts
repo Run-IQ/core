@@ -38,7 +38,7 @@ export interface PPEPlugin {
    * - A `state` that is JSON is kept, as a copy, in `result.pluginState[name]`. Any other
    *   `state` is dropped with a diagnostic naming the first non-JSON path (`$.a[1] (Date)`); the
    *   returned input and rules are still used.
-   * - If it throws (or exceeds `timeout.hook`), its error becomes a diagnostic
+   * - If it throws (or exceeds `timeout.hook`: `HookTimeoutError`), its error becomes a diagnostic
    *   `{ source: 'hook', plugin, hook: 'beforeEvaluate', message }`, `onError` is called, and the
    *   evaluation goes on with the input and rules it had.
    */
@@ -52,13 +52,16 @@ export interface PPEPlugin {
    * to it in place never reaches the engine's records or the caller's rules. The result it
    * returns replaces the decision, except that:
    *
-   * - `requestId`, `engineVersion`, `diagnostics` and `pluginState` stay the engine's;
-   * - a rewritten `value` must be a finite number; `outputs.value.value` is set to it and a
-   *   diagnostic says `plugin <name> rewrote output value from <old> to <new>`. Any other
-   *   `value` makes the engine ignore the whole result, with a diagnostic;
+   * - `requestId`, `engineVersion`, `outputs`, `diagnostics` and `pluginState` stay the engine's;
+   *   a direct change of `outputs` is ignored with the diagnostic
+   *   `plugin <name> changed outputs directly; ignored (rewrite value instead)`;
+   * - rewriting `value` is the only way to change an output: it must be a finite number;
+   *   `outputs.value.value` is set to it and a diagnostic says
+   *   `plugin <name> rewrote output value from <old> to <new>`. Any other `value` makes the
+   *   engine ignore the whole result, with a diagnostic;
    * - rules added to or removed from `appliedRules` or `skippedRules` are named in diagnostics.
    *
-   * If it throws (or exceeds `timeout.hook`), its error becomes a diagnostic with
+   * If it throws (or exceeds `timeout.hook`: `HookTimeoutError`), its error becomes a diagnostic with
    * `hook: 'afterEvaluate'`, `onError` is called, and the previous result is kept.
    */
   afterEvaluate?(
@@ -67,8 +70,10 @@ export interface PPEPlugin {
   ): EvaluationResult | Promise<EvaluationResult>;
 
   /**
-   * Told of errors, never asked to recover from them. `error` is the value thrown as is: a
-   * `PPEError` from the engine, or whatever a hook, model or DSL threw.
+   * Told of errors, never asked to recover from them. `error` is the thrown value when it is a
+   * `PPEError`; any other thrown value (a model's `RangeError`, a hook's `TypeError`...) arrives
+   * wrapped in `UnexpectedEngineError`, whose `cause` is the value as thrown. The caller of
+   * `evaluate` always receives the original value.
    *
    * - A hook of this plugin threw: called with that error and the input the hook received,
    *   after the error's diagnostic. If `onError` throws, a second diagnostic says
