@@ -24,9 +24,17 @@ export function declarationOf(models: ModelRegistry, rule: Rule): OutputDeclarat
 
 /**
  * What two declarations are compared by: their canonical form as it is, so the order of enum
- * `values` is part of the declaration.
+ * `values` is part of the declaration, except that `rounding.at: 'output'`, the default, is
+ * dropped (R37): an absent `at` and `'output'` are the same declaration.
  */
-export const declarationKey = (declaration: OutputDeclaration): string => canonicalize(declaration);
+export function declarationKey(declaration: OutputDeclaration): string {
+  const { rounding } = declaration;
+  if (rounding?.at !== 'output') return canonicalize(declaration);
+  return canonicalize({
+    ...declaration,
+    rounding: { scale: rounding.scale, mode: rounding.mode },
+  });
+}
 
 /** The type of a declaration, for messages: `number`, `enum (low, high)`. */
 export function describeType(declaration: OutputDeclaration): string {

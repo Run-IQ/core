@@ -20,7 +20,7 @@ import {
   round,
   roundDecimal,
   roundNumber,
-  significantDigits,
+  decimalSpan,
 } from './decimalArithmetic.js';
 import type { Numeric } from './decimalArithmetic.js';
 
@@ -60,12 +60,12 @@ function roundingsOf(declaration: OutputDeclaration): {
 }
 
 /**
- * Throws `DecimalPrecisionError` when `value`, a decimal of output `name`, has more than
- * `DECIMAL_DIGITS_LIMIT` significant digits; returns it otherwise.
+ * Throws `DecimalPrecisionError` when `value`, a canonical decimal of output `name`, spans more
+ * than `DECIMAL_DIGITS_LIMIT` positions (`decimalSpan`); returns it otherwise.
  */
 function heldToLimit(name: string, declaration: OutputDeclaration, value: JsonValue): JsonValue {
   if (declaration.type !== 'decimal' || typeof value !== 'string') return value;
-  if (significantDigits(value) > DECIMAL_DIGITS_LIMIT) {
+  if (decimalSpan(value) > DECIMAL_DIGITS_LIMIT) {
     throw new DecimalPrecisionError(name, DECIMAL_DIGITS_LIMIT);
   }
   return value;
@@ -166,8 +166,9 @@ export const OutputCombiner = {
    * Under `rounding` with `at` absent or `'output'`, the combined value of `sum`, `max`, `min`
    * or `highestPriority` is rounded; a `number` is rounded in `Decimal`, then converted.
    *
-   * Every decimal handled here (each contribution, before and after its rounding, and the
-   * combined value, before and after its rounding) is held to 1000 significant digits: beyond,
+   * Every decimal handled here (each contribution as soon as it is read and after its rounding,
+   * and the combined value before and after its rounding) is held to a span of 1000 positions,
+   * from its highest to its lowest, the units included (`decimalSpan`): beyond,
    * `DecimalPrecisionError` is thrown rather than the decision returned with a rounded amount.
    *
    * `contributors` lists, in that order, the ids of the rules whose contribution entered the
@@ -291,7 +292,7 @@ export const OutputCombiner = {
    * contributor, and the value its step records. The value is read as a contribution would be
    * (canonical for a `decimal`), then the declared rounding applies: at `contribution`, to it as
    * the only contribution (`recorded.unrounded` when that changed it); otherwise to the output.
-   * Throws `DecimalPrecisionError` for a decimal beyond 1000 significant digits, and an `Error`
+   * Throws `DecimalPrecisionError` for a decimal spanning more than 1000 digits, and an `Error`
    * for a value the declaration refuses (`ExceptionProcessor` excludes such a carrier first).
    */
   impose(

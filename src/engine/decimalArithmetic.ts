@@ -2,21 +2,28 @@ import Decimal from 'decimal.js';
 import { SpecError, toCanonicalDecimal } from '@run-iq/spec';
 import type { JsonValue, OutputRounding, RoundingMode } from '@run-iq/spec';
 
-/** The most significant digits a decimal handled by the engine may have. */
+/**
+ * The most digits a decimal handled by the engine may span, from its highest to its lowest
+ * position, the units included (`decimalSpan`).
+ */
 export const DECIMAL_DIGITS_LIMIT = 1000;
 
 /**
- * The decimal.js constructors of the engine, cloned so that the global `Decimal`, which other
- * code in the process may configure, is neither read nor changed. No exponent notation.
+ * The decimal.js constructors of the engine, cloned from decimal.js's defaults
+ * (`defaults: true`), so that the global `Decimal`, which the host may configure before or
+ * after core loads (`minE`, `maxE`, `precision`, `crypto`...), is neither read nor changed.
+ * No exponent notation.
  */
 const SETTINGS: Decimal.Config = {
+  defaults: true,
   rounding: Decimal.ROUND_HALF_UP,
   toExpNeg: -9e15,
   toExpPos: 9e15,
 };
 /**
- * For exact values: no operation made with it rounds to its precision (construction,
- * comparison, `toDecimalPlaces`); sums use a clone sized to their operands.
+ * For exact values. Its precision of 20 is never applied: only construction, comparison and
+ * `toDecimalPlaces` are done with it, and none of them rounds to the precision (the latter
+ * rounds to its own number of places). Sums use a clone sized to their operands instead.
  */
 const Exact = Decimal.clone({ ...SETTINGS, precision: 20 });
 /** For `number` sums: 20 significant digits, as before decimals. */
@@ -73,10 +80,15 @@ export function numberOf(value: Decimal): number {
 export const compareNumeric = (a: Numeric, b: Numeric): number => exact(a).comparedTo(exact(b));
 
 /**
- * The significant digits of a decimal, from its first to its last non-zero digit (`"1000"` has
- * 1, `"-0.00120"` has 2, `"0"` has 1), as decimal.js counts them.
+ * The positions a canonical decimal spans, from its highest to its lowest, the units included:
+ * its length without sign and point (`"1000"` spans 4, `"-0.0012"` 5, `"12.5"` 3, `"0"` 1).
+ * Computed on the text, without parsing it.
  */
-export const significantDigits = (value: string): number => exact(value).sd();
+export function decimalSpan(canonical: string): number {
+  const sign = canonical.startsWith('-') ? 1 : 0;
+  const point = canonical.includes('.') ? 1 : 0;
+  return canonical.length - sign - point;
+}
 
 /**
  * The exact sum of decimals. The precision is sized to the operands: every digit of every
@@ -85,6 +97,8 @@ export const significantDigits = (value: string): number => exact(value).sd();
  * operands. The caller holds the result to `DECIMAL_DIGITS_LIMIT`.
  */
 export function exactSum(values: readonly string[]): Decimal {
+  // With operands held to DECIMAL_DIGITS_LIMIT, the precision is at most about twice the limit
+  // plus the digits of their count.
   const terms = values.map(exact).filter((term) => !term.isZero());
   let highest = -Infinity;
   let lowest = Infinity;
@@ -93,7 +107,10 @@ export function exactSum(values: readonly string[]): Decimal {
     lowest = Math.min(lowest, term.e - term.sd() + 1);
   }
   if (terms.length === 0) return new Exact(0);
-  const Sized = Exact.clone({ precision: highest + String(terms.length).length - lowest + 1 });
+  const Sized = Decimal.clone({
+    ...SETTINGS,
+    precision: highest + String(terms.length).length - lowest + 1,
+  });
   return terms.reduce<Decimal>((total, term) => total.plus(term), new Sized(0));
 }
 

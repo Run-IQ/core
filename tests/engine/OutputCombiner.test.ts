@@ -489,7 +489,7 @@ describe('OutputCombiner', () => {
         expect(e.output).toBe('amount');
         expect(e.limit).toBe(1000);
         expect(e.message).toBe(
-          'Output amount holds a decimal of more than 1000 significant digits: the decision is refused rather than rounded',
+          'Output amount holds a decimal spanning more than 1000 digits: the decision is refused rather than rounded',
         );
       }
     });
@@ -676,7 +676,7 @@ describe('OutputCombiner', () => {
     });
   });
 
-  describe('the limit of 1000 significant digits on every decimal (R39)', () => {
+  describe('the span limit of 1000 digits on every decimal (R39)', () => {
     const over = `1${'0'.repeat(999)}.1`; // 1001 significant digits
     const at = `1${'0'.repeat(998)}.1`; // 1000 significant digits
     const declare = (
@@ -730,6 +730,42 @@ describe('OutputCombiner', () => {
           ),
         );
       }
+    });
+
+    const sum = (values: readonly string[]): JsonValue | undefined =>
+      OutputCombiner.combine(
+        'amount',
+        declare('sum'),
+        values.map((v, i) => of(rule(`r${String(i).padStart(5, '0')}`), v)),
+        'first',
+      ).output?.value;
+
+    it('limits the positional span, trailing integer zeros and leading fraction zeros included', () => {
+      const span1000 = `1${'0'.repeat(999)}`;
+      expect(sum([span1000, '1'])).toBe(`1${'0'.repeat(998)}1`);
+      expect(sum([span1000, `-${span1000}`, '1'])).toBe('1');
+      expect(() => sum([`${span1000}0`])).toThrow(DecimalPrecisionError);
+      expect(() => sum([`0.${'0'.repeat(999)}1`])).toThrow(DecimalPrecisionError);
+      expect(() => sum([span1000, '0.1'])).toThrow(DecimalPrecisionError);
+    });
+
+    it('refuses a value of a million zeros when it is read, without computing', () => {
+      const huge = `1${'0'.repeat(1_000_000)}`;
+      for (const values of [
+        [huge, '1'],
+        [huge, `-${huge}`, '1'],
+        [`0.${'0'.repeat(1_000_000)}1`],
+      ]) {
+        expect(() => sum(values)).toThrow(DecimalPrecisionError);
+      }
+    });
+
+    it('sums 10 000 contributions of span 1000', () => {
+      const span1000 = `9.${'9'.repeat(998)}`;
+      const values = Array.from({ length: 10_000 }, (_, i) =>
+        i % 2 === 0 ? span1000 : `-${span1000}`,
+      );
+      expect(sum(values)).toBe('0');
     });
 
     it('does not limit number outputs', () => {

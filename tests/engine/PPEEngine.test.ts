@@ -417,7 +417,7 @@ describe('PPEEngine', () => {
       const input = makeInput();
       await expect(engine.evaluate(rules, input)).rejects.toThrow(DecimalPrecisionError);
       await expect(engine.evaluate(rules, input)).rejects.toThrow(
-        'Output amount holds a decimal of more than 1000 significant digits: the decision is refused rather than rounded',
+        'Output amount holds a decimal spanning more than 1000 digits: the decision is refused rather than rounded',
       );
       expect(afterEvaluate).not.toHaveBeenCalled();
       expect(await adapter.exists(input.requestId)).toBe(false);

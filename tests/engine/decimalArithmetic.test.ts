@@ -10,7 +10,7 @@ import {
   readDecimal,
   roundDecimal,
   roundNumber,
-  significantDigits,
+  decimalSpan,
 } from '../../src/engine/decimalArithmetic.js';
 
 /** decimal.js's own constant for each mode, written independently of the implementation. */
@@ -134,14 +134,15 @@ describe('decimalArithmetic', () => {
     });
   });
 
-  describe('significantDigits', () => {
-    it('counts the digits from the first to the last non-zero one', () => {
+  describe('decimalSpan', () => {
+    it('counts the positions from the highest to the lowest, the units included', () => {
       expect(DECIMAL_DIGITS_LIMIT).toBe(1000);
-      expect(significantDigits('0')).toBe(1);
-      expect(significantDigits('12.5')).toBe(3);
-      expect(significantDigits('-0.00120')).toBe(2);
-      expect(significantDigits('1000')).toBe(1);
-      expect(significantDigits(`1${'0'.repeat(999)}.1`)).toBe(1001);
+      expect(decimalSpan('0')).toBe(1);
+      expect(decimalSpan('12.5')).toBe(3);
+      expect(decimalSpan('-0.0012')).toBe(5);
+      expect(decimalSpan('1000')).toBe(4);
+      expect(decimalSpan(`1${'0'.repeat(999)}.1`)).toBe(1001);
+      expect(decimalSpan(`0.${'0'.repeat(1_000_000)}1`)).toBe(1_000_002);
     });
   });
 

@@ -610,6 +610,30 @@ describe('ExecutionPipeline', () => {
       expect([two.calls, zero.calls]).toEqual([0, 0]);
     });
 
+    it("treats rounding.at 'output' and an absent at as the same declaration", () => {
+      const absent = new ValueModel(
+        'ABSENT',
+        { type: 'decimal', combine: 'sum', rounding: { scale: 2, mode: 'halfUp' } },
+        { a: '1.005' },
+      );
+      const output = new ValueModel(
+        'OUTPUT',
+        { type: 'decimal', combine: 'sum', rounding: { scale: 2, mode: 'halfUp', at: 'output' } },
+        { b: '1.005' },
+      );
+      const result = pipelineWith(absent, output).execute(
+        [
+          makeRule({ id: 'a', model: 'ABSENT', output: 'tax' }),
+          makeRule({ id: 'b', model: 'OUTPUT', output: 'tax' }),
+        ],
+        makeInput(),
+        new TraceBuilder(),
+        NONE,
+      );
+      expect(result.skipped).toEqual([]);
+      expect(result.outputs['tax']?.value).toBe('2.01');
+    });
+
     it('excludes a rule feeding value with a decimal declaration', () => {
       const amount = new ValueModel('AMOUNT', { type: 'decimal', combine: 'sum' }, { a: '1' });
       const a = makeRule({ id: 'a', model: 'AMOUNT' });
