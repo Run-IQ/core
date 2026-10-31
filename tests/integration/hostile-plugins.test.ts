@@ -529,6 +529,51 @@ describe('rules removed without a skip', () => {
   });
 });
 
+describe('rules removed or added by beforeEvaluate (multisets)', () => {
+  it('names a dropped duplicate', async () => {
+    const p = pluginWith('p', {
+      beforeEvaluate: (input, rules) => ({ input, rules: rules.slice(1) }),
+    });
+    const d = makeRule({ id: 'd', model: 'M' });
+    const result = await engineWith([p]).evaluate([d, { ...d }], makeInput());
+    expect(result.diagnostics.map((x) => x.message)).toEqual([
+      'plugin p removed rules without a skip: d@1',
+    ]);
+  });
+
+  it('names rules that appeared, after those removed', async () => {
+    const p = pluginWith('p', {
+      beforeEvaluate: (input, rules) => ({
+        input,
+        rules: rules.map((r) => makeRule({ id: r.id, model: 'M', version: r.version + 1 })),
+      }),
+    });
+    const result = await engineWith([p]).evaluate([makeRule({ id: 'v', model: 'M' })], makeInput());
+    expect(result.diagnostics.map((x) => x.message)).toEqual([
+      'plugin p removed rules without a skip: v@1',
+      'plugin p added rules: v@2',
+    ]);
+  });
+
+  it('names an added duplicate, sorted by id then version', async () => {
+    const p = pluginWith('p', {
+      beforeEvaluate: (input, rules) => ({
+        input,
+        rules: [
+          ...rules,
+          makeRule({ id: 'z', model: 'M' }),
+          rules[0]!,
+          makeRule({ id: 'a', model: 'M', version: 3 }),
+        ],
+      }),
+    });
+    const result = await engineWith([p]).evaluate([rule()], makeInput());
+    expect(result.diagnostics.map((x) => x.message)).toEqual([
+      'plugin p added rules: a@3, r1@1, z@1',
+    ]);
+  });
+});
+
 describe('hook timer on abort', () => {
   afterEach(() => {
     vi.useRealTimers();

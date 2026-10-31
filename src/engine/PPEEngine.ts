@@ -223,17 +223,26 @@ export class PPEEngine {
         continue;
       }
       signal.throwIfAborted();
-      const dropped = removedWithoutSkip(currentRules, reading);
+      const { removed, added } = ruleChanges(currentRules, reading);
       currentInput = reading.input;
       currentRules = reading.rules;
       allSkipped.push(...reading.skipped);
       if (reading.state !== undefined) pluginState[plugin.name] = reading.state;
-      if (dropped.length > 0) {
+      if (removed.length > 0) {
         hookDiagnostics.push(
           hookDiagnostic(
             plugin,
             'beforeEvaluate',
-            `plugin ${plugin.name} removed rules without a skip: ${dropped.join(', ')}`,
+            `plugin ${plugin.name} removed rules without a skip: ${removed.join(', ')}`,
+          ),
+        );
+      }
+      if (added.length > 0) {
+        hookDiagnostics.push(
+          hookDiagnostic(
+            plugin,
+            'beforeEvaluate',
+            `plugin ${plugin.name} added rules: ${added.join(', ')}`,
           ),
         );
       }
@@ -377,19 +386,33 @@ export class PPEEngine {
 type HookName = 'beforeEvaluate' | 'afterEvaluate';
 
 /**
- * The rules a `beforeEvaluate` dropped from `rules` without listing them in `skipped`, as
- * `id@version` sorted by `compareRuleIdentity`. Rules are matched by `id@version`: the plugin's
- * copies, possibly rewritten, count as kept.
+ * What a `beforeEvaluate` did to the rules it was given, as `id@version` labels sorted by
+ * `compareRuleIdentity`, matched as multisets (a dropped or added duplicate is named):
+ * - `removed`: given rules neither in the returned `rules` nor in `skipped`;
+ * - `added`: returned rules not among the given ones.
+ * The plugin's copies, possibly rewritten, count as the same rule when their label is the same.
  */
-function removedWithoutSkip(given: ReadonlyArray<Rule>, reading: BeforeEvaluateReading): string[] {
-  const accounted = new Set([
-    ...reading.rules.map(ruleLabel),
-    ...reading.skipped.map((skip) => ruleLabel(skip.rule)),
-  ]);
-  return given
-    .filter((rule) => !accounted.has(ruleLabel(rule)))
-    .sort(compareRuleIdentity)
-    .map(ruleLabel);
+function ruleChanges(
+  given: ReadonlyArray<Rule>,
+  reading: BeforeEvaluateReading,
+): { removed: string[]; added: string[] } {
+  return {
+    removed: unmatched(given, [...reading.rules, ...reading.skipped.map((skip) => skip.rule)]),
+    added: unmatched(reading.rules, given),
+  };
+}
+
+/** The rules of `from` left once each rule of `take` cancels one of the same label. */
+function unmatched(from: ReadonlyArray<Rule>, take: ReadonlyArray<Rule>): string[] {
+  const left = new Map<string, number>();
+  for (const rule of take) left.set(ruleLabel(rule), (left.get(ruleLabel(rule)) ?? 0) + 1);
+  const rest: Rule[] = [];
+  for (const rule of from) {
+    const count = left.get(ruleLabel(rule)) ?? 0;
+    if (count > 0) left.set(ruleLabel(rule), count - 1);
+    else rest.push(rule);
+  }
+  return rest.sort(compareRuleIdentity).map(ruleLabel);
 }
 
 function hookDiagnostic(plugin: PPEPlugin, hook: HookName, message: string): Diagnostic {

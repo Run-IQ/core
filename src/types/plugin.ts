@@ -42,7 +42,8 @@ export interface PPEPlugin {
    *   result that fails a check, or a getter that throws, is a hook error (below): nothing of it
    *   is used. A skip without `detail` gets `skipped by plugin <name>`.
    * - Rules dropped from `rules` without being listed in `skipped` are named in a diagnostic,
-   *   `plugin <name> removed rules without a skip: <id@version, ...>`.
+   *   `plugin <name> removed rules without a skip: <id@version, ...>`, and rules it adds in
+   *   `plugin <name> added rules: <id@version, ...>` (multisets: duplicates count).
    * - A `state` that is JSON is kept, as a copy, in `result.pluginState[name]`. Any other
    *   `state` is dropped with a diagnostic naming the first non-JSON path (`$.a[1] (Date)`); the
    *   returned input and rules are still used.
