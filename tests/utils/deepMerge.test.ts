@@ -50,6 +50,19 @@ describe('deepMerge', () => {
     expect(Object.isFrozen(list)).toBe(false);
   });
 
+  it('shares no subtree with the base: mutating the result leaves the source untouched', () => {
+    const base = { opts: { a: 1, deep: { b: 2 } }, list: [1, { c: 3 }] };
+    const merged = deepMerge(base, { x: 1 }) as {
+      opts: { a: number; deep: { b: number } };
+      list: (number | { c: number })[];
+    };
+    merged.opts.a = 9;
+    merged.opts.deep.b = 9;
+    merged.list.push(9);
+    (merged.list[1] as { c: number }).c = 9;
+    expect(base).toEqual({ opts: { a: 1, deep: { b: 2 } }, list: [1, { c: 3 }] });
+  });
+
   it('keeps __proto__, constructor and prototype as own data keys without polluting prototypes', () => {
     const patch = JSON.parse(
       '{"__proto__":{"polluted":true},"constructor":{"prototype":{"polluted":true}},"prototype":{"polluted":true},"nested":{"__proto__":{"polluted":true}}}',

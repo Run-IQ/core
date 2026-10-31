@@ -20,6 +20,7 @@ export type { EvaluationTrace, TraceStep } from './types/trace.js';
 export {
   PPEError,
   RuleConflictError,
+  ExceptionPrecedenceError,
   ModelNotFoundError,
   DSLNotFoundError,
   SnapshotFailureError,

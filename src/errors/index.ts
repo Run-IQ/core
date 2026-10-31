@@ -7,3 +7,4 @@ export { DSLTimeoutError } from './DSLTimeoutError.js';
 export { DSLEvaluationError } from './DSLEvaluationError.js';
 export { PipelineTimeoutError } from './PipelineTimeoutError.js';
 export { ValidationError } from './ValidationError.js';
+export { ExceptionPrecedenceError } from './ExceptionPrecedenceError.js';

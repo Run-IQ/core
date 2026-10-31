@@ -16,6 +16,7 @@ import type {
 import type { Rule } from '../types/rule.js';
 import type { SkippedRule } from '../types/result.js';
 import type { ModelRegistry } from '../registry/ModelRegistry.js';
+import { ExceptionPrecedenceError } from '../errors/ExceptionPrecedenceError.js';
 import { deepMerge } from '../utils/deepMerge.js';
 import { compareRuleIdentity, resolveTie } from './resolveTie.js';
 
@@ -29,6 +30,14 @@ export interface ShortCircuit {
   readonly reason?: string;
 }
 
+/**
+ * What the exceptions did. Every input rule is in exactly one of `rules` and `skipped`, except an
+ * `EXCEPTION_MODEL` rule that fired, which is in neither and has its records in `applied`.
+ *
+ * Of the skip reasons, `INHIBITED`, `RULE_CONFLICT` and `OUTPUT_MISMATCH` (of a carrier) stop a
+ * rule from firing its exceptions. `SHORT_CIRCUITED` and `INVALID_PARAMS` bear only on the
+ * rule's own computation: a carrier skipped for them has still fired its exceptions.
+ */
 export interface ExceptionResult {
   /**
    * The rules left to evaluate, by priority descending then id@version. A substituted rule is a
@@ -41,10 +50,11 @@ export interface ExceptionResult {
   /** The short-circuited outputs, by output name, in processing order. */
   readonly shortCircuits: Map<string, ShortCircuit>;
   /**
-   * The exceptions that took effect, as the proof records them: by carrier in processing order,
-   * then in the carrier's own order. `affected` lists, sorted, the ids of the rules each one acted
-   * on (excluded, inhibited or substituted). A short-circuit that won its output is always listed,
-   * even with no rule to exclude.
+   * Every exception of every rule that fired, as the proof records it: by carrier in processing
+   * order, then in the carrier's own order. `affected` lists, sorted, the ids of the rules each
+   * one acted on (excluded, inhibited or substituted), possibly none: an inhibit whose targets
+   * were already excluded, a substitution of excluded rules, or a short-circuit outranked on its
+   * output (the winner is the one in `shortCircuits`).
    */
   readonly applied: ProofException[];
 }
@@ -92,22 +102,27 @@ function describeDeclaration(declaration: OutputDeclaration): string {
 /**
  * Applies the native rule exceptions (`inhibit`, `substitute`, `shortCircuit`) of a set of rules.
  *
- * Rules are processed by priority descending, then id@version. When its turn comes, a rule that
- * is already excluded fires nothing (an inhibited exception does not fire its own exceptions:
- * exceptions of exceptions). Otherwise its exceptions fire, unless:
- * - one of its short-circuit values does not match the declaration of that output: the rule is
+ * Rules are processed once, by priority descending then id@version, and the effects of a rule
+ * that fired are final. When its turn comes, a rule already excluded fires nothing (an inhibited
+ * exception does not fire its own exceptions: exceptions of exceptions). Otherwise it fires,
+ * unless:
+ * - one of its short-circuit values does not match the declaration of that output (the
+ *   declaration of the rules in play feeding it; `DEFAULT_OUTPUT_DECLARATION` for `value` when
+ *   none does), or no rule in play declares that output, or they declare it differently: it is
  *   skipped with `OUTPUT_MISMATCH`;
- * - it conflicts with a rule of the same priority that already fired (a short-circuit of the same
- *   output, or a substitution setting a key of a common target to another value): `resolveTie`
- *   throws or skips it with `RULE_CONFLICT`.
+ * - it inhibits a carrier that already fired, i.e. one that takes precedence over it: this is a
+ *   precedence conflict, which throws `ExceptionPrecedenceError` in `throw` mode and skips it with
+ *   `RULE_CONFLICT` in `first` mode. Inhibiting a rule without exceptions, or a carrier not yet
+ *   reached, is allowed at any priority;
+ * - it conflicts with a rule of the same priority that already fired (a short-circuit of the
+ *   same output, or a substitution setting a key of a common target, not yet excluded, to another
+ *   value): `resolveTie` throws, naming every rule of the tie, or skips it with `RULE_CONFLICT`.
  *
  * Then short-circuits apply first (the rules of a short-circuited output are `SHORT_CIRCUITED`,
- * even if also inhibited), then inhibitions (`INHIBITED`), then substitutions on the remaining
- * rules, deep-merged by priority ascending so that the highest priority writes last. Substituted
- * params that the rule's model refuses skip it with `INVALID_PARAMS`.
- *
- * Processing is sequential: a lower-priority rule may still inhibit a higher-priority one, which
- * is then excluded, but whose own exceptions have already fired.
+ * even if also inhibited, which the detail says), then inhibitions (`INHIBITED`), then
+ * substitutions on the remaining rules, deep-merged by priority ascending so that the highest
+ * priority writes last. Substituted params that the rule's model refuses skip it with
+ * `INVALID_PARAMS`.
  */
 export class ExceptionProcessor {
   constructor(private readonly models: ModelRegistry) {}
@@ -134,10 +149,27 @@ export class ExceptionProcessor {
       }
 
       const carrier = this.describeCarrier(rule, exceptions, ordered);
-      const rivals = fired.filter((other) => conflicts(carrier, other));
+      const precedent = firedTargetOf(carrier, fired);
+      if (precedent !== undefined) {
+        if (mode === 'throw') {
+          throw new ExceptionPrecedenceError(rule.id, precedent.id, label(rule), label(precedent));
+        }
+        excluded.set(rule, {
+          rule,
+          reason: 'RULE_CONFLICT',
+          detail: `inhibits ${label(precedent)}, which takes precedence and already fired`,
+        });
+        continue;
+      }
+
+      const rivals = fired.filter((other) => conflicts(carrier, other, excluded));
       if (rivals.length > 0) {
+        const tie = [...rivals.map((r) => r.rule), rule];
+        if (mode === 'throw') {
+          resolveTie(this.wholeTie(tie, ordered, excluded), 'throw');
+        }
         // Rivals fired first, so they precede `rule` in identity order: `rule` always loses.
-        const { losers } = resolveTie([...rivals.map((r) => r.rule), rule], mode);
+        const { losers } = resolveTie(tie, mode);
         const loss = losers.find((loser) => loser.rule === rule);
         if (loss !== undefined) excluded.set(rule, loss);
         continue;
@@ -181,10 +213,13 @@ export class ExceptionProcessor {
         return reason === undefined || reason === 'INHIBITED';
       });
       for (const target of affected) {
+        const inhibitor = inhibitedBy.get(target)?.carrier;
         final.set(target, {
           rule: target,
           reason: 'SHORT_CIRCUITED',
-          detail: `output ${output} short-circuited by ${label(carrier)}`,
+          detail:
+            `output ${output} short-circuited by ${label(carrier)}` +
+            (inhibitor === undefined ? '' : `; also inhibited by ${label(inhibitor)}`),
         });
       }
       shortCircuited.set(output, affected);
@@ -231,19 +266,17 @@ export class ExceptionProcessor {
     const applied: ProofException[] = [];
     fired.forEach(({ rule, exceptions }, carrierIndex) => {
       exceptions.forEach((exception, index) => {
-        let affected: Rule[] | undefined;
+        let affected: readonly Rule[];
         if (exception.kind === 'inhibit') {
           affected = [...inhibitedBy]
             .filter(([, by]) => by.carrier === rule && by.index === index)
             .map(([target]) => target);
-          if (affected.length === 0) return;
         } else if (exception.kind === 'substitute') {
-          affected = substitutedBy.get(`${carrierIndex}:${index}`);
-          if (affected === undefined) return;
+          affected = substitutedBy.get(`${carrierIndex}:${index}`) ?? [];
         } else {
           const claim = claims.get(exception.output);
-          if (claim?.carrier !== rule || claim.index !== index) return;
-          affected = shortCircuited.get(exception.output) ?? [];
+          const won = claim?.carrier === rule && claim.index === index;
+          affected = won ? (shortCircuited.get(exception.output) ?? []) : [];
         }
         applied.push({
           ruleId: rule.id,
@@ -265,7 +298,37 @@ export class ExceptionProcessor {
     };
   }
 
-  /** The detail of the first short-circuit of `rule` whose value its output's declaration refuses. */
+  /**
+   * Every rule of the tie `seed` belongs to: the carriers of the same priority, not excluded,
+   * that conflict with one of its rules, transitively. Only `throw` mode needs it, to name them.
+   */
+  private wholeTie(
+    seed: readonly Rule[],
+    ordered: readonly Rule[],
+    excluded: ReadonlyMap<Rule, SkippedRule>,
+  ): Rule[] {
+    const priority = seed[0]?.priority;
+    const candidates = ordered
+      .filter(
+        (rule) =>
+          rule.priority === priority && (rule.exceptions?.length ?? 0) > 0 && !excluded.has(rule),
+      )
+      .map((rule) => this.describeCarrier(rule, rule.exceptions ?? [], ordered));
+    const tie = candidates.filter((c) => seed.includes(c.rule));
+    for (let grown = true; grown;) {
+      grown = false;
+      for (const candidate of candidates) {
+        if (tie.includes(candidate)) continue;
+        if (tie.some((member) => conflicts(candidate, member, excluded))) {
+          tie.push(candidate);
+          grown = true;
+        }
+      }
+    }
+    return tie.map((c) => c.rule);
+  }
+
+  /** The detail of the first short-circuit of `rule` that its output's declarations refuse. */
   private findOutputMismatch(
     rule: Rule,
     exceptions: readonly RuleException[],
@@ -273,34 +336,41 @@ export class ExceptionProcessor {
   ): string | undefined {
     for (const exception of exceptions) {
       if (exception.kind !== 'shortCircuit') continue;
-      for (const declaration of this.declarationsOf(exception.output, ordered)) {
-        if (!valueMatchesOutputType(exception.value, declaration)) {
-          return (
-            `shortCircuit of ${label(rule)} on output ${exception.output}: value ` +
-            `${canonicalize(exception.value)} does not match type ${describeDeclaration(declaration)}`
-          );
-        }
+      const { output, value } = exception;
+      const at = `shortCircuit of ${label(rule)} on output ${output}`;
+      const declarations = this.declarationsOf(output, ordered);
+      const [declaration] = declarations;
+      if (declaration === undefined) return `${at}: no rule in play declares output ${output}`;
+      if (declarations.length > 1) {
+        const described = declarations
+          .map((d) => `${d.type}/${d.combine}${d.values ? ` (${d.values.join(', ')})` : ''}`)
+          .sort();
+        return `${at}: the rules feeding it declare it differently (${described.join(', ')})`;
+      }
+      if (!valueMatchesOutputType(value, declaration)) {
+        return `${at}: value ${canonicalize(value)} does not match type ${describeDeclaration(declaration)}`;
       }
     }
     return undefined;
   }
 
   /**
-   * The declarations of `output`: those of the rules feeding it (whose model is registered), or
-   * `DEFAULT_OUTPUT_DECLARATION` for the default output when no rule feeds it.
+   * The distinct declarations of `output` among the rules in play feeding it (whose model is
+   * registered), each `model.output ?? DEFAULT_OUTPUT_DECLARATION`; for the default output with
+   * no such rule, `DEFAULT_OUTPUT_DECLARATION`.
    */
   private declarationsOf(output: string, ordered: readonly Rule[]): OutputDeclaration[] {
-    const declarations: OutputDeclaration[] = [];
+    const declarations = new Map<string, OutputDeclaration>();
     for (const rule of ordered) {
       if (rule.model === EXCEPTION_MODEL || outputOf(rule) !== output) continue;
       if (!this.models.has(rule.model)) continue;
       const declaration = this.models.get(rule.model).output ?? DEFAULT_OUTPUT_DECLARATION;
-      if (!declarations.includes(declaration)) declarations.push(declaration);
+      declarations.set(canonicalize(declaration), declaration);
     }
-    if (declarations.length === 0 && output === DEFAULT_OUTPUT) {
-      declarations.push(DEFAULT_OUTPUT_DECLARATION);
+    if (declarations.size === 0 && output === DEFAULT_OUTPUT) {
+      return [DEFAULT_OUTPUT_DECLARATION];
     }
-    return declarations;
+    return [...declarations.values()];
   }
 
   private describeCarrier(
@@ -354,8 +424,22 @@ function selects(rule: Rule, selector: RuleSelector): boolean {
   );
 }
 
-/** True when two carriers of the same priority fire contradictory exceptions. */
-function conflicts(a: Carrier, b: Carrier): boolean {
+/** The first carrier that already fired among the targets of the inhibitions of `carrier`. */
+function firedTargetOf(carrier: Carrier, fired: readonly Carrier[]): Rule | undefined {
+  for (const [index, targets] of carrier.targets) {
+    if (carrier.exceptions[index]?.kind !== 'inhibit') continue;
+    const target = targets.find((t) => fired.some((f) => f.rule === t));
+    if (target !== undefined) return target;
+  }
+  return undefined;
+}
+
+/**
+ * True when two carriers of the same priority fire contradictory exceptions: a short-circuit of
+ * the same output, or substitutions setting one key of a common target, not yet excluded, to
+ * different values.
+ */
+function conflicts(a: Carrier, b: Carrier, excluded: ReadonlyMap<Rule, SkippedRule>): boolean {
   if (a.rule.priority !== b.rule.priority) return false;
   const shortCircuitOutputs = (c: Carrier): string[] =>
     c.exceptions.flatMap((e) => (e.kind === 'shortCircuit' ? [e.output] : []));
@@ -366,7 +450,14 @@ function conflicts(a: Carrier, b: Carrier): boolean {
     c: Carrier,
   ): { params: Substitute['params']; targets: readonly Rule[] }[] =>
     c.exceptions.flatMap((e, index) =>
-      e.kind === 'substitute' ? [{ params: e.params, targets: c.targets.get(index) ?? [] }] : [],
+      e.kind === 'substitute'
+        ? [
+            {
+              params: e.params,
+              targets: (c.targets.get(index) ?? []).filter((t) => !excluded.has(t)),
+            },
+          ]
+        : [],
     );
   const ofB = substitutions(b);
   return substitutions(a).some((left) =>

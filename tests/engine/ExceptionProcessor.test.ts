@@ -4,6 +4,8 @@ import type { JsonValue, OutputDeclaration, ProofException, RuleException } from
 import { ExceptionProcessor } from '../../src/engine/ExceptionProcessor.js';
 import { ModelRegistry } from '../../src/registry/ModelRegistry.js';
 import { RuleConflictError } from '../../src/errors/RuleConflictError.js';
+import { ExceptionPrecedenceError } from '../../src/errors/ExceptionPrecedenceError.js';
+import type { ExceptionResult } from '../../src/engine/ExceptionProcessor.js';
 import type { CalculationModel, ValidationResult } from '../../src/types/model.js';
 import type { Rule } from '../../src/types/rule.js';
 import { makeRule, StubModel } from '../helpers.js';
@@ -78,6 +80,29 @@ const permutations = <T>(items: readonly T[]): T[][] =>
     : items.flatMap((item, i) =>
         permutations([...items.slice(0, i), ...items.slice(i + 1)]).map((rest) => [item, ...rest]),
       );
+
+const key = (rule: Rule): string => `${rule.id}@${rule.version}`;
+
+/**
+ * Every input rule is passed on, or skipped, exactly once; or it is an EXCEPTION_MODEL carrier
+ * with at least one applied record. No rule both is INHIBITED and has an applied record.
+ */
+function expectInvariants(input: readonly Rule[], result: ExceptionResult): void {
+  const passed = result.rules.map(key);
+  const skipped = result.skipped.map((s) => key(s.rule));
+  const recorded = result.applied.map((a) => `${a.ruleId}@${a.version}`);
+  for (const rule of input) {
+    const k = key(rule);
+    const places = passed.filter((x) => x === k).length + skipped.filter((x) => x === k).length;
+    if (rule.model === EXCEPTION_MODEL && places === 0) {
+      expect(recorded, `${k} vanished`).toContain(k);
+    } else {
+      expect(places, `${k} placed ${places} times`).toBe(1);
+    }
+  }
+  const inhibited = result.skipped.filter((s) => s.reason === 'INHIBITED').map((s) => key(s.rule));
+  for (const k of inhibited) expect(recorded, `${k} inhibited yet fired`).not.toContain(k);
+}
 
 describe('ExceptionProcessor', () => {
   const processor = new ExceptionProcessor(makeRegistry());
@@ -166,7 +191,102 @@ describe('ExceptionProcessor', () => {
       ]);
       expect(result.applied).toEqual([
         { ruleId: 'X', version: 1, kind: 'inhibit', affected: ['B'] },
+        { ruleId: 'Y', version: 1, kind: 'inhibit', affected: [] },
       ]);
+    });
+
+    it('records an inhibit whose targets were all already excluded, with no affected rule', () => {
+      const x = carrier('X', 9000, [inhibit(['B'])]);
+      const y = carrier('Y', 100, [inhibit(['B'])]);
+      const b = makeRule({ id: 'B', model: 'M' });
+      const result = processor.apply([b, y, x], 'throw');
+      expect(result.skipped).toEqual([
+        { rule: b, reason: 'INHIBITED', detail: 'inhibited by X@1' },
+      ]);
+      expect(result.applied).toEqual([
+        { ruleId: 'X', version: 1, kind: 'inhibit', affected: ['B'] },
+        { ruleId: 'Y', version: 1, kind: 'inhibit', affected: [] },
+      ]);
+      expectInvariants([b, y, x], result);
+    });
+
+    it('lets a low priority rule inhibit a higher one that carries no exception', () => {
+      const h = makeRule({ id: 'H', model: 'M', priority: 9000 });
+      const l = carrier('L', 10, [inhibit(['H'])]);
+      const result = processor.apply([h, l], 'throw');
+      expect(result.rules).toEqual([]);
+      expect(result.skipped).toEqual([
+        { rule: h, reason: 'INHIBITED', detail: 'inhibited by L@1' },
+      ]);
+      expect(result.applied).toEqual([
+        { ruleId: 'L', version: 1, kind: 'inhibit', affected: ['H'] },
+      ]);
+    });
+
+    describe('precedence: inhibiting a carrier that already fired', () => {
+      const sc = carrier('SC', 9000, [{ kind: 'shortCircuit', output: 'value', value: 5 }]);
+      const i = carrier('I', 100, [inhibit(['SC'])]);
+      const v = makeRule({ id: 'V', model: 'M' });
+      const d1 = makeRule({ id: 'd1', model: 'M', priority: 3, exceptions: [inhibit(['d2'])] });
+      const d2 = makeRule({ id: 'd2', model: 'M', priority: 2 });
+      const d3 = makeRule({ id: 'd3', model: 'M', priority: 1, exceptions: [inhibit(['d1'])] });
+
+      it('throws ExceptionPrecedenceError in throw mode, whatever the order', () => {
+        for (const order of permutations([sc, i, v])) {
+          try {
+            processor.apply(order, 'throw');
+            expect.unreachable('should have thrown');
+          } catch (e) {
+            if (!(e instanceof ExceptionPrecedenceError)) throw e;
+            expect(e.code).toBe('EXCEPTION_PRECEDENCE');
+            expect(e.inhibitorId).toBe('I');
+            expect(e.targetId).toBe('SC');
+            expect(e.message).toBe(
+              'Exception precedence conflict: I@1 inhibits SC@1, which takes precedence and already fired',
+            );
+          }
+        }
+      });
+
+      it("skips the newcomer with RULE_CONFLICT in 'first' mode, and it fires nothing", () => {
+        const expected = processor.apply([sc, i, v], 'first');
+        expect(expected.rules).toEqual([]);
+        expect(expected.skipped).toEqual([
+          {
+            rule: i,
+            reason: 'RULE_CONFLICT',
+            detail: 'inhibits SC@1, which takes precedence and already fired',
+          },
+          { rule: v, reason: 'SHORT_CIRCUITED', detail: 'output value short-circuited by SC@1' },
+        ]);
+        expect(expected.applied).toEqual([
+          { ruleId: 'SC', version: 1, kind: 'shortCircuit', affected: ['V'] },
+        ]);
+        for (const order of permutations([sc, i, v])) {
+          const result = processor.apply(order, 'first');
+          expect(result).toEqual(expected);
+          expectInvariants(order, result);
+        }
+      });
+
+      it("refuses an upward inhibition chain in 'first' mode", () => {
+        const expected = processor.apply([d1, d2, d3], 'first');
+        expect(expected.rules).toEqual([d1]);
+        expect(expected.skipped).toEqual([
+          { rule: d2, reason: 'INHIBITED', detail: 'inhibited by d1@1' },
+          {
+            rule: d3,
+            reason: 'RULE_CONFLICT',
+            detail: 'inhibits d1@1, which takes precedence and already fired',
+          },
+        ]);
+        for (const order of permutations([d1, d2, d3])) {
+          const result = processor.apply(order, 'first');
+          expect(result).toEqual(expected);
+          expectInvariants(order, result);
+          expect(() => processor.apply(order, 'throw')).toThrow(ExceptionPrecedenceError);
+        }
+      });
     });
 
     it('lists affected ids sorted', () => {
@@ -200,7 +320,44 @@ describe('ExceptionProcessor', () => {
       const result = processor.apply([x, b], 'throw');
       expect(result.rules).toEqual([b]);
       expect(result.skipped).toEqual([]);
-      expect(result.applied).toEqual([]);
+      expect(result.applied).toEqual([{ ruleId: 'X', version: 1, kind: 'inhibit', affected: [] }]);
+      expectInvariants([x, b], result);
+    });
+
+    it('still fires the exceptions of a carrier that is SHORT_CIRCUITED or has INVALID_PARAMS', () => {
+      const sc = carrier('SC', 9000, [{ kind: 'shortCircuit', output: 'value', value: 5 }]);
+      const k = makeRule({ id: 'K', model: 'M', priority: 10, exceptions: [inhibit(['W'])] });
+      const w = makeRule({ id: 'W', model: 'M', output: 'other' });
+      const t = makeRule({
+        id: 'T',
+        model: 'Rate',
+        params: { rate: 0.5 },
+        output: 'rate',
+        priority: 10,
+        exceptions: [inhibit(['W2'])],
+      });
+      const s = carrier('S', 8000, [substitute(['T'], { rate: 'bad' })]);
+      const w2 = makeRule({ id: 'W2', model: 'M', output: 'other' });
+      const input = [sc, k, w, t, s, w2];
+      const result = processor.apply(input, 'throw');
+      expect(result.rules).toEqual([]);
+      expect(result.skipped.map((x) => [x.rule.id, x.reason, x.detail])).toEqual([
+        ['W', 'INHIBITED', 'inhibited by K@1'],
+        ['W2', 'INHIBITED', 'inhibited by T@1'],
+        ['K', 'SHORT_CIRCUITED', 'output value short-circuited by SC@1'],
+        [
+          'T',
+          'INVALID_PARAMS',
+          'after substitution by S@1: rate must be a number; see the model docs',
+        ],
+      ]);
+      expect(result.applied).toEqual([
+        { ruleId: 'SC', version: 1, kind: 'shortCircuit', affected: ['K'] },
+        { ruleId: 'S', version: 1, kind: 'substitute', affected: ['T'] },
+        { ruleId: 'K', version: 1, kind: 'inhibit', affected: ['W'] },
+        { ruleId: 'T', version: 1, kind: 'inhibit', affected: ['W2'] },
+      ]);
+      expectInvariants(input, result);
     });
 
     it('returns rules without exceptions untouched', () => {
@@ -294,8 +451,45 @@ describe('ExceptionProcessor', () => {
         { rule: t, reason: 'INHIBITED', detail: 'inhibited by I@1' },
       ]);
       expect(result.applied).toEqual([
+        { ruleId: 'S', version: 1, kind: 'substitute', affected: [] },
         { ruleId: 'I', version: 1, kind: 'inhibit', affected: ['T'] },
       ]);
+    });
+
+    it('does not see a conflict on a target already excluded when the carriers fire', () => {
+      const t = makeRule({ id: 'T', model: 'M' });
+      const a = carrier('A', 500, [substitute(['T'], { r: 1 })]);
+      const b = carrier('B', 500, [substitute(['T'], { r: 2 })]);
+      const x = carrier('X', 9000, [inhibit(['T'])]);
+      for (const order of permutations([t, a, b, x])) {
+        const result = processor.apply(order, 'throw');
+        expect(result.rules).toEqual([]);
+        expect(result.skipped).toEqual([
+          { rule: t, reason: 'INHIBITED', detail: 'inhibited by X@1' },
+        ]);
+        expect(result.applied).toEqual([
+          { ruleId: 'X', version: 1, kind: 'inhibit', affected: ['T'] },
+          { ruleId: 'A', version: 1, kind: 'substitute', affected: [] },
+          { ruleId: 'B', version: 1, kind: 'substitute', affected: [] },
+        ]);
+        expectInvariants(order, result);
+      }
+    });
+
+    it('names every rule of a substitution tie in throw mode', () => {
+      const t = makeRule({ id: 'T', model: 'Rate', params: { rate: 0.5 } });
+      const a = carrier('A', 500, [substitute(['T'], { rate: 0.1 })]);
+      const b = carrier('B', 500, [substitute(['T'], { rate: 0.2 })]);
+      const c = carrier('C', 500, [substitute(['T'], { rate: 0.3 })]);
+      for (const order of permutations([t, a, b, c])) {
+        try {
+          processor.apply(order, 'throw');
+          expect.unreachable('should have thrown');
+        } catch (e) {
+          if (!(e instanceof RuleConflictError)) throw e;
+          expect(e.ruleIds).toEqual(['A', 'B', 'C']);
+        }
+      }
     });
 
     it('applies non-conflicting substitutions of equal priority together', () => {
@@ -405,12 +599,21 @@ describe('ExceptionProcessor', () => {
       const low = carrier('SC-low', 100, [
         { kind: 'shortCircuit', output: 'riskLevel', value: 'low' },
       ]);
-      const result = processor.apply([low, high], 'throw');
+      const r1 = risk('R1');
+      const result = processor.apply([low, r1, high], 'throw');
       expect(result.shortCircuits.get('riskLevel')).toEqual({ rule: high, value: 'high' });
-      expect(result.skipped).toEqual([]);
-      expect(result.applied).toEqual([
-        { ruleId: 'SC-high', version: 1, kind: 'shortCircuit', affected: [] },
+      expect(result.skipped).toEqual([
+        {
+          rule: r1,
+          reason: 'SHORT_CIRCUITED',
+          detail: 'output riskLevel short-circuited by SC-high@1',
+        },
       ]);
+      expect(result.applied).toEqual([
+        { ruleId: 'SC-high', version: 1, kind: 'shortCircuit', affected: ['R1'] },
+        { ruleId: 'SC-low', version: 1, kind: 'shortCircuit', affected: [] },
+      ]);
+      expectInvariants([low, r1, high], result);
     });
 
     it('does not short-circuit from an inhibited carrier', () => {
@@ -435,7 +638,11 @@ describe('ExceptionProcessor', () => {
       const r1 = risk('R1');
       const result = processor.apply([r1, i, sc], 'throw');
       expect(result.skipped).toEqual([
-        { rule: r1, reason: 'SHORT_CIRCUITED', detail: 'output riskLevel short-circuited by SC@1' },
+        {
+          rule: r1,
+          reason: 'SHORT_CIRCUITED',
+          detail: 'output riskLevel short-circuited by SC@1; also inhibited by I@1',
+        },
       ]);
       expect(result.applied).toEqual([
         { ruleId: 'SC', version: 1, kind: 'shortCircuit', affected: ['R1'] },
@@ -529,13 +736,38 @@ describe('ExceptionProcessor', () => {
       expect(processor.apply([good], 'throw').skipped).toEqual([]);
     });
 
-    it('accepts any value on an output no rule declares', () => {
+    it('skips the carrier with OUTPUT_MISMATCH on an output no rule in play declares', () => {
       const sc = carrier('SC', 9000, [
         { kind: 'shortCircuit', output: 'flags', value: { any: ['thing'] } },
       ]);
       const result = processor.apply([sc], 'throw');
-      expect(result.skipped).toEqual([]);
-      expect(result.shortCircuits.get('flags')).toEqual({ rule: sc, value: { any: ['thing'] } });
+      expect(result.skipped).toEqual([
+        {
+          rule: sc,
+          reason: 'OUTPUT_MISMATCH',
+          detail: 'shortCircuit of SC@1 on output flags: no rule in play declares output flags',
+        },
+      ]);
+      expect(result.shortCircuits.size).toBe(0);
+      expect(result.applied).toEqual([]);
+    });
+
+    it('skips the carrier with OUTPUT_MISMATCH when the rules feeding the output disagree', () => {
+      const sc = carrier('SC', 9000, [
+        { kind: 'shortCircuit', output: 'riskLevel', value: 'high' },
+      ]);
+      const r1 = risk('R1');
+      const n1 = makeRule({ id: 'N1', model: 'M', output: 'riskLevel' });
+      const result = processor.apply([n1, sc, r1], 'throw');
+      expect(result.skipped).toEqual([
+        {
+          rule: sc,
+          reason: 'OUTPUT_MISMATCH',
+          detail:
+            'shortCircuit of SC@1 on output riskLevel: the rules feeding it declare it differently (enum/highestPriority (low, high), number/sum)',
+        },
+      ]);
+      expect(result.rules).toEqual([n1, r1]);
     });
   });
 
@@ -569,7 +801,8 @@ describe('ExceptionProcessor', () => {
         const result = processor.apply(order, 'first');
         expect(result).toEqual(expected);
         expect([...result.shortCircuits.keys()]).toEqual([...expected.shortCircuits.keys()]);
+        expectInvariants(order, result);
       }
-    });
+    }, 60_000);
   });
 });
