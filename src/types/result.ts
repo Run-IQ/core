@@ -42,12 +42,12 @@ export type SkipReason =
   | 'OUTPUT_MISMATCH'
   /**
    * A plugin meta-rule inhibited the rule.
-   * @deprecated Use `INHIBITED`; retirés quand plugin-fiscal migre (phase 3).
+   * @deprecated Use `INHIBITED`. Removed when plugin-fiscal migrates (phase 3).
    */
   | 'INHIBITED_BY_META_RULE'
   /**
    * The rule does not apply to the input's country (set by plugins).
-   * @deprecated Use `DIMENSION_MISMATCH`; retirés quand plugin-fiscal migre (phase 3).
+   * @deprecated Use `DIMENSION_MISMATCH`. Removed when plugin-fiscal migrates (phase 3).
    */
   | 'COUNTRY_MISMATCH'
   /**

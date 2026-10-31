@@ -80,8 +80,10 @@ describe('CalculationModel (outputs)', () => {
   });
 
   it('accepts a typed model that declares its output', () => {
-    expectTypeOf(obligations.output).toEqualTypeOf<OutputDeclaration | undefined>();
-    expectTypeOf(obligations.calculate).returns.toEqualTypeOf<
+    expectTypeOf<CalculationModel<string[]>['output']>().toEqualTypeOf<
+      OutputDeclaration | undefined
+    >();
+    expectTypeOf<ReturnType<CalculationModel<string[]>['calculate']>>().toEqualTypeOf<
       string[] | CalculationOutput<string[]>
     >();
   });
@@ -202,13 +204,9 @@ describe('DecisionStore and FactEncoder', () => {
     >();
   });
 
-  it('encodes a non-JSON fact into JSON', () => {
-    const decimal: FactEncoder = {
-      name: 'decimal',
-      test: (value) => typeof value === 'bigint',
-      encode: (value) => String(value),
-    };
-    expectTypeOf(decimal.encode).returns.toEqualTypeOf<JsonValue>();
-    expectTypeOf(decimal.test).returns.toEqualTypeOf<boolean>();
+  it('encodes a fact with the shared signature', () => {
+    expectTypeOf<FactEncoder['name']>().toEqualTypeOf<string>();
+    expectTypeOf<FactEncoder['test']>().toEqualTypeOf<(value: unknown) => boolean>();
+    expectTypeOf<FactEncoder['encode']>().toEqualTypeOf<(value: unknown) => JsonValue>();
   });
 });

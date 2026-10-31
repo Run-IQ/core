@@ -9,7 +9,7 @@ export default defineConfig({
       enabled: true,
       include: ['tests/**/*.test-d.ts'],
       tsconfig: './tsconfig.test.json',
-      // Errors in src belong to `npm run typecheck`; vitest only judges the type tests.
+      // Transitional: removed in Task 10 once src typechecks (phase 2).
       ignoreSourceErrors: true,
     },
     coverage: {
