@@ -1,5 +1,6 @@
 import type { Rule } from '../types/rule.js';
 import type { EvaluationInput } from '../types/input.js';
+import type { Diagnostic } from '../types/diagnostic.js';
 import type { SkippedRule } from '../types/result.js';
 import type { DSLRegistry } from '../registry/DSLRegistry.js';
 import type { PluginSandbox } from '../security/PluginSandbox.js';
@@ -12,17 +13,38 @@ export interface FilterResult {
   readonly skipped: readonly SkippedRule[];
   /** Sorted, unique dotted paths read by the evaluated conditions but absent from `input.data`. */
   readonly missingFacts: readonly string[];
+  /** Non-fatal problems met while filtering (a failing `listVariables`). */
+  readonly diagnostics: readonly Diagnostic[];
 }
 
 type Exclusion = Pick<SkippedRule, 'reason'> & { readonly detail: string };
 
+/**
+ * Resolves a dotted path object by object. Only own enumerable properties count (inherited ones
+ * such as `constructor`, and array `length`, are not facts); an own array index does. A
+ * non-object intermediate makes the path unresolvable.
+ */
 function resolvePath(data: Record<string, unknown>, path: string): unknown {
   let current: unknown = data;
   for (const key of path.split('.')) {
-    if (typeof current !== 'object' || current === null || !(key in current)) return undefined;
+    if (typeof current !== 'object' || current === null) return undefined;
+    if (!Object.prototype.propertyIsEnumerable.call(current, key)) return undefined;
     current = Reflect.get(current, key);
   }
   return current;
+}
+
+function describeThrown(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  try {
+    return String(error);
+  } catch {
+    return '(unprintable error)';
+  }
+}
+
+function formatDate(date: Date): string {
+  return Number.isNaN(date.getTime()) ? 'Invalid Date' : date.toISOString();
 }
 
 export class RuleFilter {
@@ -39,9 +61,10 @@ export class RuleFilter {
     const passed: Rule[] = [];
     const skipped: SkippedRule[] = [];
     const missing = new Set<string>();
+    const diagnostics: Diagnostic[] = [];
 
     for (const rule of rules) {
-      const exclusion = await this.checkRule(rule, input, now, missing);
+      const exclusion = await this.checkRule(rule, input, now, missing, diagnostics);
       if (exclusion) {
         skipped.push({ rule, reason: exclusion.reason, detail: exclusion.detail });
       } else {
@@ -49,7 +72,7 @@ export class RuleFilter {
       }
     }
 
-    return { passed, skipped, missingFacts: [...missing].sort() };
+    return { passed, skipped, missingFacts: [...missing].sort(), diagnostics };
   }
 
   private async checkRule(
@@ -57,13 +80,14 @@ export class RuleFilter {
     input: EvaluationInput,
     now: Date,
     missing: Set<string>,
+    diagnostics: Diagnostic[],
   ): Promise<Exclusion | null> {
     // 1. Date filter: half-open window [effectiveFrom, effectiveUntil)
     if (!isEffectiveAt(rule, now)) {
-      const until = rule.effectiveUntil === null ? 'infinity' : rule.effectiveUntil.toISOString();
+      const until = rule.effectiveUntil === null ? 'infinity' : formatDate(rule.effectiveUntil);
       return {
         reason: 'INACTIVE_DATE',
-        detail: `window [${rule.effectiveFrom.toISOString()}, ${until}), evaluated at ${now.toISOString()}`,
+        detail: `window [${formatDate(rule.effectiveFrom)}, ${until}), evaluated at ${formatDate(now)}`,
       };
     }
 
@@ -87,7 +111,7 @@ export class RuleFilter {
         if (actual !== expected) {
           return {
             reason: 'DIMENSION_MISMATCH',
-            detail: `${key}: rule ${expected}, input ${actual ?? '(absent)'}`,
+            detail: `${key}: rule ${expected}, ${actual === undefined ? `input has no ${key}` : `input ${actual}`}`,
           };
         }
       }
@@ -100,12 +124,21 @@ export class RuleFilter {
         return { reason: 'DSL_NOT_FOUND', detail: `DSL not found: ${rule.condition.dsl}` };
       }
 
-      try {
-        if (evaluator.listVariables) {
+      // listVariables only feeds missingFacts: its failure never changes the rule's outcome.
+      if (evaluator.listVariables) {
+        try {
           for (const path of evaluator.listVariables(rule.condition.value)) {
-            if (resolvePath(input.data, path) === undefined) missing.add(path);
+            if (path !== '' && resolvePath(input.data, path) === undefined) missing.add(path);
           }
+        } catch (error) {
+          diagnostics.push({
+            source: 'engine',
+            message: `listVariables failed for ${rule.id}@${rule.version} (${rule.condition.dsl}): ${describeThrown(error)}`,
+          });
         }
+      }
+
+      try {
         const result = await this.sandbox.runDSL(evaluator, rule.condition.value, input.data);
         if (!result) {
           return { reason: 'CONDITION_FALSE', detail: 'condition evaluated to false' };
