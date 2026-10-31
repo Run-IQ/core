@@ -14,6 +14,7 @@ import { InputSanitizer } from '../security/InputSanitizer.js';
 import { RuleFilter } from './RuleFilter.js';
 import { RuleValidator } from '../security/RuleValidator.js';
 import { DominanceResolver } from './DominanceResolver.js';
+import { ExceptionProcessor } from './ExceptionProcessor.js';
 import { ExecutionPipeline } from './ExecutionPipeline.js';
 import { TraceBuilder } from './TraceBuilder.js';
 import { PluginSandbox } from '../security/PluginSandbox.js';
@@ -47,6 +48,7 @@ export class PPEEngine {
   private readonly dslRegistry: DSLRegistry;
   private readonly ruleFilter: RuleFilter;
   private readonly ruleValidator: RuleValidator;
+  private readonly exceptionProcessor: ExceptionProcessor;
   private readonly dominanceResolver: DominanceResolver;
   private readonly executionPipeline: ExecutionPipeline;
   private readonly sandbox: PluginSandbox;
@@ -71,6 +73,7 @@ export class PPEEngine {
 
     this.ruleFilter = new RuleFilter(this.dslRegistry, this.sandbox);
     this.ruleValidator = new RuleValidator(this.modelRegistry, config.onChecksumMismatch ?? 'skip');
+    this.exceptionProcessor = new ExceptionProcessor(this.modelRegistry);
     this.dominanceResolver = new DominanceResolver();
     this.executionPipeline = new ExecutionPipeline(this.modelRegistry);
 
@@ -173,14 +176,19 @@ export class PPEEngine {
     const filterResult = await this.ruleFilter.filter(currentRules, currentInput, now);
     allSkipped.push(...filterResult.skipped);
 
-    // Step 6: Dominance resolution
+    // Step 6: Native exceptions. The short-circuited values and the exception records are
+    // consumed by the output combination (Task 8) and the proof (Task 10).
+    const exceptionResult = this.exceptionProcessor.apply(filterResult.passed, this.conflictMode);
+    allSkipped.push(...exceptionResult.skipped);
+
+    // Step 7: Dominance resolution
     const { kept: resolvedRules, skipped: dominanceSkipped } = this.dominanceResolver.resolve(
-      filterResult.passed,
+      exceptionResult.rules,
       this.conflictMode,
     );
     allSkipped.push(...dominanceSkipped);
 
-    // Step 7: Execution pipeline
+    // Step 8: Execution pipeline
     const pipelineResult = this.executionPipeline.execute(
       resolvedRules,
       currentInput,
@@ -216,7 +224,7 @@ export class PPEEngine {
       timestamp: new Date(),
     };
 
-    // Step 8: Plugin afterEvaluate hooks
+    // Step 9: Plugin afterEvaluate hooks
     for (const plugin of this.plugins) {
       if (plugin.afterEvaluate) {
         try {
@@ -239,7 +247,7 @@ export class PPEEngine {
       }
     }
 
-    // Step 9: Snapshot — use the rules that actually executed (post-plugin)
+    // Step 10: Snapshot — use the rules that actually executed (post-plugin)
     const snapshot = SnapshotSerializer.serialize(
       currentInput,
       currentRules,
@@ -252,7 +260,7 @@ export class PPEEngine {
 
     const snapshotId = await this.snapshotManager.save(snapshot);
 
-    // Step 10: Return with snapshotId
+    // Step 11: Return with snapshotId
     return { ...result, snapshotId };
   }
 

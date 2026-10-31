@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { EXCEPTION_MODEL } from '@run-iq/spec';
 import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import { ValidationError } from '../../src/errors/ValidationError.js';
 import { VERSION } from '../../src/utils/version.js';
@@ -121,6 +122,27 @@ describe('PPEEngine', () => {
     // Pipeline should continue despite hook error
     expect(result.value).toBe(100);
     expect(errorPlugin.errors).toHaveLength(1);
+  });
+
+  it('applies native exceptions before evaluation and never evaluates an exception-only rule', async () => {
+    const engine = new PPEEngine({
+      plugins: [new StubPlugin('test', [new StubModel('M', 100)])],
+      dsls: [],
+      strict: false,
+    });
+    const exception = makeRule({
+      id: 'X',
+      model: EXCEPTION_MODEL,
+      priority: 9000,
+      exceptions: [{ kind: 'inhibit', targets: { ids: ['B'] } }],
+    });
+    const rules = [exception, makeRule({ id: 'A', model: 'M' }), makeRule({ id: 'B', model: 'M' })];
+    const result = await engine.evaluate(rules, makeInput());
+    expect(result.value).toBe(100);
+    expect(result.appliedRules.map((r) => r.id)).toEqual(['A']);
+    expect(result.skippedRules.map((s) => [s.rule.id, s.reason, s.detail])).toEqual([
+      ['B', 'INHIBITED', 'inhibited by X@1'],
+    ]);
   });
 
   it('supports dryRun mode (no snapshot saved)', async () => {
