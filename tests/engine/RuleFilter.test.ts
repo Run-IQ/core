@@ -170,6 +170,28 @@ describe('RuleFilter', () => {
       ]);
     });
 
+    it('formats an invalid effectiveUntil defensively', async () => {
+      // makeRule seals a checksum, which refuses an invalid date: corrupt the rule afterwards.
+      const rule = {
+        ...makeRule({
+          id: 'r1',
+          model: 'M',
+          effectiveFrom: new Date('2025-01-01T00:00:00.000Z'),
+        }),
+        effectiveUntil: new Date('x'),
+      };
+      const result = await createFilter().filter(
+        [rule],
+        makeInput(),
+        new Date('2024-06-01T00:00:00.000Z'),
+      );
+      expect(result.skipped[0]).toMatchObject({
+        reason: 'INACTIVE_DATE',
+        detail:
+          'window [2025-01-01T00:00:00.000Z, Invalid Date), evaluated at 2024-06-01T00:00:00.000Z',
+      });
+    });
+
     it('includes a rule whose effectiveFrom equals the evaluated date', async () => {
       const rule = makeRule({
         id: 'r1',
@@ -397,6 +419,27 @@ describe('RuleFilter', () => {
         ]);
       },
     );
+
+    it('adds nothing when listVariables throws midway through a lazy iterable', async () => {
+      const registry = new DSLRegistry();
+      registry.register({
+        dsl: 'lazy',
+        version: '1.0.0',
+        evaluate: () => true,
+        listVariables: function* () {
+          yield 'first.missing';
+          throw new Error('midway');
+        },
+      });
+      const filter = new RuleFilter(registry, new PluginSandbox(500, 100));
+      const rule = makeRule({ id: 'r1', model: 'M', condition: { dsl: 'lazy', value: {} } });
+      const result = await filter.filter([rule], makeInput(), at);
+      expect(result.missingFacts).toEqual([]);
+      expect(result.passed).toEqual([rule]);
+      expect(result.diagnostics).toEqual([
+        { source: 'engine', message: 'listVariables failed for r1@1 (lazy): midway' },
+      ]);
+    });
 
     it('stays empty when the DSL has no listVariables', async () => {
       const rule = makeRule({

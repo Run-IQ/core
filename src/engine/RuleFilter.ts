@@ -127,9 +127,11 @@ export class RuleFilter {
       // listVariables only feeds missingFacts: its failure never changes the rule's outcome.
       if (evaluator.listVariables) {
         try {
-          for (const path of evaluator.listVariables(rule.condition.value)) {
-            if (path !== '' && resolvePath(input.data, path) === undefined) missing.add(path);
-          }
+          // Collected first: a lazy iterable throwing midway contributes nothing.
+          const absent = [...evaluator.listVariables(rule.condition.value)].filter(
+            (path) => path !== '' && resolvePath(input.data, path) === undefined,
+          );
+          for (const path of absent) missing.add(path);
         } catch (error) {
           diagnostics.push({
             source: 'engine',
