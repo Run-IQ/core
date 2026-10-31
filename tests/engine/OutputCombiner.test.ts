@@ -476,7 +476,7 @@ describe('OutputCombiner', () => {
       ).toThrow(RuleConflictError);
     });
 
-    it('throws DecimalPrecisionError beyond 1000 significant digits, without a result', () => {
+    it('throws DecimalPrecisionError beyond a span of 1000 digits, without a result', () => {
       const under = `1${'0'.repeat(998)}`; // 999 integer digits: 1000 with the fraction
       expect(sumOf(under, '0.1')).toBe(`${under}.1`);
       const big = `${under}0`; // 1000 integer digits: 1001 with the fraction
@@ -677,8 +677,8 @@ describe('OutputCombiner', () => {
   });
 
   describe('the span limit of 1000 digits on every decimal (R39)', () => {
-    const over = `1${'0'.repeat(999)}.1`; // 1001 significant digits
-    const at = `1${'0'.repeat(998)}.1`; // 1000 significant digits
+    const over = `1${'0'.repeat(999)}.1`; // spans 1001 digits
+    const at = `1${'0'.repeat(998)}.1`; // spans 1000 digits
     const declare = (
       combine: OutputDeclaration['combine'],
       rounding?: OutputRounding,
@@ -710,7 +710,7 @@ describe('OutputCombiner', () => {
       }
     });
 
-    it('accepts a contribution of exactly 1000 significant digits', () => {
+    it('accepts a contribution of a span of exactly 1000 digits', () => {
       for (const combine of ['max', 'min', 'highestPriority', 'sum'] as const) {
         expect(
           OutputCombiner.combine('amount', declare(combine), [of(rule('a'), at)], 'throw').output

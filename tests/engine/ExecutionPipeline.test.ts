@@ -649,7 +649,7 @@ describe('ExecutionPipeline', () => {
       expect(amount.calls).toBe(0);
     });
 
-    it('throws DecimalPrecisionError when an exact sum exceeds 1000 significant digits', () => {
+    it('throws DecimalPrecisionError when an exact sum exceeds a span of 1000 digits', () => {
       const pipeline = pipelineWith(
         new ValueModel(
           'BIG',
@@ -752,7 +752,7 @@ describe('ExecutionPipeline', () => {
       expect(result.outputs['amount']?.value).toBe(2.8);
     });
 
-    it('throws DecimalPrecisionError on an imposed decimal beyond 1000 significant digits', () => {
+    it('throws DecimalPrecisionError on an imposed decimal beyond a span of 1000 digits', () => {
       expect(() =>
         imposing({ type: 'decimal', combine: 'highestPriority' }, `1${'0'.repeat(999)}.1`),
       ).toThrow(DecimalPrecisionError);

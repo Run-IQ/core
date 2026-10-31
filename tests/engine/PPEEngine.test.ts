@@ -389,7 +389,7 @@ describe('PPEEngine', () => {
       expect(plugin.errors.every((e) => e instanceof OutputNotFiniteError)).toBe(true);
     });
 
-    it('refuses an exact sum beyond 1000 significant digits instead of a partial decision', async () => {
+    it('refuses an exact sum beyond a span of 1000 digits instead of a partial decision', async () => {
       const big = new ValueModel(
         'BIG',
         { type: 'decimal', combine: 'sum' },
@@ -425,7 +425,7 @@ describe('PPEEngine', () => {
       expect(plugin.errors.every((e) => e instanceof DecimalPrecisionError)).toBe(true);
     });
 
-    it('refuses a short-circuit beyond 1000 significant digits instead of a partial decision', async () => {
+    it('refuses a short-circuit beyond a span of 1000 digits instead of a partial decision', async () => {
       const amount = new ValueModel('AMOUNT', { type: 'decimal', combine: 'max' }, { a: '1' });
       const afterEvaluate = vi.fn((_input: EvaluationInput, result: EvaluationResult) => result);
       const watcher: PPEPlugin = {
