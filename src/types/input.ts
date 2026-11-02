@@ -1,4 +1,4 @@
-import type { JsonValue } from '@run-iq/spec';
+import type { FactAssertion, JsonValue } from '@run-iq/spec';
 
 export interface EvaluationInput {
   readonly data: Record<string, unknown>;
@@ -8,14 +8,31 @@ export interface EvaluationInput {
     readonly userId?: string | undefined;
     readonly tags?: readonly string[] | undefined;
     readonly context?: Record<string, unknown> | undefined;
+    /**
+     * The evaluation date. It is `meta.dates.effective` in the canonical input (`normalizeMeta`);
+     * given with `dates.effective`, the two must name the same instant or date.
+     */
     readonly effectiveDate?: Date | undefined;
     /**
-     * The input's value on each dimension (e.g. `{ country: 'TG' }`), one value per dimension.
-     * When present, a rule applies only if each of its dimensions matches (`matchDimension` of
-     * `@run-iq/spec`: a value, or `{ anyOf, ... }`); `DIMENSION_MISMATCH` otherwise, and a
-     * dimension the input lacks is a mismatch. Absent means no dimension filtering.
+     * Named dates (`effective`, `facture`...): a `Date`, a civil date `YYYY-MM-DD` or a date-time
+     * with `Z` or an offset. Written canonically by `normalizeMeta`: a civil date stays civil, any
+     * other becomes `YYYY-MM-DDTHH:MM:SS.sssZ`. Read as `/$dates/<name>`.
      */
-    readonly dimensions?: Readonly<Record<string, string>> | undefined;
+    readonly dates?: Readonly<Record<string, string | Date>> | undefined;
+    /**
+     * The provenance of facts, dates and dimensions, by pointer of the evaluation context
+     * (`/revenue/total`, `/$dates/facture`).
+     */
+    readonly assertions?: Readonly<Record<string, FactAssertion>> | undefined;
+    /**
+     * The input's value on each dimension (e.g. `{ country: 'TG' }`), or its several values
+     * (`{ country: ['FR', 'US'] }`, written sorted without duplicates, one value as a string by
+     * `normalizeMeta`). When present, a rule applies only if each of its dimensions matches
+     * (`matchDimension` of `@run-iq/spec`: a value, or `{ anyOf, ... }`); `DIMENSION_MISMATCH`
+     * otherwise, and a dimension the input lacks is a mismatch. Absent means no dimension
+     * filtering. Read as `/$dimensions/<name>`.
+     */
+    readonly dimensions?: Readonly<Record<string, string | readonly string[]>> | undefined;
   };
 }
 
