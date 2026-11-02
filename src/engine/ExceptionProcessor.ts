@@ -338,7 +338,7 @@ export class ExceptionProcessor {
       )
       .map((rule) => this.describeCarrier(rule, rule.exceptions ?? [], ordered));
     const tie = candidates.filter((c) => seed.includes(c.rule));
-    for (let grown = true; grown; ) {
+    for (let grown = true; grown;) {
       grown = false;
       for (const candidate of candidates) {
         if (tie.includes(candidate)) continue;
