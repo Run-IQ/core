@@ -1,4 +1,3 @@
-import { DEFAULT_OUTPUT, DEFAULT_OUTPUT_DECLARATION } from '@run-iq/spec';
 import type { JsonValue } from '@run-iq/spec';
 import type { Rule } from '../types/rule.js';
 import type { EvaluationInput } from '../types/input.js';
@@ -8,6 +7,7 @@ import type { DSLEvaluator } from '../types/dsl.js';
 import type { ISnapshotAdapter } from '../types/snapshot.js';
 import type { Diagnostic } from '../types/diagnostic.js';
 import { ValidationError } from '../errors/ValidationError.js';
+import { DuplicateRequestError } from '../errors/DuplicateRequestError.js';
 import { PipelineTimeoutError } from '../errors/PipelineTimeoutError.js';
 import { UnexpectedEngineError } from '../errors/UnexpectedEngineError.js';
 import { ModelRegistry } from '../registry/ModelRegistry.js';
@@ -186,10 +186,7 @@ export class PPEEngine {
 
     // Step 2: Idempotence check
     const alreadyExists = await this.snapshotManager.exists(input.requestId);
-    if (alreadyExists) {
-      // Return a minimal result indicating cached
-      return this.buildCachedResult(input);
-    }
+    if (alreadyExists) throw new DuplicateRequestError(input.requestId);
 
     // Step 3: Rule validation (checksum of the source rules)
     const initialValidation = this.ruleValidator.validate(rules);
@@ -364,33 +361,6 @@ export class PPEEngine {
 
     // Step 11: Return the result; spec dropped `snapshotId`, the proof replaces it
     return result;
-  }
-
-  /**
-   * The stub of an already seen `requestId`: nothing is evaluated, `meta.cached` says so (it
-   * took the place of `snapshotId: 'cached'`; Task 10 returns the stored decision instead).
-   */
-  private buildCachedResult(input: EvaluationInput): UnsealedResult {
-    const { type, combine } = DEFAULT_OUTPUT_DECLARATION;
-    return {
-      requestId: input.requestId,
-      value: 0,
-      outputs: {
-        [DEFAULT_OUTPUT]: { name: DEFAULT_OUTPUT, type, combine, value: 0, contributors: [] },
-      },
-      breakdown: [],
-      appliedRules: [],
-      skippedRules: [],
-      trace: { steps: [], totalDurationMs: 0 },
-      diagnostics: [],
-      missingFacts: [],
-      pluginState: {},
-      engineVersion: ENGINE_VERSION,
-      pluginVersions: {},
-      dslVersions: {},
-      timestamp: new Date(),
-      meta: { cached: true },
-    };
   }
 }
 

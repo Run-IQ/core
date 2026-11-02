@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { PPEEngine } from '../../src/engine/PPEEngine.js';
+import { DuplicateRequestError } from '../../src/errors/DuplicateRequestError.js';
 import { makeRule, makeInput, StubModel, StubPlugin, InMemorySnapshotAdapter } from '../helpers.js';
 
 describe('Idempotence', () => {
-  it('returns cached result for duplicate requestId', async () => {
+  it('refuses a duplicate requestId with DUPLICATE_REQUEST', async () => {
     const adapter = new InMemorySnapshotAdapter();
     const model = new StubModel('M', 500);
     const plugin = new StubPlugin('test', [model]);
@@ -23,28 +24,18 @@ describe('Idempotence', () => {
     expect(result1.value).toBe(500);
 
     // Second call with same requestId
-    const result2 = await engine.evaluate(rules, input);
-    // The stub of an already seen requestId: nothing evaluated, marked by meta.cached (Task 10
-    // replaces the stub by the stored decision, `fromStore`).
-    expect(result2).toEqual({
-      requestId: 'idempotent-001',
-      value: 0,
-      outputs: {
-        value: { name: 'value', type: 'number', combine: 'sum', value: 0, contributors: [] },
-      },
-      breakdown: [],
-      appliedRules: [],
-      skippedRules: [],
-      trace: { steps: [], totalDurationMs: 0 },
-      diagnostics: [],
-      missingFacts: [],
-      pluginState: {},
-      engineVersion: result1.engineVersion,
-      pluginVersions: {},
-      dslVersions: {},
-      timestamp: result2.timestamp,
-      meta: { cached: true },
+    // A requestId already seen is refused by name, never answered with a stub (Task 10 returns
+    // the stored decision with fromStore: true).
+    const error = await engine.evaluate(rules, input).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(DuplicateRequestError);
+    expect(error).toMatchObject({
+      name: 'DuplicateRequestError',
+      code: 'DUPLICATE_REQUEST',
+      message:
+        'request idempotent-001 was already evaluated; its stored decision is returned from Task 10',
     });
-    expect(result1).not.toHaveProperty('meta');
   });
 });

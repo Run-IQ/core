@@ -39,6 +39,7 @@ export {
   HookTimeoutError,
   UnexpectedEngineError,
   ValidationError,
+  DuplicateRequestError,
 } from './errors/index.js';
 export { ModelRegistry } from './registry/ModelRegistry.js';
 export { DSLRegistry } from './registry/DSLRegistry.js';
