@@ -297,6 +297,7 @@ describe('what 9L adds to the public surface', () => {
       | 'maxReferentialNodes'
       | 'maxGroupDepth'
       | 'maxRuleLeaves'
+      | 'maxHookLeaves'
     >();
     expectTypeOf(DEFAULT_LIMITS).toEqualTypeOf<Readonly<EngineLimits>>();
     // @ts-expect-error DEFAULT_LIMITS is frozen: it is read-only for the compiler too

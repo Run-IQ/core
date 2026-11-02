@@ -6,7 +6,8 @@ import { EngineLimitError } from '../errors/EngineLimitError.js';
 import { InputCopier } from '../input/copyInput.js';
 import type { RuleValidator } from '../security/RuleValidator.js';
 import { compareRuleIdentity } from './resolveTie.js';
-import { isObject, ruleLabel } from '../utils/values.js';
+import { ruleLabel } from '../utils/values.js';
+import { NotPlain, isDateObject, isPlainPrototype } from '../utils/plain.js';
 
 // The plugin trust boundary, in one place. The engine owns its state; a plugin is handed views of
 // it and never the objects the engine holds; what a plugin returns is read once, bounded, copied
@@ -26,23 +27,65 @@ export const PLUGIN_SKIP_REASONS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Reads `value` once into data the engine owns: plain objects and lists are copied (keys and
- * length read once) and frozen, a `Date` is copied, and the walk is bounded by
- * `limits.maxInputLeaves` and `limits.maxInputDepth` without recursion (`EngineLimitError`). A
+ * The rule objects the engine holds. They are deep-frozen, hold no `Date` and no object that is
+ * not plain, so nobody can change them: they are handed to hooks as they are, and a hook that
+ * returns one of them returns the engine's own object (nothing to copy or to check again).
+ */
+const ENGINE_RULES = new WeakSet<object>();
+
+/** The leaves read from one list or one return, against one declared limit. */
+export class Budget {
+  leaves = 0;
+
+  constructor(
+    private readonly name: 'maxHookLeaves' | 'maxInputLeaves',
+    private readonly max: number,
+  ) {}
+
+  /** Counts `count` more leaves; past the limit it throws `EngineLimitError`. */
+  add(count: number): void {
+    this.leaves += count;
+    if (this.leaves > this.max) throw new EngineLimitError(this.name, this.max, this.leaves);
+  }
+}
+
+/** How a value is read. */
+export interface ReadOptions {
+  /** Which limit holds the leaves of this one value (`maxInputLeaves`, or `maxRuleLeaves`). */
+  readonly leafLimit?: 'maxInputLeaves' | 'maxRuleLeaves';
+  /** The aggregate the leaves of this value also count against. */
+  readonly budget?: Budget;
+  /** Write every `Date` as its canonical string (a rule holds none). */
+  readonly datesAsStrings?: boolean;
+}
+
+/**
+ * Reads `value` once into data the engine owns: plain objects (those of `@run-iq/spec`, a foreign
+ * realm's included) and lists are copied (keys, length and prototype read once) and frozen, a
+ * `Date` is copied (or written as a string), and the walk is bounded by the leaf limit,
+ * `limits.maxInputDepth` and the aggregate `budget`, without recursion (`EngineLimitError`). A
  * property that cannot be read, a hole, a symbol key or a non-enumerable property throws `Error`
- * naming it (`<what>/a could not be read: ...`). Objects that are not plain are kept by
- * reference and never frozen: the caller of this function checks what may remain.
+ * naming it (`<what>/a could not be read: ...`). An object that is not plain is replaced by a
+ * marker that spec refuses: nothing is ever kept by reference.
  */
 export function readBounded(
   value: unknown,
   limits: Readonly<EngineLimits>,
   what: string,
-  leafLimit: 'maxInputLeaves' | 'maxRuleLeaves' = 'maxInputLeaves',
+  options: ReadOptions = {},
 ): unknown {
-  const copier = new InputCopier(limits, leafLimit);
-  const copy = copier.copy(value, what);
-  if (copier.reasons.length > 0) throw new Error(copier.reasons.join('; '));
-  return copy;
+  const copier = new InputCopier(
+    limits,
+    options.leafLimit ?? 'maxInputLeaves',
+    options.datesAsStrings ?? false,
+  );
+  try {
+    const copy = copier.copy(value, what);
+    if (copier.reasons.length > 0) throw new Error(copier.reasons.join('; '));
+    return copy;
+  } finally {
+    options.budget?.add(copier.leaves);
+  }
 }
 
 /**
@@ -72,40 +115,110 @@ export function resultLimits(
 const RESULT_DEPTH = 16;
 
 /**
- * Reads a list a plugin returned (`rules`, `skipped`): its `length` once, at most `maxRules`
- * items, each item read once and bounded on its own by `maxRuleLeaves` and `maxInputDepth` (a list of 100 000 rules is not one tree).
- * Throws `Error` for a value that is not a list or has a hole, `EngineLimitError` past a bound.
+ * Reads a list (`rules`, `skipped`): its `length` once, at most `maxRules` items, each item read
+ * once and bounded on its own by `maxRuleLeaves` and `maxInputDepth`, all of them against the
+ * `budget` (a list of 100 000 rules is not one tree, but it is one bound). An item that is one of
+ * the engine's own rules is kept as it is. Throws `TypeError` for a value that is not a list or
+ * has a hole, `EngineLimitError` past a bound.
  */
-export function readItems(value: unknown, limits: Readonly<EngineLimits>, what: string): unknown[] {
+export function readItems(
+  value: unknown,
+  limits: Readonly<EngineLimits>,
+  what: string,
+  budget: Budget,
+): unknown[] {
   if (!Array.isArray(value)) throw new TypeError(`${what} is not a list`);
   const length = value.length;
-  if (!Number.isSafeInteger(length) || length < 0)
-    throw new TypeError(`${what} has no valid length`);
+  if (!Number.isSafeInteger(length) || length < 0) throw new TypeError(`${what} has no valid length`);
   if (length > limits.maxRules) throw new EngineLimitError('maxRules', limits.maxRules, length);
   const items: unknown[] = [];
   for (let index = 0; index < length; index += 1) {
     if (!Object.hasOwn(value, index)) {
       throw new TypeError(`${what} has a hole at index ${index}: lists must be dense`);
     }
-    items.push(readBounded(value[index], limits, `${what}/${index}`, 'maxRuleLeaves'));
+    const item: unknown = value[index];
+    if (typeof item === 'object' && item !== null && ENGINE_RULES.has(item)) {
+      items.push(item);
+      continue;
+    }
+    items.push(
+      readBounded(item, limits, `${what}/${index}`, {
+        leafLimit: 'maxRuleLeaves',
+        budget,
+        datesAsStrings: true,
+      }),
+    );
   }
   return items;
 }
 
 /**
- * A fresh, frozen copy of `value`: containers are new and frozen, a `Date` is a new `Date`, and
- * anything else (a non-plain object) is kept as it is and left unfrozen, as it is not the
- * engine's. Recursion is bounded by the depth the data was read with.
+ * Reads the skips a hook returned: a list, each skip a plain record with exactly the keys
+ * `rule`, `reason` and `detail` (read once each, by the reader, into a new frozen record; an
+ * accessor runs once). Returns the records unchecked as to their values: the caller checks the
+ * copy. Throws `TypeError` for a skip that is not such a record.
+ */
+export function readSkips(
+  value: unknown,
+  limits: Readonly<EngineLimits>,
+  budget: Budget,
+): { rule: unknown; reason: unknown; detail: unknown }[] {
+  if (!Array.isArray(value)) throw new TypeError('skipped is not a list');
+  const length = value.length;
+  if (!Number.isSafeInteger(length) || length < 0) throw new TypeError('skipped has no valid length');
+  if (length > limits.maxRules) throw new EngineLimitError('maxRules', limits.maxRules, length);
+  const skips: { rule: unknown; reason: unknown; detail: unknown }[] = [];
+  for (let index = 0; index < length; index += 1) {
+    if (!Object.hasOwn(value, index)) {
+      throw new TypeError(`skipped has a hole at index ${index}: lists must be dense`);
+    }
+    const raw: unknown = value[index];
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+      throw new TypeError('a malformed skipped');
+    }
+    if (!isPlainPrototype(Object.getPrototypeOf(raw))) throw new TypeError('a malformed skipped');
+    const record: Record<string, unknown> = {};
+    for (const key of Reflect.ownKeys(raw)) {
+      if (key !== 'rule' && key !== 'reason' && key !== 'detail') {
+        throw new TypeError('a malformed skipped');
+      }
+      // Read once, here: a getter answers once and the answer is the one that is checked.
+      // justification: `raw` is a plain object (checked above); `key` is one of three names.
+      record[key] = (raw as Record<string, unknown>)[key];
+    }
+    const rule = record['rule'];
+    skips.push({
+      rule:
+        typeof rule === 'object' && rule !== null && ENGINE_RULES.has(rule)
+          ? rule
+          : readBounded(rule, limits, `skipped/${index}/rule`, {
+              leafLimit: 'maxRuleLeaves',
+              budget,
+              datesAsStrings: true,
+            }),
+      reason: record['reason'],
+      detail: record['detail'],
+    });
+  }
+  return skips;
+}
+
+/**
+ * A fresh, frozen copy of `value` for a view: containers are new and frozen, a `Date` is a new
+ * `Date`, and anything the engine owns (a rule) is returned as it is. Nothing that is not plain is
+ * kept: it is replaced by a marker. Recursion is bounded by the depth the data was read with.
  */
 // justification: every `as T` below returns a copy of the same shape as the argument.
 export function frozenCopyOf<T>(value: T): T {
   if (typeof value !== 'object' || value === null) return value;
-  if (value instanceof Date) return new Date(value.getTime()) as T;
+  if (ENGINE_RULES.has(value)) return value;
+  // justification: `isDateObject` passed, so `getTime` returns a number.
+  if (isDateObject(value)) return new Date(Date.prototype.getTime.call(value) as number) as T;
   if (Array.isArray(value)) {
     return Object.freeze(value.map((item: unknown) => frozenCopyOf(item))) as T;
   }
   const proto: unknown = Object.getPrototypeOf(value);
-  if (proto !== Object.prototype && proto !== null) return value;
+  if (!isPlainPrototype(proto)) return new NotPlain('an object') as T;
   const copy: Record<string, unknown> = proto === null ? Object.create(null) : {};
   for (const [key, item] of Object.entries(value)) {
     Object.defineProperty(copy, key, {
@@ -169,11 +282,10 @@ export class RuleLedger {
    * @param seen - the labels of every source rule, valid or not.
    */
   constructor(rules: ReadonlyArray<Rule>, seen: Iterable<string>) {
-    this.live = rules.map((rule) => ({
-      rule,
-      label: ruleLabel(rule),
-      checksum: String(rule.checksum),
-    }));
+    this.live = rules.map((rule) => {
+      ENGINE_RULES.add(rule);
+      return { rule, label: ruleLabel(rule), checksum: String(rule.checksum) };
+    });
     this.everSeen = new Set(seen);
   }
 
@@ -182,9 +294,13 @@ export class RuleLedger {
     return this.live.map((entry) => entry.rule);
   }
 
-  /** A fresh frozen array of fresh frozen copies: what a hook is handed. */
+  /**
+   * A fresh frozen array of the engine's own rules: what a hook is handed. The rules are
+   * deep-frozen and hold nothing writable, so they are not copied again; only the array is new,
+   * because the ledger never reads one back.
+   */
   view(): readonly Rule[] {
-    return Object.freeze(this.live.map((entry) => ruleView(entry.rule)));
+    return Object.freeze(this.live.map((entry) => entry.rule));
   }
 
   /**
@@ -207,11 +323,23 @@ export class RuleLedger {
       throw new Error(`plugin ${pluginName} ${message}`);
     };
 
+    // The common case: the hook handed back exactly the engine's own rules, in order, and skipped
+    // none. Every entry is used once, nothing is added, and there is nothing to check.
+    if (
+      returned.skipped.length === 0 &&
+      returned.rules.length === this.live.length &&
+      this.live.every((entry, index) => returned.rules[index] === entry.rule)
+    ) {
+      return { rules: this.current(), skipped: [], added: [] };
+    }
+
     const byPair = new Map<string, Entry[]>();
     const byLabel = new Set<string>();
     for (const entry of this.live) {
       const pair = pairOf(entry.label, entry.checksum);
-      byPair.set(pair, [...(byPair.get(pair) ?? []), entry]);
+      const entries = byPair.get(pair);
+      if (entries === undefined) byPair.set(pair, [entry]);
+      else entries.push(entry);
       byLabel.add(entry.label);
     }
     const givenCount = new Map<string, number>();
@@ -249,7 +377,8 @@ export class RuleLedger {
       const label = ruleLabel(rule);
       const entry = take(rule);
       if (entry !== undefined) {
-        if (!intact(rule)) {
+        // The engine's own object is frozen and cannot have changed; a copy is checked.
+        if (!ENGINE_RULES.has(rule) && !intact(rule)) {
           fail(`rewrote rule ${label}: its content is not the one it was given`);
         }
         used.add(entry);
@@ -265,6 +394,10 @@ export class RuleLedger {
         );
       }
       if (added.has(label)) fail(`added rule ${label} more than once`);
+      // A model registered after the evaluation began is not one the rules were validated against.
+      if (!validator.knowsModel(rule)) {
+        fail(`added rule ${label}, whose model ${String(rule.model)} is not registered`);
+      }
       const [refused] = validator.validate([rule]).invalid;
       if (refused !== undefined) fail(`added rule ${label}: ${refused.detail ?? refused.reason}`);
       added.set(label, rule);
@@ -275,13 +408,18 @@ export class RuleLedger {
       const label = ruleLabel(skip.rule);
       if (!byLabel.has(label)) fail(`skipped rule ${label}, which it was not given`);
       const entry = take(skip.rule);
-      if (entry === undefined || !intact(skip.rule)) {
+      if (entry === undefined || (!ENGINE_RULES.has(skip.rule) && !intact(skip.rule))) {
         fail(`skipped rule ${label} with a content other than the one it was given`);
       }
       // justification: the `if` above throws when `entry` is `undefined`.
       used.add(entry as Entry);
       skipped.push(
-        Object.freeze({ rule: (entry as Entry).rule, reason: skip.reason, detail: skip.detail }),
+        Object.freeze({
+          rule: (entry as Entry).rule,
+          reason: skip.reason,
+          // The plugin's name is always in the record, prefixed by the engine.
+          detail: `plugin ${pluginName}: ${skip.detail ?? 'skipped'}`,
+        }),
       );
     }
 
@@ -294,6 +432,7 @@ export class RuleLedger {
     // Committed only now: every check passed.
     for (const label of added.keys()) this.everSeen.add(label);
     const addedRules = [...added.values()];
+    for (const rule of addedRules) ENGINE_RULES.add(rule);
     this.live = [
       ...this.live.filter((entry) => kept.has(entry)),
       ...addedRules.map((rule) => ({
@@ -308,27 +447,4 @@ export class RuleLedger {
       added: [...added.keys()].sort(),
     };
   }
-}
-
-/** True for a plain object whose own keys are among `allowed`, and that has all of `required`. */
-export function hasExactKeys(
-  value: unknown,
-  required: readonly string[],
-  optional: readonly string[],
-): boolean {
-  if (!isObject(value) || typeof value !== 'object' || value === null) return false;
-  const keys = Reflect.ownKeys(value);
-  return (
-    keys.every(
-      (key) => typeof key === 'string' && (required.includes(key) || optional.includes(key)),
-    ) && required.every((key) => keys.includes(key))
-  );
-}
-
-/**
- * A fresh frozen copy of a rule for a model or a hook: its own objects and its own `Date`s, so
- * that a write cannot reach the rule the engine holds.
- */
-export function ruleView(rule: Rule): Rule {
-  return frozenCopyOf(rule);
 }

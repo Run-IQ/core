@@ -28,6 +28,7 @@ describe('DEFAULT_LIMITS', () => {
       maxReferentialNodes: 100_000,
       maxGroupDepth: 64,
       maxRuleLeaves: 100_000,
+      maxHookLeaves: 8_000_000,
     });
     expect(Object.isFrozen(DEFAULT_LIMITS)).toBe(true);
   });

@@ -36,6 +36,12 @@ export interface EngineLimits {
    * the engine reads, whether given by the caller, returned by a hook, or held in a skip.
    */
   maxRuleLeaves: number;
+  /**
+   * Leaves read, in total, from one list of rules or from one return of a hook (its rules, skips,
+   * state and data together). A hook cannot make the engine read more, however many rules it
+   * repeats or how big they are.
+   */
+  maxHookLeaves: number;
 }
 
 /**
@@ -56,6 +62,7 @@ export const DEFAULT_LIMITS: Readonly<EngineLimits> = Object.freeze({
   maxReferentialNodes: 100_000,
   maxGroupDepth: 64,
   maxRuleLeaves: 100_000,
+  maxHookLeaves: 8_000_000,
 });
 
 /** The limits a caller may give: any of them, or `undefined` for the default. */

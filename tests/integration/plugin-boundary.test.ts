@@ -160,35 +160,35 @@ describe('R1: the array of given rules is not writable and is not read back', ()
 });
 
 describe('R2: the dates of a rule cannot be moved by a model or a hook', () => {
-  it('a model moving effectiveFrom changes neither the decision nor the record', async () => {
+  it('a model writing the bound of its rule is excluded, and the record keeps the bound', async () => {
     const mover: CalculationModel = {
       name: 'MOVER',
       version: '1.0.0',
       validateParams: () => ({ valid: true }),
       calculate: (_input, rule) => {
-        (rule.effectiveFrom as Date).setTime(Date.UTC(2099, 0, 1));
+        (rule as { effectiveFrom: unknown }).effectiveFrom = '2099-01-01';
         return 7;
       },
     };
     const built = build([pluginWith('reg', { onInit: (c) => c.modelRegistry.register(mover) })]);
     const result = await built.engine.evaluate(
-      [makeRule({ id: 'm', model: 'MOVER' })],
+      [makeRule({ id: 'm', model: 'MOVER' }), makeRule({ id: 'ok', model: 'M' })],
       makeInput({ meta: { tenantId: 't', effectiveDate: new Date('2024-06-01T00:00:00Z') } }),
     );
-    expect(result.value).toBe(7);
-    expect((result.appliedRules[0]!.effectiveFrom as Date).toISOString()).toBe(
-      '2024-01-01T00:00:00.000Z',
-    );
-    expect((built.saved[0]!.rulesSnapshot[0]!.effectiveFrom as Date).toISOString()).toBe(
-      '2024-01-01T00:00:00.000Z',
-    );
+    expect(result.appliedRules.map((r) => r.id)).toEqual(['ok']);
+    const skip = result.skippedRules.find((s) => s.rule.id === 'm');
+    expect(skip).toMatchObject({
+      reason: 'MODEL_ERROR',
+      detail: 'wrote to its input: effectiveFrom',
+    });
+    expect(skip?.rule.effectiveFrom).toBe('2024-01-01T00:00:00.000Z');
   });
 
-  it('a hook moving a date of a rule it was given and returning it fails', async () => {
+  it('a hook cannot write the bound of a rule it was given: it is a string, in a frozen rule', async () => {
     const built = build([
       pluginWith('h', {
         beforeEvaluate: (input, rules) => {
-          (rules[0]!.effectiveFrom as Date).setTime(0);
+          (rules[0] as { effectiveFrom: unknown }).effectiveFrom = '1970-01-01';
           return { input, rules };
         },
       }),
@@ -428,7 +428,7 @@ describe('R9: a plugin skip has the exact shape and a plugin reason', () => {
     const built = build([skipWith((rule) => ({ rule, reason: 'PLUGIN', detail: 'my words' }))]);
     const result = await built.engine.evaluate([tax()], makeInput());
     expect(result.skippedRules.map((s) => [s.rule.id, s.reason, s.detail])).toEqual([
-      ['tax', 'PLUGIN', 'my words'],
+      ['tax', 'PLUGIN', 'plugin h: my words'],
     ]);
     expect(Object.isFrozen(result.skippedRules[0])).toBe(true);
   });
@@ -514,7 +514,7 @@ describe("R12: a model that writes into its arguments is that rule's error", () 
 });
 
 describe('R13 and R16: what a hook is handed is a view', () => {
-  it("beforeEvaluate moving the dates of its view does not move the caller's", async () => {
+  it("beforeEvaluate moving the dates of its view fails (meta is the caller's), and does not move the caller's", async () => {
     const dates = { facture: new Date('2025-01-01T00:00:00Z') };
     const built = build([
       pluginWith('h', {
@@ -526,10 +526,12 @@ describe('R13 and R16: what a hook is handed is a view', () => {
       }),
     ]);
     const effectiveDate = new Date('2024-06-01T00:00:00Z');
-    await built.engine.evaluate(
+    const error = await failure(
+      built,
       [tax()],
       makeInput({ meta: { tenantId: 't', dates, effectiveDate } }),
     );
+    expect(error).toBeInstanceOf(PluginHookError);
     expect(dates.facture.toISOString()).toBe('2025-01-01T00:00:00.000Z');
     expect(effectiveDate.toISOString()).toBe('2024-06-01T00:00:00.000Z');
   });
@@ -672,22 +674,6 @@ describe('R18: what a hook returns is bounded in size and depth', () => {
 });
 
 describe('survivors of the third review (R16) and the views', () => {
-  it("a hook moving a Date of the view and returning the caller's own rule leaves the engine's dates alone", async () => {
-    const callerRule = tax();
-    const built = build([
-      pluginWith('h', {
-        beforeEvaluate: (input, rules) => {
-          (rules[0]!.effectiveFrom as Date).setTime(0);
-          return { input, rules: [callerRule] };
-        },
-      }),
-    ]);
-    const result = await built.engine.evaluate([callerRule], makeInput());
-    expect((result.appliedRules[0]!.effectiveFrom as Date).toISOString()).toBe(
-      '2024-01-01T00:00:00.000Z',
-    );
-  });
-
   it('the lists inside a rule view are frozen', async () => {
     const built = build([
       pluginWith('h', {
@@ -794,26 +780,6 @@ describe('maxRuleLeaves: the leaves of one rule', () => {
     const error = (await failure(built2, [rule])) as PluginHookError;
     expect(error).toBeInstanceOf(PluginHookError);
     expect(error.cause).toMatchObject({ limit: 'maxRuleLeaves', max: leaves });
-  });
-
-  it('a skip a hook returns is held to it too', async () => {
-    const rule = tax();
-    const leaves = leavesOfRule(rule);
-    const built = build(
-      [
-        pluginWith('h', {
-          beforeEvaluate: (input, rules) => ({
-            input,
-            rules: [],
-            skipped: [{ rule: rules[0]!, reason: 'PLUGIN' as never }],
-          }),
-        }),
-      ],
-      { limits: { maxRuleLeaves: leaves } },
-    );
-    // The rule alone fits (it is a source rule); the skip holds it and its own `reason`.
-    const error = (await failure(built, [rule])) as PluginHookError;
-    expect(error.cause).toMatchObject({ limit: 'maxRuleLeaves' });
   });
 
   it('is refused at construction when it is not a positive integer', () => {

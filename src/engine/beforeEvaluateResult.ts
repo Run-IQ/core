@@ -5,7 +5,8 @@ import type { Rule } from '../types/rule.js';
 import type { SkippedRule } from '../types/result.js';
 import { describeValue, findNonJson } from '../utils/json.js';
 import { isObject } from '../utils/values.js';
-import { PLUGIN_SKIP_REASONS, hasExactKeys, readBounded, readItems } from './pluginBoundary.js';
+import { PLUGIN_SKIP_REASONS, readBounded, readItems, readSkips } from './pluginBoundary.js';
+import type { Budget } from './pluginBoundary.js';
 
 /** What the engine takes from a `beforeEvaluate` result, read once and checked. */
 export interface BeforeEvaluateReading {
@@ -41,6 +42,7 @@ export function readBeforeEvaluate(
   pluginName: string,
   returned: BeforeEvaluateResult,
   limits: Readonly<EngineLimits>,
+  budget: Budget,
 ): BeforeEvaluateReading {
   const refuse = (what: string): TypeError =>
     new TypeError(`plugin ${pluginName} beforeEvaluate returned ${what}`);
@@ -55,54 +57,43 @@ export function readBeforeEvaluate(
   if (!isObject(input)) throw refuse('a malformed input');
 
   if (!Array.isArray(rulesIn)) throw refuse('a malformed rules');
-  const rules = readItems(rulesIn, limits, 'rules');
+  const rules = readItems(rulesIn, limits, 'rules', budget);
   if (!rules.every(isObject)) throw refuse('a malformed rules');
 
   if (skippedIn !== undefined && !Array.isArray(skippedIn)) throw refuse('a malformed skipped');
-  const skipped = readItems(skippedIn ?? [], limits, 'skipped');
-  for (const skip of skipped) {
-    if (!isSkip(skip)) throw refuse('a malformed skipped');
+  let records: ReturnType<typeof readSkips>;
+  try {
+    records = readSkips(skippedIn ?? [], limits, budget);
+  } catch (error) {
+    if (error instanceof TypeError) throw refuse('a malformed skipped');
+    throw error;
+  }
+  const skipped: SkippedRule[] = records.map((record) => {
+    const { rule, reason, detail } = record;
+    if (!isObject(rule) || typeof reason !== 'string') throw refuse('a malformed skipped');
+    if (detail !== undefined && typeof detail !== 'string') throw refuse('a malformed skipped');
     // A reason of the engine's own stages is not the plugin's to give.
-    const reason = Reflect.get(skip as object, 'reason') as string;
     if (!PLUGIN_SKIP_REASONS.has(reason)) {
       throw refuse(
         `a skip with the reason ${JSON.stringify(reason)}: a plugin skip has one of ${[...PLUGIN_SKIP_REASONS].join(', ')}`,
       );
     }
-  }
+    // justification: `rule` is an object and `reason` a string in the plugin set (checked above);
+    // the ledger checks `rule` as a rule.
+    return { rule: rule as Rule, reason: reason as SkippedRule['reason'], detail };
+  });
 
   // justification: typed as JSON only to be handed to `findNonJson` on the next line, which checks
   // it before anything uses it.
-  const state = readBounded(stateIn, limits, 'state') as JsonValue | undefined;
+  const state = readBounded(stateIn, limits, 'state', { budget }) as JsonValue | undefined;
   const stateNotJson = state === undefined ? undefined : findNonJson(state);
   if (stateNotJson !== undefined) throw refuse(`a state that is not JSON at ${stateNotJson}`);
   return {
     input,
     // justification: every item was checked to be an object; the ledger checks them as rules.
     rules: rules as Rule[],
-    // justification: every item was checked to have exactly `rule`, `reason` and `detail`.
-    skipped: (skipped as SkippedRule[]).map((skip) => withDetail(skip, pluginName)),
+    skipped,
     state,
   };
 }
 
-/** True for exactly `{ rule: object, reason: string, detail?: string }`: no other key. */
-export function isSkip(value: unknown): boolean {
-  if (!hasExactKeys(value, ['rule', 'reason'], ['detail'])) return false;
-  const skip = value as object;
-  const detail: unknown = Reflect.get(skip, 'detail');
-  return (
-    isObject(Reflect.get(skip, 'rule')) &&
-    typeof Reflect.get(skip, 'reason') === 'string' &&
-    (detail === undefined || typeof detail === 'string')
-  );
-}
-
-/** The skip, with `detail: 'skipped by plugin <name>'` when it has none. */
-export function withDetail(skip: SkippedRule, pluginName: string): SkippedRule {
-  return Object.freeze(
-    skip.detail === undefined
-      ? { ...skip, detail: `skipped by plugin ${pluginName}` }
-      : { ...skip },
-  );
-}

@@ -1,3 +1,5 @@
+import { trapped } from '../engine/frozenView.js';
+import { FrozenViewWriteError } from '../errors/FrozenViewWriteError.js';
 import { EXCEPTION_MODEL, SpecError, verifyRuleChecksum } from '@run-iq/spec';
 import type { Rule } from '../types/rule.js';
 import type { SkippedRule } from '../types/result.js';
@@ -30,6 +32,14 @@ export class RuleValidator {
     private readonly modelRegistry: ModelRegistry,
     private readonly onChecksumMismatch: 'throw' | 'skip' = 'skip',
   ) {}
+
+  /**
+   * True when the rule's model is one the evaluation can run: registered when the evaluation
+   * began, or the exception model. Used for the rules a hook adds.
+   */
+  knowsModel(rule: Rule): boolean {
+    return rule.model === EXCEPTION_MODEL || this.modelRegistry.has(rule.model);
+  }
 
   validate(rules: ReadonlyArray<Rule>): RuleValidationResult {
     const valid: Rule[] = [];
@@ -77,7 +87,14 @@ export class RuleValidator {
     // in beforeEvaluate (e.g., meta-rules). ExecutionPipeline will skip them.
     if (rule.model !== EXCEPTION_MODEL && this.modelRegistry.has(rule.model)) {
       const model = this.modelRegistry.get(rule.model);
-      const validation = model.validateParams(rule.params);
+      let validation: ReturnType<typeof model.validateParams>;
+      try {
+        validation = model.validateParams(trapped(rule.params));
+      } catch (error) {
+        // A write into the params is that rule's error, named; any other throw is the model's.
+        if (!(error instanceof FrozenViewWriteError)) throw error;
+        return { rule, reason: 'MODEL_ERROR', detail: error.message };
+      }
       if (!validation.valid) {
         const errors = validation.errors?.length
           ? validation.errors.join('; ')

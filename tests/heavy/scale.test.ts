@@ -6,6 +6,7 @@ import { DEFAULT_LIMITS } from '../../src/limits.js';
 import { InputCopier } from '../../src/input/copyInput.js';
 import type { Rule } from '../../src/types/rule.js';
 import { makeRule, makeInput, StubModel, StubPlugin } from '../helpers.js';
+import type { PPEPlugin } from '../../src/types/plugin.js';
 
 // The scale tests of D-26: each default limit is held at its value, with a written budget. They
 // read a clock, so they run in the heavy project (`npm run test:heavy`), one file at a time.
@@ -135,4 +136,89 @@ describe('maxRuleLeaves (100 000): the leaves of one rule', () => {
     expect(error).toBeInstanceOf(EngineLimitError);
     expect(error).toMatchObject({ limit: 'maxRuleLeaves', max: 100_000, actual: 100_001 });
   }, 60_000);
+});
+
+describe('maxRules (100 000) with plugins: three beforeEvaluate hooks and one afterEvaluate', () => {
+  /** A hook that hands everything back, as an identity plugin does. */
+  const identity = (name: string): PPEPlugin => ({
+    name,
+    version: '1.0.0',
+    onInit: () => undefined,
+    beforeEvaluate: (input, rules) => ({ input, rules }),
+  });
+
+  it('evaluates maxRules simple rules in under 10 s', async () => {
+    const rules = Array.from({ length: DEFAULT_LIMITS.maxRules }, (_, i) =>
+      makeRule({ id: `r${i}`, model: 'M', priority: i }),
+    );
+    const after: PPEPlugin = {
+      name: 'after',
+      version: '1.0.0',
+      onInit: () => undefined,
+      afterEvaluate: (_input, result) => result,
+    };
+    const engine = new PPEEngine({
+      plugins: [
+        new StubPlugin('p', [new StubModel('M', 1)]),
+        identity('one'),
+        identity('two'),
+        identity('three'),
+        after,
+      ],
+      dsls: [],
+      strict: false,
+    });
+    const start = performance.now();
+    const result = await engine.evaluate(rules, makeInput());
+    const elapsed = performance.now() - start;
+    expect(result.appliedRules).toHaveLength(DEFAULT_LIMITS.maxRules);
+    expect(elapsed).toBeLessThan(10_000);
+  }, 120_000);
+});
+
+describe('maxHookLeaves (8 000 000): the leaves one return of a hook makes the engine read', () => {
+  /** Rules of about 90 000 leaves each, `count` of them. */
+  const bigRules = (count: number): Rule[] =>
+    Array.from({ length: count }, (_, i) =>
+      makeRule({ id: `big${i}`, model: 'M', params: { pad: new Array<number>(90_000).fill(i) } }),
+    );
+  const engineAdding = (added: Rule[]): PPEEngine =>
+    new PPEEngine({
+      plugins: [
+        new StubPlugin('p', [new StubModel('M', 1)]),
+        {
+          name: 'adder',
+          version: '1.0.0',
+          onInit: () => undefined,
+          beforeEvaluate: (input, rules) => ({ input, rules: [...rules, ...added] }),
+        },
+      ],
+      dsls: [],
+      strict: false,
+    });
+
+  it('reads, validates and evaluates a return of maxHookLeaves leaves in under 8 s', async () => {
+    // 88 rules of 90 003 leaves are 7 920 264 leaves: the most that fits.
+    const added = bigRules(88);
+    const start = performance.now();
+    const result = await engineAdding(added).evaluate(
+      [makeRule({ id: 'one', model: 'M' })],
+      makeInput(),
+    );
+    expect(performance.now() - start).toBeLessThan(8_000);
+    expect(result.appliedRules).toHaveLength(89);
+  }, 120_000);
+
+  it('refuses a return of more, as soon as the bound is passed', async () => {
+    const added = bigRules(90);
+    const start = performance.now();
+    const error = await failureOf(() =>
+      engineAdding(added).evaluate([makeRule({ id: 'one', model: 'M' })], makeInput()),
+    );
+    expect(performance.now() - start).toBeLessThan(8_000);
+    expect((error as { cause: unknown }).cause).toMatchObject({
+      limit: 'maxHookLeaves',
+      max: 8_000_000,
+    });
+  }, 120_000);
 });

@@ -1,3 +1,4 @@
+import { trapped } from '../engine/frozenView.js';
 import { parsePointer } from '@run-iq/spec';
 import type { JsonPointer } from '@run-iq/spec';
 import type { CalculationModel } from '../types/model.js';
@@ -135,13 +136,13 @@ export function readsOf(
     if (dsl?.listVariables === undefined) declared = false;
     else {
       const value = rule.condition.value;
-      collect(rule.condition.dsl, () => dsl.listVariables?.(value));
+      collect(rule.condition.dsl, () => dsl.listVariables?.(trapped(value)));
     }
   }
   if (model?.listVariables === undefined) declared = false;
   else {
     const params = rule.params;
-    collect(model.name, () => model.listVariables?.(params));
+    collect(model.name, () => model.listVariables?.(trapped(params)));
   }
 
   return { pointers: [...pointers], outputs: [...outputs], declared, problems };

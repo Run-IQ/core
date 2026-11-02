@@ -4,7 +4,7 @@ import type { UnsealedResult } from '../types/result.js';
 import { describeValue, findNonJson } from '../utils/json.js';
 import type { EngineLimits } from '../limits.js';
 import { isObject } from '../utils/values.js';
-import { readBounded, resultLimits } from './pluginBoundary.js';
+import { Budget, readBounded, resultLimits } from './pluginBoundary.js';
 
 /** What the engine keeps of a result returned by `afterEvaluate`. */
 export interface AfterEvaluateTransition {
@@ -41,6 +41,7 @@ export const PLUGIN_SETTABLE_FIELDS: ReadonlySet<string> = new Set(['meta', 'plu
 export function acceptAfterEvaluate(
   pluginName: string,
   before: UnsealedResult,
+  handed: UnsealedResult,
   returned: UnsealedResult,
   limits: Readonly<EngineLimits>,
 ): AfterEvaluateTransition {
@@ -50,34 +51,46 @@ export function acceptAfterEvaluate(
   if (!isObject(raw) || typeof raw !== 'object' || raw === null) {
     throw refuse(`${describeValue(raw)}, not a result`);
   }
-  // Read by name, once each, whatever the kind of property; then copied.
+  // Each field is read by name, once, whatever the kind of property. A field the result was not
+  // handed with (and that a plugin may not set) is a change, named without being copied. A field
+  // that is the very object it was handed is unchanged: the handed view is frozen, so there is
+  // nothing to read. Any other field is copied, bounded (leaves and depth, all fields against one
+  // budget) and without recursion.
   const fields = new Set([...Object.keys(before), ...Object.keys(raw), ...PLUGIN_SETTABLE_FIELDS]);
-  const read: Record<string, unknown> = {};
-  for (const field of fields) {
-    // defineProperty: a field named `__proto__` stays a field.
-    Object.defineProperty(read, field, {
-      value: Reflect.get(raw, field),
-      enumerable: true,
-      writable: true,
-      configurable: true,
-    });
-  }
-  // Each field is copied on its own, bounded (leaves and depth) and without recursion.
   const theirs: Record<string, unknown> = {};
-  const bounds = resultLimits(before, limits);
-  for (const [field, value] of Object.entries(read)) {
+  const changed: string[] = [];
+  let bounds: Readonly<EngineLimits> | undefined;
+  let budget: Budget | undefined;
+  const keep = (field: string, value: unknown): void => {
+    // defineProperty: a field named `__proto__` stays a field.
     Object.defineProperty(theirs, field, {
-      value: readBounded(value, bounds, field),
+      value,
       enumerable: true,
       writable: true,
       configurable: true,
     });
+  };
+  for (const field of fields) {
+    const value: unknown = Reflect.get(raw, field);
+    const settable = PLUGIN_SETTABLE_FIELDS.has(field);
+    if (!settable && !Object.hasOwn(before, field)) {
+      changed.push(field);
+      continue;
+    }
+    if (value === Reflect.get(handed, field)) {
+      keep(field, Reflect.get(before, field));
+      continue;
+    }
+    bounds ??= resultLimits(before, limits);
+    budget ??= new Budget('maxInputLeaves', bounds.maxInputLeaves);
+    keep(field, readBounded(value, bounds, field, { budget }));
   }
 
   // A field the plugin left out was read as `undefined`: it differs, so it counts as changed.
-  const changed: string[] = [];
   for (const [field, value] of Object.entries(theirs)) {
     if (PLUGIN_SETTABLE_FIELDS.has(field)) continue;
+    // The very object of the result: it is unchanged, with nothing to compare.
+    if (value === Reflect.get(before, field)) continue;
     if (!sameData(Reflect.get(before, field), value)) changed.push(field);
   }
   const meta: unknown = theirs['meta'];

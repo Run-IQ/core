@@ -114,19 +114,16 @@ describe('N1: a hook cannot rewrite a given rule in place', () => {
     );
   });
 
-  it('moving a date of a given rule in place and returning it fails: its checksum no longer holds', async () => {
+  it('the bounds of a given rule are strings: nothing to move in place', async () => {
     const built = build([
       pluginWith('h', {
         beforeEvaluate: (input, rules) => {
-          (rules[0]!.effectiveFrom as Date).setTime(0);
+          expect(typeof rules[0]!.effectiveFrom).toBe('string');
           return { input, rules };
         },
       }),
     ]);
-    await expectHookFailure(
-      await failure(built),
-      'plugin h rewrote rule tax@1: its content is not the one it was given',
-    );
+    expect(await failure(built)).toBeUndefined();
   });
 
   it("leaves the caller's rules and input untouched and unfrozen", async () => {
@@ -367,7 +364,7 @@ describe('N5: the evaluation copy is frozen and private', () => {
     expect(result.appliedRules.map((r) => r.id)).toEqual(['tax']);
     const skip = result.skippedRules.find((s) => s.rule.id === 'bad');
     expect(skip?.reason).toBe('DSL_ERROR');
-    expect(skip?.detail).toMatch(/read only|not extensible|Cannot assign/);
+    expect(skip?.detail).toMatch(/wrote to its input/);
   });
 
   it('a model writing into the input data cannot change what the next model reads', async () => {

@@ -1,6 +1,8 @@
 import { EngineLimitError } from '../errors/EngineLimitError.js';
 import type { EngineLimits } from '../limits.js';
 import { describeThrown } from '../utils/values.js';
+import { NotPlain, isDateObject, isPlainPrototype } from '../utils/plain.js';
+import { toReferenceDate } from '@run-iq/spec';
 
 /** The segment of a JSON pointer for `key`: `~` is `~0`, `/` is `~1`. */
 const escapeSegment = (key: string): string => key.replace(/~/g, '~0').replace(/\//g, '~1');
@@ -58,6 +60,11 @@ export class InputCopier {
   constructor(
     private readonly limits: Readonly<EngineLimits>,
     private readonly leafLimit: 'maxInputLeaves' | 'maxRuleLeaves' = 'maxInputLeaves',
+    /**
+     * Write every `Date` as its canonical string (`YYYY-MM-DDTHH:MM:SS.sssZ`), as for a rule: the
+     * engine then holds no `Date` object that anybody could move.
+     */
+    private readonly datesAsStrings = false,
   ) {}
 
   private leaf(): void {
@@ -121,42 +128,49 @@ export class InputCopier {
       let keys: string[] | undefined;
       let length: number;
       try {
-        // A Date is copied, so that nobody holds the one the evaluation records. Spec refuses it
-        // in `data` and `meta.context`; `meta.effectiveDate` and `meta.dates` take it. A fake
-        // Date or a revoked Proxy throws here, and is named as unreadable.
-        if (value instanceof Date) {
-          const copy = new Date(value.getTime());
-          this.leaf();
-          put(parent, key, copy);
-          return;
-        }
         isList = Array.isArray(value);
         if (isList) {
+          // justification: `Array.isArray` passed.
           length = (value as unknown[]).length;
           if (!Number.isSafeInteger(length) || length < 0) throw new TypeError('invalid length');
         } else {
+          // Plainness is decided once, from one read of the prototype.
           const prototype: unknown = Object.getPrototypeOf(value);
-          if (prototype !== Object.prototype && prototype !== null) {
+          if (!isPlainPrototype(prototype)) {
+            // A Date is copied (or written as its string, for a rule), so that nobody holds the
+            // one the evaluation records. Spec refuses it in `data` and `meta.context`;
+            // `meta.effectiveDate` and `meta.dates` take it. Anything else that is not plain is
+            // replaced by a marker spec refuses, never kept. The brand is read only here: a plain
+            // object is not a date, and a read through a Proxy is not wasted on every object.
             this.leaf();
-            put(parent, key, value);
+            if (isDateObject(value)) {
+              // justification: `isDateObject` passed, so `getTime` returns a number.
+              const time = Date.prototype.getTime.call(value) as number;
+              let copy: unknown = new Date(time);
+              if (this.datesAsStrings) {
+                try {
+                  copy = toReferenceDate(new Date(time));
+                } catch {
+                  copy = new NotPlain('an invalid Date');
+                }
+              }
+              put(parent, key, copy);
+            } else {
+              put(parent, key, new NotPlain(describeKind(prototype)));
+            }
             return;
           }
-          keys = Object.keys(value);
-          length = keys.length;
-          // A symbol key or a non-enumerable property is not JSON, and would vanish from the
-          // copy: it is named instead (the keys are listed once more only to count them).
-          const owned = Reflect.ownKeys(value);
-          if (owned.length !== length) {
-            const listed = new Set<string | symbol>(keys);
-            for (const extra of owned) {
-              if (listed.has(extra)) continue;
-              this.reasons.push(
-                typeof extra === 'symbol'
-                  ? `${at()} has a symbol key: ${extra.toString()}`
-                  : `${at()}/${escapeSegment(extra)} is not enumerable`,
-              );
-            }
+          // One listing of the own keys; enumerability is read per key. A symbol key
+          // or a non-enumerable property would vanish from the copy: it is named instead.
+          keys = [];
+          for (const own of Reflect.ownKeys(value)) {
+            if (typeof own === 'symbol') {
+              this.reasons.push(`${at()} has a symbol key: ${own.toString()}`);
+            } else if (!Object.prototype.propertyIsEnumerable.call(value, own)) {
+              this.reasons.push(`${at()}/${escapeSegment(own)} is not enumerable`);
+            } else keys.push(own);
           }
+          length = keys.length;
         }
       } catch (error) {
         this.unreadable(at(), error);
@@ -231,4 +245,14 @@ export function listKeys(value: object, pointer: string, reasons: string[]): str
     }
   }
   return keys;
+}
+
+/** What kind of object a prototype describes, for the marker that stands in for it. */
+function describeKind(prototype: unknown): string {
+  try {
+    const ctor: unknown = (prototype as { constructor?: unknown } | null)?.constructor;
+    return typeof ctor === 'function' && ctor.name !== '' ? ctor.name : 'an object';
+  } catch {
+    return 'an object';
+  }
 }

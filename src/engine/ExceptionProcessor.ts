@@ -1,3 +1,4 @@
+import { trapped } from './frozenView.js';
 import {
   DEFAULT_OUTPUT,
   DEFAULT_OUTPUT_DECLARATION,
@@ -422,7 +423,7 @@ export class ExceptionProcessor {
   private refuseParams(rule: Rule, params: unknown): string | undefined {
     if (!this.models.has(rule.model)) return undefined;
     const model = this.models.get(rule.model);
-    const validation = model.validateParams(params);
+    const validation = model.validateParams(trapped(params));
     if (validation.valid) return undefined;
     return validation.errors?.length
       ? validation.errors.join('; ')

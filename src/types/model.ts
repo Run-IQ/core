@@ -40,11 +40,14 @@ export interface CalculationModel<V extends OutputValue = number> {
   validateParams(params: unknown): ValidationResult;
 
   /**
-   * Computes the rule's contribution. The arguments are frozen views: `input` is the evaluation's
-   * own frozen data, `rule` and its `params` are a fresh frozen copy of the rule (with its own
-   * `Date`s). A model that writes into them (strict mode throws) does not fail the evaluation: its
-   * rule is excluded with the reason `MODEL_ERROR` and the detail `wrote to its input: ...`.
-   * Any other throw is the model's and fails the evaluation.
+   * Computes the rule's contribution. The arguments are views that refuse every write: `input` is
+   * the evaluation's own data, `rule` and its `params` the engine's rule, which holds no `Date`
+   * (dates are `YYYY-MM-DDTHH:MM:SS.sssZ` strings, civil dates `YYYY-MM-DD`). A write (assignment,
+   * `delete`, `defineProperty`) throws a `FrozenViewWriteError`, which does not fail the
+   * evaluation: the rule is excluded with the reason `MODEL_ERROR` and the detail `wrote to its
+   * input: <key>`. The same holds for `validateParams`. Any other throw, a `TypeError` of the
+   * model's own included, is the model's and fails the evaluation. What the model returns is
+   * copied. A view cannot be passed to `structuredClone`: copy the part you need first.
    */
   calculate(
     input: Record<string, unknown>,

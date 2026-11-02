@@ -659,7 +659,10 @@ describe('RuleFilter', () => {
           $outputs: {},
         },
       ]);
-      expect(Object.isFrozen(seen[0])).toBe(true);
+      // The DSL gets a view that refuses writes with a dedicated error (a view is not `isFrozen`).
+      expect(() => {
+        (seen[0] as Record<string, unknown>)['amount'] = 1;
+      }).toThrow('wrote to its input: amount');
     });
 
     describe('a listVariables that does not conform (D-39)', () => {

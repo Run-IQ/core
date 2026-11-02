@@ -1,5 +1,6 @@
 import { SpecError, toReferenceDate } from '@run-iq/spec';
 import type { ProofInput } from '@run-iq/spec';
+import { isPlainPrototype } from '../utils/plain.js';
 import { ValidationError } from '../errors/ValidationError.js';
 import type { EvaluationInput } from '../types/input.js';
 
@@ -8,7 +9,10 @@ export type NormalizedMeta = ProofInput['meta'];
 
 /** True for a non-null, non-array object: the only shape a map of the canonical meta may have. */
 const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
+  value !== null &&
+  typeof value === 'object' &&
+  !Array.isArray(value) &&
+  isPlainPrototype(Object.getPrototypeOf(value));
 
 /**
  * Writes `map[key]` as an own data property: a plain assignment of `__proto__` would set the

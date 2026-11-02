@@ -47,17 +47,21 @@ export interface PPEPlugin {
    *   `{ rule, reason, detail? }` with a plugin reason (`PLUGIN`, or one of the deprecated
    *   `INHIBITED_BY_META_RULE`, `COUNTRY_MISMATCH`, `MODEL_NOT_FOUND`: never a reason of the
    *   engine's own stages); a `state` that is not JSON (`a state that is not JSON at $.a[1]
-   *   (Date)`); a getter that throws. A skip without `detail` gets `skipped by plugin <name>`.
-   * - The hook is handed views, never the objects the engine holds: a fresh frozen input (with
-   *   its own copies of the dates in `meta`), and a fresh frozen list of fresh frozen copies of
-   *   the rules. A write into a view throws in strict mode and has no effect otherwise; a `Date`
-   *   it moves is its own copy. The engine never reads back anything it handed out: the hook
-   *   returns new objects to change anything.
+   *   (Date)`); a getter that throws. The engine records every skip with `detail` `plugin <name>: <your words>` (`plugin <name>: skipped` when you give none): the record always says which plugin skipped.
+   * - The hook is handed frozen data: a frozen input (with its own copies of the dates in
+   *   `meta`) and a fresh frozen list of the engine's rules. The rules are deep-frozen and hold no
+   *   `Date`: their bounds, `params`, `condition.value` and extension fields are strings (a `Date`
+   *   in a rule is written as `YYYY-MM-DDTHH:MM:SS.sssZ` when the engine reads it), so they are
+   *   handed as they are. A write throws in strict mode and has no effect otherwise. The engine
+   *   never reads back anything it handed out: the hook returns new objects to change anything.
    * - The returned `input` is checked as the caller's is: the bounds (`maxInputDepth`,
    *   `maxInputLeaves`), `validateProofInput` on its canonical form (D-3, D-5, portable JSON,
    *   unknown `meta` keys), and in strict mode the evaluation date. Changing the data is allowed
-   *   once it passes; changing `requestId` or `meta.tenantId` is not (the idempotence check and
-   *   the record rest on them). At most `limits.maxRules` rules may be returned.
+   *   once it passes. Changing `meta` at all is not (the date, the named dates, the dimensions,
+   *   the tags, the context and the assertions are the caller's declarations; the engine never
+   *   guesses), nor `requestId` (the idempotence check and the record rest on it). The total of
+   *   the leaves one return makes the engine read (rules, skips, state and data) is held to
+   *   `limits.maxHookLeaves`. At most `limits.maxRules` rules may be returned.
    * - The rules it returns are checked against a ledger the engine keeps, one entry per rule
    *   instance given. A rule dropped without a skip, returned more often than it was given
    *   (checked per `id@version` and checksum, so two contents under one name cannot be swapped),
@@ -77,10 +81,11 @@ export interface PPEPlugin {
   ): BeforeEvaluateResult | Promise<BeforeEvaluateResult>;
 
   /**
-   * Runs after the decision is computed, in registration order, on a copy of the result: writing
-   * to it in place never reaches the engine's records or the caller's rules. **Fail closed**: it
-   * cannot change the decision. The result it returns is read once (every field by name, own,
-   * non-enumerable or inherited, then a deep copy), and:
+   * Runs after the decision is computed, in registration order, on a view of the result that
+   * refuses every write (a `FrozenViewWriteError`, which fails the hook): nothing it does to the
+   * view reaches the engine's records or the caller's rules. A field it returns as it received it
+   * is unchanged; any other is read once (by name, own, non-enumerable or inherited), copied and
+   * bounded. **Fail closed**: it cannot change the decision, and:
    *
    * - it may set `meta` (an object of JSON: annotations on the result; it may add keys, and changing or
    *   removing a key another plugin set fails) and its own entry of `pluginState`

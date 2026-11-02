@@ -1,3 +1,4 @@
+import { trapped } from './frozenView.js';
 import type { Rule } from '../types/rule.js';
 import type { EvaluationInput } from '../types/input.js';
 import type { Diagnostic } from '../types/diagnostic.js';
@@ -237,7 +238,11 @@ export class RuleFilter {
       }
 
       try {
-        const result = await this.sandbox.runDSL(evaluator, rule.condition.value, scope.context);
+        const result = await this.sandbox.runDSL(
+          evaluator,
+          trapped(rule.condition.value),
+          trapped(scope.context),
+        );
         if (!result) {
           return { reason: 'CONDITION_FALSE', detail: 'condition evaluated to false' };
         }

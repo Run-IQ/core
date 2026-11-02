@@ -180,7 +180,7 @@ describe('hostile beforeEvaluate results', () => {
     expect(result.diagnostics).toEqual([]);
   });
 
-  it('gives a plugin skip without detail the detail "skipped by plugin <name>"', async () => {
+  it('gives a plugin skip without detail the detail "plugin <name>: skipped"', async () => {
     const fiscal = pluginWith('fiscal', {
       beforeEvaluate: (input, rules) => ({
         input,
@@ -190,7 +190,7 @@ describe('hostile beforeEvaluate results', () => {
     });
     const result = await engineWith([fiscal]).evaluate([rule()], makeInput());
     expect(result.skippedRules.map((s) => [s.rule.id, s.reason, s.detail])).toEqual([
-      ['r1', 'PLUGIN', 'skipped by plugin fiscal'],
+      ['r1', 'PLUGIN', 'plugin fiscal: skipped'],
     ]);
   });
 });
@@ -288,11 +288,9 @@ describe('hostile afterEvaluate results', () => {
     const error = await failure(engineWith([st, bad]));
     expect(error).toBeInstanceOf(PluginHookError);
     expect(error).toMatchObject({ plugin: 'bad', hook: 'afterEvaluate' });
-    expect((error as PluginHookError).cause).toMatchObject({
-      message:
-        'plugin bad afterEvaluate changed the decision: diagnostics, dslVersions, ' +
-        'missingFacts, pluginState, pluginVersions',
-    });
+    // The result a plugin is handed refuses writes: its first write throws and the hook fails.
+    // Fields it changes by returning a new result are named (see the next tests).
+    expect(((error as PluginHookError).cause as Error).name).toBe('FrozenViewWriteError');
   });
 
   it('fails the evaluation for applied and skipped entries kept under the same id but changed', async () => {
@@ -414,7 +412,7 @@ describe('fields read by name', () => {
     });
     const result = await engineWith([p]).evaluate([rule()], makeInput());
     expect(result.skippedRules.map((s) => [s.rule.id, s.reason, s.detail])).toEqual([
-      ['r1', 'PLUGIN', 'skipped by plugin p'],
+      ['r1', 'PLUGIN', 'plugin p: skipped'],
     ]);
     expect(result.diagnostics).toEqual([]);
   });

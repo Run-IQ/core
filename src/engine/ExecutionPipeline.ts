@@ -6,11 +6,13 @@ import type { BreakdownItem, SkippedRule } from '../types/result.js';
 import type { DecisionOutput } from '../types/output.js';
 import type { ModelRegistry } from '../registry/ModelRegistry.js';
 import { findNonJson, isJsonValue } from '../utils/json.js';
-import { describeThrown, isPlainObject, ruleLabel } from '../utils/values.js';
+import { isPlainObject, ruleLabel } from '../utils/values.js';
 import type { ShortCircuit } from './ExceptionProcessor.js';
 import type { TraceBuilder } from './TraceBuilder.js';
 import { OutputCombiner } from './OutputCombiner.js';
-import { ruleView } from './pluginBoundary.js';
+import { frozenCopyOf } from './pluginBoundary.js';
+import { trapped } from './frozenView.js';
+import { FrozenViewWriteError } from '../errors/FrozenViewWriteError.js';
 import type { Contribution } from './OutputCombiner.js';
 import { compareByPriorityThenIdentity, compareRuleIdentity } from './resolveTie.js';
 import {
@@ -184,22 +186,18 @@ export class ExecutionPipeline {
       for (const rule of feeders) {
         const model = this.modelRegistry.get(rule.model);
         const start = performance.now();
-        // The model gets a view of the rule: its own objects and its own `Date`s, frozen.
-        const view = ruleView(rule);
+        // The model gets write-trapping views of the engine's frozen data: a write into them is
+        // refused with a dedicated error, and the rule that wrote is excluded by that class.
         let raw: unknown;
         try {
-          raw = model.calculate(input.data, view, view.params);
+          raw = model.calculate(trapped(input.data), trapped(rule), trapped(rule.params));
         } catch (error) {
-          // A write into a frozen argument (the rule, its params, the input) is that rule's
-          // error, named; any other throw is the model's and fails the evaluation as before.
-          if (!isWriteAttempt(error)) throw error;
-          skipped.push({
-            rule,
-            reason: 'MODEL_ERROR',
-            detail: `wrote to its input: ${describeThrown(error)}`,
-          });
+          if (!(error instanceof FrozenViewWriteError)) throw error;
+          skipped.push({ rule, reason: 'MODEL_ERROR', detail: error.message });
           continue;
         }
+        // What the model returns is data the engine copies: never a view it was handed.
+        raw = frozenCopyOf(raw);
         const durationMs = Math.round((performance.now() - start) * 100) / 100;
         const { value, detail } = readCalculation(raw, declaration);
         if (!isJsonValue(value)) {
@@ -280,12 +278,4 @@ export class ExecutionPipeline {
       skipped: skipped.sort((a, b) => compareByPriorityThenIdentity(a.rule, b.rule)),
     };
   }
-}
-
-/** True for the `TypeError` a strict-mode write into a frozen or sealed object throws. */
-function isWriteAttempt(error: unknown): boolean {
-  return (
-    error instanceof TypeError &&
-    /read only|read-only|not extensible|Cannot (assign|add|delete|define)/.test(error.message)
-  );
 }

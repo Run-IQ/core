@@ -1,3 +1,4 @@
+import { canonicalize } from '@run-iq/spec';
 import type { JsonValue } from '@run-iq/spec';
 import type { Rule } from '../types/rule.js';
 import type { EvaluationInput } from '../types/input.js';
@@ -34,10 +35,11 @@ import { PluginSandbox } from '../security/PluginSandbox.js';
 import { SnapshotManager } from '../snapshot/SnapshotManager.js';
 import { SnapshotSerializer } from '../snapshot/SnapshotSerializer.js';
 import { VERSION } from '../utils/version.js';
-import { copyData, describeThrown, ruleLabel } from '../utils/values.js';
+import { describeThrown, ruleLabel } from '../utils/values.js';
 import { acceptAfterEvaluate } from './afterEvaluateTransition.js';
 import { readBeforeEvaluate } from './beforeEvaluateResult.js';
-import { RuleLedger, readItems } from './pluginBoundary.js';
+import { Budget, RuleLedger, readItems } from './pluginBoundary.js';
+import { trapped } from './frozenView.js';
 import type { LedgerOutcome } from './pluginBoundary.js';
 import type { BeforeEvaluateReading } from './beforeEvaluateResult.js';
 
@@ -95,11 +97,7 @@ export class PPEEngine {
   private readonly modelRegistry: ModelRegistry;
   private readonly pluginRegistry: PluginRegistry;
   private readonly dslRegistry: DSLRegistry;
-  private readonly ruleFilter: RuleFilter;
-  private readonly ruleValidator: RuleValidator;
-  private readonly exceptionProcessor: ExceptionProcessor;
   private readonly dominanceResolver: DominanceResolver;
-  private readonly executionPipeline: ExecutionPipeline;
   private readonly sandbox: PluginSandbox;
   private readonly snapshotManager: SnapshotManager;
   private readonly plugins: readonly PPEPlugin[];
@@ -109,6 +107,7 @@ export class PPEEngine {
   private readonly pipelineTimeout: number | undefined;
   private readonly limits: EngineLimits;
   private readonly inputSeed: InputSeedConfig | undefined;
+  private readonly onChecksumMismatch: 'throw' | 'skip';
 
   constructor(config: PPEEngineConfig) {
     this.strict = config.strict ?? true;
@@ -124,11 +123,8 @@ export class PPEEngine {
 
     this.sandbox = new PluginSandbox(config.timeout?.hook ?? 500, config.timeout?.dsl ?? 100);
 
-    this.ruleFilter = new RuleFilter(this.dslRegistry, this.sandbox);
-    this.ruleValidator = new RuleValidator(this.modelRegistry, config.onChecksumMismatch ?? 'skip');
-    this.exceptionProcessor = new ExceptionProcessor(this.modelRegistry);
+    this.onChecksumMismatch = config.onChecksumMismatch ?? 'skip';
     this.dominanceResolver = new DominanceResolver();
-    this.executionPipeline = new ExecutionPipeline(this.modelRegistry, this.conflictMode);
 
     this.snapshotManager = new SnapshotManager(
       this.dryRun ? null : (config.snapshot ?? null),
@@ -207,10 +203,13 @@ export class PPEEngine {
       return await this.runPipeline(rules, input, options, signal);
     } catch (error) {
       if (signal.aborted) throw error;
+      // What the plugins are told is not writable: one plugin cannot rewrite the attribution (the
+      // `plugin`, the `message`) of a failure that the caller then receives.
+      const told = Object.freeze(UnexpectedEngineError.wrap(error));
       for (const plugin of this.plugins) {
         if (!plugin.onError) continue;
         try {
-          plugin.onError(UnexpectedEngineError.wrap(error), input);
+          plugin.onError(told, input);
         } catch {
           // Contract of PPEPlugin.onError: the evaluation's own error reaches the caller.
         }
@@ -228,7 +227,12 @@ export class PPEEngine {
   private copySourceRules(rules: ReadonlyArray<Rule>): Rule[] {
     try {
       // justification: each item is a copy of a rule; the validator checks it as one.
-      return readItems(rules, this.limits, 'rules') as Rule[];
+      return readItems(
+        rules,
+        this.limits,
+        'rules',
+        new Budget('maxHookLeaves', this.limits.maxHookLeaves),
+      ) as Rule[];
     } catch (error) {
       if (error instanceof EngineLimitError) throw error;
       throw new ValidationError('Invalid rules', [describeThrown(error)]);
@@ -259,8 +263,9 @@ export class PPEEngine {
     // The options and the number of rules come first: no hook runs, nothing is read, for a call
     // that is refused whatever the input.
     checkEvaluateOptions(options);
-    if (rules.length > this.limits.maxRules) {
-      throw new EngineLimitError('maxRules', this.limits.maxRules, rules.length);
+    const ruleCount = countRules(rules);
+    if (ruleCount > this.limits.maxRules) {
+      throw new EngineLimitError('maxRules', this.limits.maxRules, ruleCount);
     }
 
     const traceBuilder = new TraceBuilder();
@@ -279,11 +284,20 @@ export class PPEEngine {
     const alreadyExists = await this.snapshotManager.exists(requestId);
     if (alreadyExists) throw new DuplicateRequestError(requestId);
 
+    // The registries are fixed for this evaluation: a model or a DSL registered or replaced while
+    // it runs is not seen, so that what the rules are validated against is what runs.
+    const models = this.modelRegistry.snapshot();
+    const dsls = this.dslRegistry.snapshot();
+    const ruleValidator = new RuleValidator(models, this.onChecksumMismatch);
+    const ruleFilter = new RuleFilter(dsls, this.sandbox);
+    const exceptionProcessor = new ExceptionProcessor(models);
+    const executionPipeline = new ExecutionPipeline(models, this.conflictMode);
+
     // Step 3: Rule validation (checksum of the source rules). The engine works on its own frozen
     // copies of the rules: the caller's objects are never handed to a hook, so a hook cannot
     // rewrite a rule in place, and a caller cannot change one while hooks are awaited.
     const sourceCopies = this.copySourceRules(rules);
-    const initialValidation = this.ruleValidator.validate(sourceCopies);
+    const initialValidation = ruleValidator.validate(sourceCopies);
     allSkipped.push(...initialValidation.invalid);
 
     // The ledger of the given rules: held by the engine alone, from here on. Hooks get views of
@@ -304,6 +318,8 @@ export class PPEEngine {
       let reading: BeforeEvaluateReading;
       let accepted: PreparedInput;
       let outcome: LedgerOutcome;
+      // All the leaves one return makes the engine read count against one bound.
+      const budget = new Budget('maxHookLeaves', this.limits.maxHookLeaves);
       try {
         // Read once and checked as a whole: nothing is committed unless every check passes.
         reading = readBeforeEvaluate(
@@ -315,10 +331,12 @@ export class PPEEngine {
             signal,
           ),
           this.limits,
+          budget,
         );
         // The input a hook returns is checked as the caller's was (bounds, spec, strict mode),
         // and it is the same request: the idempotence check and the record rest on these two.
         accepted = this.acceptInput(reading.input);
+        budget.add(accepted.leaves);
         if (accepted.input.requestId !== requestId) {
           throw new Error(
             `plugin ${plugin.name} changed requestId from ${JSON.stringify(requestId)} to ${JSON.stringify(accepted.input.requestId)}`,
@@ -331,7 +349,12 @@ export class PPEEngine {
         }
         // The rules and the skips are the given ones, or verified new ones: nothing rewritten,
         // doubled, dropped or invented.
-        outcome = ledger.apply(plugin.name, reading, this.ruleValidator);
+        // The meta is the caller's declaration (the date, the named dates, the dimensions, the
+        // tags): a hook may change the data, not what the caller declared.
+        if (!sameCanonical(currentMeta, accepted.meta)) {
+          throw new Error(`plugin ${plugin.name} changed meta, which only the caller declares`);
+        }
+        outcome = ledger.apply(plugin.name, reading, ruleValidator);
       } catch (error) {
         // Fail closed: a decision computed without what a plugin was to prepare is not returned.
         signal.throwIfAborted();
@@ -358,12 +381,12 @@ export class PPEEngine {
     // Step 5: Rule filtering (on potentially mutated rules)
     signal.throwIfAborted();
     const now = currentDate ?? new Date();
-    const filterResult = await this.ruleFilter.filter(currentRules, currentInput, now, currentMeta);
+    const filterResult = await ruleFilter.filter(currentRules, currentInput, now, currentMeta);
     allSkipped.push(...filterResult.skipped);
 
     // Step 6: Native exceptions. The short-circuited values feed the output combination; the
     // exception records are for the proof (Task 10).
-    const exceptionResult = this.exceptionProcessor.apply(filterResult.passed, this.conflictMode);
+    const exceptionResult = exceptionProcessor.apply(filterResult.passed, this.conflictMode);
     allSkipped.push(...exceptionResult.skipped);
 
     // Step 7: Dominance resolution
@@ -374,7 +397,7 @@ export class PPEEngine {
     allSkipped.push(...dominanceSkipped);
 
     // Step 8: Execution and combination, output by output
-    const pipelineResult = this.executionPipeline.execute(
+    const pipelineResult = executionPipeline.execute(
       resolvedRules,
       currentInput,
       traceBuilder,
@@ -395,7 +418,7 @@ export class PPEEngine {
     }
 
     const dslVersions: Record<string, string> = {};
-    for (const [name, evaluator] of this.dslRegistry.getAll()) {
+    for (const [name, evaluator] of dsls.getAll()) {
       dslVersions[name] = evaluator.version;
     }
 
@@ -424,8 +447,10 @@ export class PPEEngine {
       if (!hook) continue;
       signal.throwIfAborted();
       const before = result;
-      const handed = copyData(before);
       try {
+        // A view that refuses every write, over the result as it is: nothing is copied, and a
+        // field the hook returns unchanged is the very object of the view.
+        const handed = trapped(before);
         const returned = await this.sandbox.runHook(
           () => hook.call(plugin, hookView(currentInput), handed),
           plugin.name,
@@ -433,7 +458,7 @@ export class PPEEngine {
           signal,
         );
         signal.throwIfAborted();
-        result = acceptAfterEvaluate(plugin.name, before, returned, this.limits).result;
+        result = acceptAfterEvaluate(plugin.name, before, handed, returned, this.limits).result;
       } catch (error) {
         signal.throwIfAborted();
         throw new PluginHookError(plugin.name, 'afterEvaluate', error);
@@ -473,15 +498,37 @@ function hookView(input: EvaluationInput): EvaluationInput {
     ...(dates === undefined
       ? {}
       : {
-          dates: Object.fromEntries(
-            Object.entries(dates).map(([name, date]) => [
-              name,
-              date instanceof Date ? new Date(date.getTime()) : date,
-            ]),
+          dates: Object.freeze(
+            Object.fromEntries(
+              Object.entries(dates).map(([name, date]) => [
+                name,
+                date instanceof Date ? new Date(date.getTime()) : date,
+              ]),
+            ),
           ),
         }),
   };
   return Object.freeze({ ...input, meta: Object.freeze(meta) });
+}
+
+/** The number of rules given, read once; an unreadable list is a `ValidationError`. */
+function countRules(rules: unknown): number {
+  try {
+    if (Array.isArray(rules)) return rules.length;
+  } catch (error) {
+    throw new ValidationError('Invalid rules', [`rules could not be read: ${describeThrown(error)}`]);
+  }
+  // Not a list: `readItems` says so, as a `ValidationError`.
+  return 0;
+}
+
+/** True when two canonical metas have the same canonical form (a value without one differs). */
+function sameCanonical(a: unknown, b: unknown): boolean {
+  try {
+    return canonicalize(a) === canonicalize(b);
+  } catch {
+    return false;
+  }
 }
 
 function hookDiagnostic(plugin: PPEPlugin, hook: HookName, message: string): Diagnostic {

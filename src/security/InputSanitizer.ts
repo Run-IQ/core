@@ -26,22 +26,19 @@ export interface PreparedInput {
   readonly meta: NormalizedMeta;
   /** The instant rules are evaluated at, when the input names one (`evaluationDate`). */
   readonly evaluationDate: Date | undefined;
+  /** The leaves counted while the input was copied (data and every part of `meta`). */
+  readonly leaves: number;
 }
 
 /** True for a non-null, non-array object. */
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
-
-/** Freezes the maps and lists `normalizeMeta` built (the rest is already the frozen copy). */
-function freezeCanonical(meta: NormalizedMeta): void {
-  for (const values of Object.values(meta.dimensions)) {
-    if (typeof values !== 'string') Object.freeze(values);
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  try {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+  } catch {
+    // A revoked Proxy: not an object the engine can read; it is named, not thrown raw.
+    return false;
   }
-  Object.freeze(meta.dimensions);
-  Object.freeze(meta.dates);
-  Object.freeze(meta.tags);
-  Object.freeze(meta);
-}
+};
 
 export class InputSanitizer {
   /**
@@ -164,9 +161,6 @@ export class InputSanitizer {
       throw new ValidationError('Invalid evaluation input', reasons);
     }
 
-    // The canonical meta is the one the rules read ($dates, $dimensions): frozen at every depth,
-    // so that nothing a rule or a DSL does can change what a later rule sees.
-    freezeCanonical(canonical);
     return {
       input: Object.freeze({
         requestId: requestId as string,
@@ -176,6 +170,7 @@ export class InputSanitizer {
       }),
       meta: canonical,
       evaluationDate: evaluationDate(canonical),
+      leaves: copier.leaves,
     };
   }
 

@@ -18,7 +18,15 @@ export class DSLRegistry {
     return this.evaluators.has(dsl);
   }
 
+  /** A copy: writing to it changes nothing in the registry. */
   getAll(): ReadonlyMap<string, DSLEvaluator> {
-    return this.evaluators;
+    return new Map(this.evaluators);
+  }
+
+  /** A registry fixed at this moment: an evaluator registered later is not seen by it. */
+  snapshot(): DSLRegistry {
+    const fixed = new DSLRegistry();
+    for (const [name, evaluator] of this.evaluators) fixed.evaluators.set(name, evaluator);
+    return fixed;
   }
 }

@@ -40,7 +40,18 @@ export class ModelRegistry {
     return this.models.has(name);
   }
 
+  /** A copy: writing to it changes nothing in the registry. */
   getAll(): ReadonlyMap<string, CalculationModel<OutputValue>> {
-    return this.models;
+    return new Map(this.models);
+  }
+
+  /**
+   * A registry fixed at this moment: a model registered or replaced later is not seen by it. An
+   * evaluation works on one, so that what its rules were validated against is what runs.
+   */
+  snapshot(): ModelRegistry {
+    const fixed = new ModelRegistry();
+    for (const [name, model] of this.models) fixed.models.set(name, model);
+    return fixed;
   }
 }

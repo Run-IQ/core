@@ -507,10 +507,8 @@ describe('afterEvaluate cannot change the decision', () => {
       () => expect.unreachable('should have failed'),
       (error: unknown) => {
         expect(error).toBeInstanceOf(PluginHookError);
-        expect((error as PluginHookError).cause).toMatchObject({
-          message:
-            'plugin careless afterEvaluate changed the decision: appliedRules, outputs, value',
-        });
+        // The result it was handed refuses writes: the first one throws a dedicated error.
+        expect(((error as PluginHookError).cause as Error).name).toBe('FrozenViewWriteError');
       },
     );
     expect(rule.params).toEqual({ rate: 1 });
