@@ -1,6 +1,6 @@
 import type { JsonValue } from '@run-iq/spec';
 import type { EvaluationInput } from './input.js';
-import type { EvaluationResult, SkippedRule } from './result.js';
+import type { UnsealedResult, SkippedRule } from './result.js';
 import type { Rule } from './rule.js';
 import type { CalculationModel } from './model.js';
 import type { OutputValue } from './output.js';
@@ -84,8 +84,8 @@ export interface PPEPlugin {
    */
   afterEvaluate?(
     input: EvaluationInput,
-    result: EvaluationResult,
-  ): EvaluationResult | Promise<EvaluationResult>;
+    result: UnsealedResult,
+  ): UnsealedResult | Promise<UnsealedResult>;
 
   /**
    * Told of errors, never asked to recover from them. `error` is the thrown value when it is a

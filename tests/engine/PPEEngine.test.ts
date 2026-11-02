@@ -42,7 +42,9 @@ describe('PPEEngine', () => {
     expect(result.value).toBe(250);
     expect(result.appliedRules).toHaveLength(1);
     expect(result.engineVersion).toBe(VERSION);
-    expect(result.snapshotId).toBeTruthy();
+    expect(result).not.toHaveProperty('snapshotId');
+    // The snapshot is still saved: the adapter answers `exists` for the requestId.
+    expect(await adapter.exists(result.requestId)).toBe(true);
     expect(result.trace.steps).toHaveLength(1);
   });
 

@@ -1,5 +1,5 @@
 import { DEFAULT_OUTPUT, canonicalize } from '@run-iq/spec';
-import type { EvaluationResult } from '../types/result.js';
+import type { UnsealedResult } from '../types/result.js';
 import { describeValue } from '../utils/json.js';
 import { copyData, isObject } from '../utils/values.js';
 import { isSkip, withDetail } from './beforeEvaluateResult.js';
@@ -7,7 +7,7 @@ import { isSkip, withDetail } from './beforeEvaluateResult.js';
 /** What the engine keeps of a result returned by `afterEvaluate`, and what it says about it. */
 export interface AfterEvaluateTransition {
   /** The accepted result, or `null` when the engine refuses it and keeps the previous one. */
-  readonly result: EvaluationResult | null;
+  readonly result: UnsealedResult | null;
   /** One message per change the engine reports, in a fixed order (see `acceptAfterEvaluate`). */
   readonly messages: readonly string[];
 }
@@ -56,8 +56,8 @@ export const PLUGIN_EDITABLE_FIELDS: ReadonlySet<string> = new Set([
  */
 export function acceptAfterEvaluate(
   pluginName: string,
-  before: EvaluationResult,
-  returned: EvaluationResult,
+  before: UnsealedResult,
+  returned: UnsealedResult,
 ): AfterEvaluateTransition {
   const refuse = (what: string): TypeError =>
     new TypeError(`plugin ${pluginName} afterEvaluate returned ${what}; ignored`);
@@ -171,9 +171,9 @@ export function acceptAfterEvaluate(
 
 /** The engine-owned fields whose returned values (read once, in `owned`) differ, sorted. */
 function changedEngineFields(
-  before: EvaluationResult,
+  before: UnsealedResult,
   owned: Readonly<Record<string, unknown>>,
-  syncedOutputs: EvaluationResult['outputs'],
+  syncedOutputs: UnsealedResult['outputs'],
 ): string[] {
   const changed: string[] = [];
   for (const [field, theirs] of Object.entries(owned)) {

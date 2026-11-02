@@ -2,7 +2,13 @@ export { PPEEngine } from './engine/PPEEngine.js';
 export type { PPEEngineConfig } from './engine/PPEEngine.js';
 export type { Rule, Expression } from './types/rule.js';
 export type { EvaluationInput, FactEncoder } from './types/input.js';
-export type { EvaluationResult, BreakdownItem, SkippedRule, SkipReason } from './types/result.js';
+export type {
+  EvaluationResult,
+  UnsealedResult,
+  BreakdownItem,
+  SkippedRule,
+  SkipReason,
+} from './types/result.js';
 export type { OutputValue, DecisionOutput } from './types/output.js';
 export type { Diagnostic } from './types/diagnostic.js';
 export type { DecisionStore } from './types/store.js';

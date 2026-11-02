@@ -1,5 +1,5 @@
 import type { EvaluationInput } from './input.js';
-import type { EvaluationResult } from './result.js';
+import type { UnsealedResult } from './result.js';
 import type { Rule } from './rule.js';
 import type { EvaluationTrace } from './trace.js';
 
@@ -11,7 +11,7 @@ export interface Snapshot {
   readonly dslVersions: Record<string, string>;
   readonly inputSnapshot: EvaluationInput;
   readonly rulesSnapshot: ReadonlyArray<Rule>;
-  readonly result: EvaluationResult;
+  readonly result: UnsealedResult;
   readonly trace: EvaluationTrace;
   readonly checksum: string;
   readonly timestamp: Date;

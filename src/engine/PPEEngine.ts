@@ -1,7 +1,8 @@
+import { DEFAULT_OUTPUT, DEFAULT_OUTPUT_DECLARATION } from '@run-iq/spec';
 import type { JsonValue } from '@run-iq/spec';
 import type { Rule } from '../types/rule.js';
 import type { EvaluationInput } from '../types/input.js';
-import type { EvaluationResult, SkippedRule } from '../types/result.js';
+import type { SkippedRule, UnsealedResult } from '../types/result.js';
 import type { PPEPlugin, PluginContext } from '../types/plugin.js';
 import type { DSLEvaluator } from '../types/dsl.js';
 import type { ISnapshotAdapter } from '../types/snapshot.js';
@@ -120,7 +121,7 @@ export class PPEEngine {
    * cleared whatever the outcome. The pipeline still running then is aborted: it stops at its
    * next step, before any further hook, before saving, and without calling `onError`.
    */
-  async evaluate(rules: ReadonlyArray<Rule>, input: EvaluationInput): Promise<EvaluationResult> {
+  async evaluate(rules: ReadonlyArray<Rule>, input: EvaluationInput): Promise<UnsealedResult> {
     const abort = new AbortController();
     const timeoutMs = this.pipelineTimeout;
     if (timeoutMs === undefined) return this.executeEvaluation(rules, input, abort.signal);
@@ -148,7 +149,7 @@ export class PPEEngine {
     rules: ReadonlyArray<Rule>,
     input: EvaluationInput,
     signal: AbortSignal,
-  ): Promise<EvaluationResult> {
+  ): Promise<UnsealedResult> {
     try {
       return await this.runPipeline(rules, input, signal);
     } catch (error) {
@@ -169,7 +170,7 @@ export class PPEEngine {
     rules: ReadonlyArray<Rule>,
     input: EvaluationInput,
     signal: AbortSignal,
-  ): Promise<EvaluationResult> {
+  ): Promise<UnsealedResult> {
     const traceBuilder = new TraceBuilder();
     const allSkipped: SkippedRule[] = [];
 
@@ -302,7 +303,7 @@ export class PPEEngine {
     }
 
     // Build initial result
-    let result: EvaluationResult = {
+    let result: UnsealedResult = {
       requestId: input.requestId,
       value: pipelineResult.outputs.value.value,
       outputs: pipelineResult.outputs,
@@ -313,7 +314,6 @@ export class PPEEngine {
       diagnostics: [...filterResult.diagnostics, ...hookDiagnostics],
       missingFacts: filterResult.missingFacts,
       pluginState,
-      snapshotId: '',
       engineVersion: ENGINE_VERSION,
       pluginVersions,
       dslVersions,
@@ -360,25 +360,36 @@ export class PPEEngine {
     );
 
     signal.throwIfAborted();
-    const snapshotId = await this.snapshotManager.save(snapshot);
+    await this.snapshotManager.save(snapshot);
 
-    // Step 11: Return with snapshotId
-    return { ...result, snapshotId };
+    // Step 11: Return the result; spec dropped `snapshotId`, the proof replaces it
+    return result;
   }
 
-  private buildCachedResult(input: EvaluationInput): EvaluationResult {
+  /**
+   * The stub of an already seen `requestId`: nothing is evaluated, `meta.cached` says so (it
+   * took the place of `snapshotId: 'cached'`; Task 10 returns the stored decision instead).
+   */
+  private buildCachedResult(input: EvaluationInput): UnsealedResult {
+    const { type, combine } = DEFAULT_OUTPUT_DECLARATION;
     return {
       requestId: input.requestId,
       value: 0,
+      outputs: {
+        [DEFAULT_OUTPUT]: { name: DEFAULT_OUTPUT, type, combine, value: 0, contributors: [] },
+      },
       breakdown: [],
       appliedRules: [],
       skippedRules: [],
       trace: { steps: [], totalDurationMs: 0 },
-      snapshotId: 'cached',
+      diagnostics: [],
+      missingFacts: [],
+      pluginState: {},
       engineVersion: ENGINE_VERSION,
       pluginVersions: {},
       dslVersions: {},
       timestamp: new Date(),
+      meta: { cached: true },
     };
   }
 }

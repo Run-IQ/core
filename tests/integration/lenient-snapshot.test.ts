@@ -25,7 +25,7 @@ describe('SnapshotManager lenient mode (via engine)', () => {
     expect(result.appliedRules[0]!.id).toBe('r1');
   });
 
-  it('returns snapshotId even when adapter fails in lenient mode', async () => {
+  it('returns the result without a snapshotId when adapter fails in lenient mode', async () => {
     const adapter = new InMemorySnapshotAdapter();
     adapter.shouldFail = true;
 
@@ -42,9 +42,9 @@ describe('SnapshotManager lenient mode (via engine)', () => {
     const rules = [makeRule({ id: 'r1', model: 'M', params: {} })];
     const result = await engine.evaluate(rules, makeInput());
 
-    // snapshotId should still be set (the serializer generates it before save)
-    expect(result.snapshotId).toBeTruthy();
-    expect(result.snapshotId).not.toBe('');
+    expect(result.value).toBe(300);
+    expect(result).not.toHaveProperty('snapshotId');
+    expect(await adapter.exists(result.requestId)).toBe(false);
   });
 
   it('calls onSnapshotError callback when adapter fails in lenient mode', async () => {

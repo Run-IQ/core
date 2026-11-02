@@ -29,6 +29,13 @@ import {
   refusesDeclaration,
 } from './outputDeclaration.js';
 
+/**
+ * An exception as core records it before 9M2 (`status`, `stratum`) and Task 10 (`salt`) settle
+ * and seal it: spec's `ProofException` without those three. Derived from it, so every other
+ * member stays in sync; those tasks delete this alias.
+ */
+export type UnsettledException = Omit<ProofException, 'status' | 'stratum' | 'salt'>;
+
 type Substitute = Extract<RuleException, { kind: 'substitute' }>;
 type ShortCircuitException = Extract<RuleException, { kind: 'shortCircuit' }>;
 
@@ -71,7 +78,7 @@ export interface ExceptionResult {
    * were already excluded, a substitution of excluded rules, or a short-circuit outranked on its
    * output (the winner is the one in `shortCircuits`).
    */
-  readonly applied: ProofException[];
+  readonly applied: UnsettledException[];
 }
 
 /** A rule whose exceptions fire, with the static targets of each of them. */
@@ -274,7 +281,7 @@ export class ExceptionProcessor {
       kept.push({ ...target, params });
     }
 
-    const applied: ProofException[] = [];
+    const applied: UnsettledException[] = [];
     fired.forEach(({ rule, exceptions }, carrierIndex) => {
       exceptions.forEach((exception, index) => {
         let affected: readonly Rule[];

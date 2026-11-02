@@ -24,6 +24,27 @@ describe('Idempotence', () => {
 
     // Second call with same requestId
     const result2 = await engine.evaluate(rules, input);
-    expect(result2.snapshotId).toBe('cached');
+    // The stub of an already seen requestId: nothing evaluated, marked by meta.cached (Task 10
+    // replaces the stub by the stored decision, `fromStore`).
+    expect(result2).toEqual({
+      requestId: 'idempotent-001',
+      value: 0,
+      outputs: {
+        value: { name: 'value', type: 'number', combine: 'sum', value: 0, contributors: [] },
+      },
+      breakdown: [],
+      appliedRules: [],
+      skippedRules: [],
+      trace: { steps: [], totalDurationMs: 0 },
+      diagnostics: [],
+      missingFacts: [],
+      pluginState: {},
+      engineVersion: result1.engineVersion,
+      pluginVersions: {},
+      dslVersions: {},
+      timestamp: result2.timestamp,
+      meta: { cached: true },
+    });
+    expect(result1).not.toHaveProperty('meta');
   });
 });

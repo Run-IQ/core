@@ -23,9 +23,12 @@ import type {
   SkippedRule,
   SkipReason,
   TraceStep,
+  UnsealedResult,
   ValidationResult,
 } from '../src/index.js';
+import type { UnsettledException } from '../src/engine/ExceptionProcessor.js';
 import type {
+  ProofException as SpecProofException,
   CombineStrategy as SpecCombineStrategy,
   DecisionProof as SpecDecisionProof,
   JsonValue,
@@ -222,5 +225,24 @@ describe('DecisionStore and FactEncoder', () => {
     expectTypeOf<FactEncoder['name']>().toEqualTypeOf<string>();
     expectTypeOf<FactEncoder['test']>().toEqualTypeOf<(value: unknown) => boolean>();
     expectTypeOf<FactEncoder['encode']>().toEqualTypeOf<(value: unknown) => JsonValue>();
+  });
+});
+
+describe('the transitional aliases are exactly the Omit of spec and result types', () => {
+  it('UnsealedResult is EvaluationResult without proof and fromStore (Task 10 deletes it)', () => {
+    expectTypeOf<UnsealedResult>().toEqualTypeOf<Omit<EvaluationResult, 'proof' | 'fromStore'>>();
+    expectTypeOf<UnsealedResult>().not.toHaveProperty('proof');
+    expectTypeOf<UnsealedResult>().not.toHaveProperty('fromStore');
+    expectTypeOf<UnsealedResult['outputs']>().toEqualTypeOf<EvaluationResult['outputs']>();
+  });
+
+  it('UnsettledException is ProofException without status, stratum and salt (9M2, Task 10)', () => {
+    expectTypeOf<UnsettledException>().toEqualTypeOf<
+      Omit<SpecProofException, 'status' | 'stratum' | 'salt'>
+    >();
+    expectTypeOf<UnsettledException>().not.toHaveProperty('status');
+    expectTypeOf<UnsettledException>().not.toHaveProperty('stratum');
+    expectTypeOf<UnsettledException>().not.toHaveProperty('salt');
+    expectTypeOf<UnsettledException['affected']>().toEqualTypeOf<SpecProofException['affected']>();
   });
 });

@@ -112,3 +112,10 @@ export interface EvaluationResult {
   readonly timestamp: Date;
   readonly meta?: Record<string, unknown> | undefined;
 }
+
+/**
+ * What core returns before Task 10 builds the proof: an `EvaluationResult` without its `proof`
+ * and its `fromStore`. Derived from `EvaluationResult`, so every other member stays in sync; Task
+ * 10 deletes this alias and the engine returns `EvaluationResult`.
+ */
+export type UnsealedResult = Omit<EvaluationResult, 'proof' | 'fromStore'>;

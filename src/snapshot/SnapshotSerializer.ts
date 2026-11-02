@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { randomUUID } from 'node:crypto';
 import type { EvaluationInput } from '../types/input.js';
-import type { EvaluationResult } from '../types/result.js';
+import type { UnsealedResult } from '../types/result.js';
 import type { Rule } from '../types/rule.js';
 import type { EvaluationTrace } from '../types/trace.js';
 import type { Snapshot } from '../types/snapshot.js';
@@ -10,7 +10,7 @@ export class SnapshotSerializer {
   static serialize(
     input: EvaluationInput,
     rules: ReadonlyArray<Rule>,
-    result: EvaluationResult,
+    result: UnsealedResult,
     trace: EvaluationTrace,
     engineVersion: string,
     pluginVersions: Record<string, string>,
@@ -19,7 +19,7 @@ export class SnapshotSerializer {
     // Deep immutable copy — structuredClone preserves Date objects (Node 17+)
     const inputSnapshot = structuredClone(input) as EvaluationInput;
     const rulesSnapshot = structuredClone(rules) as Rule[];
-    const resultCopy = structuredClone(result) as EvaluationResult;
+    const resultCopy = structuredClone(result) as UnsealedResult;
     const traceCopy = structuredClone(trace) as EvaluationTrace;
 
     const id = randomUUID();
