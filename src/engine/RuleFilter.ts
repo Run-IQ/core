@@ -43,6 +43,9 @@ const NO_REFERENTIALS: ReadonlyMap<string, Referential> = new Map();
 const describeSpec = (spec: DimensionSpec): string =>
   typeof spec === 'string' ? spec : canonicalize(spec);
 
+/** A window that holds every instant: it only makes spec check the date it is asked about. */
+const ALWAYS_OPEN = { effectiveFrom: new Date(0), effectiveUntil: null };
+
 /** The exclusion of a rule that spec refuses: its code and message, as spec words them. */
 function invalidRule(rule: Rule, error: SpecError, where = ''): Exclusion {
   return {
@@ -68,6 +71,9 @@ export class RuleFilter {
     input: EvaluationInput,
     now: Date,
   ): Promise<FilterResult> {
+    // The evaluation date is an input: an invalid one rejects the evaluation with spec's own
+    // error (INVALID_DATE), before any rule. A fault after this point is a rule's bound.
+    isEffectiveAt(ALWAYS_OPEN, now);
     const passed: Rule[] = [];
     const skipped: SkippedRule[] = [];
     const missing = new Set<string>();
