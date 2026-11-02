@@ -10,9 +10,10 @@ export interface EvaluationInput {
     readonly context?: Record<string, unknown> | undefined;
     readonly effectiveDate?: Date | undefined;
     /**
-     * The input's position on each dimension (e.g. `{ country: 'TG' }`). When present, a rule
-     * applies only if each of its dimensions equals the input's (`DIMENSION_MISMATCH` otherwise).
-     * Absent means no dimension filtering.
+     * The input's value on each dimension (e.g. `{ country: 'TG' }`), one value per dimension.
+     * When present, a rule applies only if each of its dimensions matches (`matchDimension` of
+     * `@run-iq/spec`: a value, or `{ anyOf, ... }`); `DIMENSION_MISMATCH` otherwise, and a
+     * dimension the input lacks is a mismatch. Absent means no dimension filtering.
      */
     readonly dimensions?: Readonly<Record<string, string>> | undefined;
   };

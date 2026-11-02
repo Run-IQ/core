@@ -63,7 +63,7 @@ result.breakdown; // [{ ruleId: 'shipping-fee', contribution: 10, modelUsed: 'PE
 ## How `evaluate()` works
 
 1. Validate the input
-2. Return early if a snapshot already exists for `requestId`
+2. Refuse a `requestId` whose snapshot already exists (`DuplicateRequestError`, code `DUPLICATE_REQUEST`)
 3. Verify rule checksums and params
 4. Run plugin `beforeEvaluate` hooks
 5. Filter rules by validity period, tags and condition
@@ -89,11 +89,11 @@ Rules that are not applied appear in `result.skippedRules` with a reason (`CONDI
 
 `meta.effectiveDate` selects the rules that were in force at that date. This lets you recompute an old result with the rules that applied at the time.
 
-When filtering, core still treats `effectiveUntil` as inclusive: a rule is in force at the instant `effectiveUntil` itself. `@run-iq/spec` defines the window as `[effectiveFrom, effectiveUntil)`, and core will apply it in a later release. The checksum already requires `effectiveUntil` to be after `effectiveFrom`, so a one-day rule ends the next day (`2025-03-01` to `2025-03-02`).
+The window of a rule is `[effectiveFrom, effectiveUntil)`, as `@run-iq/spec` defines it: `effectiveUntil` itself is excluded. A bound is a `Date` (an instant) or a civil date `YYYY-MM-DD`, compared as a civil date in UTC. The checksum requires `effectiveUntil` to be after `effectiveFrom`, so a one-day rule ends the next day (`2025-03-01` to `2025-03-02`). A bound spec refuses (or a civil bound with an IANA `timeZone`, which core cannot resolve yet) skips that rule as `INVALID_RULE`, with spec's code and message in `detail`.
 
 ## Rules stored as JSON
 
-Rules loaded from a database or an API have their dates as strings. `hydrateRule` and `hydrateRules` convert them back. They keep the stored `checksum`, so a row changed after sealing is still skipped as `CHECKSUM_MISMATCH`.
+Rules loaded from a database or an API have their dates as strings. `hydrateRule` and `hydrateRules` convert them back (an instant becomes a `Date`, a civil date stays a string). They keep the stored `checksum`, so a row changed after sealing is still skipped as `CHECKSUM_MISMATCH`.
 
 They throw a `ValidationError` on an invalid definition, for example a date-time without a time zone, `effectiveUntil` not after `effectiveFrom`, missing `params`, or a non-integer `version`. Its `reasons` list every problem found.
 
