@@ -35,16 +35,17 @@ Other rigour: write the test first and show it failing; exact assertions; one mu
 
 ## 3. Loop protocol with the machine session
 
-The cloud session (you) and the machine session (on the owner's computer) talk only through the GitHub issue `Run-IQ/.github#1` and the pull requests. The owner does not intervene in the loop.
+Two cloud sessions work in parallel, **lane A** and **lane B**, with the machine session. They talk only through the GitHub issue `Run-IQ/.github#1` and the pull requests. The owner does not intervene in the loop. In core the session so far is lane A; the current job names the lane that works here, and that lane alone works in this repository until its job is merged.
 
+- **Lanes.** A lane is a session, not a repo: each job names the repos it works in, and a lane works only in those. Two lanes never work in the same repo at the same time. When a job needs a change in a repo the job does not name, post what is needed and wait for the machine session's ruling. Cross-lane dependencies are decided by the machine session; lanes never coordinate directly. Each repo a lane enters later gets this same `CLAUDE.md` in that lane's first PR there.
 - **Branches.** One `cloud/<task>` branch per job, cut from `refonte/phase-2`. Pull requests go into `refonte/phase-2`.
-- **Comments.** Every comment you post starts with `Cloud session:`. The machine session's start with `Machine session:`.
-- **Sequence.** `Cloud session: ready for audit <PR link>`, then audit comments, then `Cloud session: fixes pushed` (one answer per finding, by number, Minor ones included), repeated until `Machine session: audit OK`.
-- **Merge.** Only after `Machine session: audit OK`, with CI green and the base unchanged: a fast-forward only, `git push origin cloud/<task>:refonte/phase-2`. Then post `Cloud session: merged <sha>` and wait for the next job. Commits are kept, never squashed.
-- **Owner questions.** For a product, licence or irreversible choice, any publish, tag or release, any push to `master` or `main`, deleting a repository or another branch, a change to spec while working on a core task, or a budget choice: post `Cloud session: BLOCKED (owner decision) <why>` and wait.
-- **Waiting.** Never end the session while waiting: poll issue #1 and the PR every 2 minutes for a new `Machine session:` comment, and re-arm the watch when it expires.
+- **Comments.** Every comment you post starts with `Cloud session (lane A):` or `Cloud session (lane B):`. The machine session's start with `Machine session (lane A):`, `Machine session (lane B):` or `Machine session (all lanes):`; a `Machine session: DECISION` post counts as all lanes. A lane acts only on comments for its own lane or for all lanes, and never answers, comments on or acts on the other lane's jobs, audits or PRs. Earlier comments with no lane tag belonged to lane A, except Job 5, which is lane B. An audit is posted on the PR, with a one-line tagged notice on #1.
+- **Sequence.** `Cloud session (lane A): ready for audit <PR link>`, then audit comments, then `fixes pushed` (one answer per finding, by number, Minor ones included), repeated until the audit OK.
+- **Merge.** Only after the audit OK, which comes as `Machine session (lane A): audit OK <PR link>` (the untagged form `Machine session: audit OK` is accepted for past PRs) and names **your** PR, with CI green and the base unchanged: a fast-forward only, `git push origin cloud/<task>:refonte/phase-2`. Then post `merged <sha>` and wait for the next job. Commits are kept, never squashed.
+- **Owner questions.** For a product, licence or irreversible choice, any publish, tag or release, any push to `master` or `main`, deleting a repository or another branch, a change to a repo the job does not name, or a budget choice: post `Cloud session (lane A): BLOCKED (owner decision) <why>` and wait.
+- **Waiting.** Never end the session while waiting: poll issue #1 and the PR every 2 minutes for a new comment whose body starts with `Machine session`, then keep only those tagged for your lane, `(all lanes)` or `DECISION`. Do not match on `Machine session:` alone, which misses tagged comments. Re-arm the watch when it expires.
 - **No footers.** No "Generated with", no `Co-Authored-By`, no signature line in commits, pull requests or comments. Tools that append one (`gh api`, some MCP create calls) must be followed by an edit that removes it, then checked.
-- **The owner is the sole author** of every commit.
+- **The owner is the sole author** of every commit: check `git config user.name` and `user.email` before the first commit of a session.
 - **Never:** push to `master` or `main`, publish a package, create or move a tag, create a repository, force-push, print or store a token.
 
 ## 4. Owner decisions
