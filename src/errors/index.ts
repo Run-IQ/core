@@ -8,6 +8,7 @@ export { DSLEvaluationError } from './DSLEvaluationError.js';
 export { PipelineTimeoutError } from './PipelineTimeoutError.js';
 export { ValidationError } from './ValidationError.js';
 export { DuplicateRequestError } from './DuplicateRequestError.js';
+export { EngineLimitError } from './EngineLimitError.js';
 export { ExceptionPrecedenceError } from './ExceptionPrecedenceError.js';
 export { OutputNotFiniteError } from './OutputNotFiniteError.js';
 export { DecimalPrecisionError } from './DecimalPrecisionError.js';
