@@ -96,10 +96,15 @@ export function describeMismatch(
 export function describeDeclaration(declaration: OutputDeclaration): string {
   const { values, rounding } = declaration;
   const listed = values === undefined ? '' : ` (${values.join(', ')})`;
+  // As `round` reads it: the scale first, else the increment, else nothing is rounded.
   const step =
-    rounding?.increment === undefined ? rounding?.scale : `increment ${rounding.increment}`;
+    rounding?.scale !== undefined
+      ? `${rounding.scale}`
+      : rounding?.increment !== undefined
+        ? `increment ${rounding.increment}`
+        : undefined;
   const rounded =
-    rounding === undefined
+    rounding === undefined || step === undefined
       ? ''
       : ` rounding ${step} ${rounding.mode}${rounding.at === undefined ? '' : ` at ${rounding.at}`}`;
   return `${declaration.type}/${declaration.combine}${listed}${rounded}`;

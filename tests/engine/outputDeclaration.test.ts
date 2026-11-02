@@ -60,4 +60,14 @@ describe('describeDeclaration', () => {
       'decimal/sum rounding increment 0.05 halfUp',
     );
   });
+
+  it('describes what round does: the scale when both steps are set, nothing without a step', () => {
+    // Spec refuses both, but `round` takes the scale first: the message says what is done.
+    expect(
+      describeDeclaration(decimal({ scale: 2, increment: '0.05', mode: 'halfUp', at: 'output' })),
+    ).toBe('decimal/sum rounding 2 halfUp at output');
+    expect(describeDeclaration(decimal({ mode: 'halfUp', at: 'contribution' }))).toBe(
+      'decimal/sum',
+    );
+  });
 });
