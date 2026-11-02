@@ -22,7 +22,7 @@ describe('RuleFilter: a dimension that spec cannot decide', () => {
     const filter = new RuleFilter(new DSLRegistry(), new PluginSandbox(500, 100));
     const rule = makeRule({ id: 'r1', model: 'M', dimensions: { country: 'TG' } });
     const input = makeInput({ meta: { tenantId: 't', dimensions: { country: 'TG' } } });
-    const result = await filter.filter([rule], input, new Date('2024-06-15T23:59:59.999Z'));
+    const result = await filter.filter([rule], input, new Date('2024-06-15T23:30:00.000Z'));
     // Called with the rule's spec, the input value, the UTC civil date of the evaluation and no
     // referential.
     expect(matchDimension.mock.calls).toEqual([['TG', 'TG', '2024-06-15', new Map()]]);
