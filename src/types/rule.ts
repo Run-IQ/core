@@ -22,6 +22,6 @@ export interface Rule extends Omit<
   readonly condition?: Expression | undefined;
   readonly dominanceGroup?: string | undefined;
   /** Absent means no dimension, like `{}`. */
-  readonly dimensions?: Readonly<Record<string, string>> | undefined;
+  readonly dimensions?: ExecutableRuleBase['dimensions'] | undefined;
   readonly [extension: string]: unknown;
 }

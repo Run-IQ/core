@@ -298,6 +298,74 @@ describe('RuleFilter', () => {
       expect(result.passed).toEqual([matching, free]);
     });
 
+    describe('structured dimensions (spec matchDimension)', () => {
+      const inCountry = (country: string) =>
+        makeInput({ meta: { tenantId: 't', dimensions: { country } } });
+
+      it('anyOf: passes a value of the list, names the spec and the value otherwise', async () => {
+        const rule = makeRule({
+          id: 'r1',
+          model: 'M',
+          dimensions: { country: { anyOf: ['TG', 'BJ'] } },
+        });
+        const passes = await createFilter().filter([rule], inCountry('BJ'), at);
+        expect(passes.passed).toEqual([rule]);
+        const refused = await createFilter().filter([rule], inCountry('CI'), at);
+        expect(refused.skipped).toEqual([
+          {
+            rule,
+            reason: 'DIMENSION_MISMATCH',
+            detail: 'country: rule {"anyOf":["TG","BJ"]}, input CI',
+          },
+        ]);
+      });
+
+      it('match all: the one input value must match, as with any', async () => {
+        const rule = makeRule({
+          id: 'r1',
+          model: 'M',
+          dimensions: { country: { anyOf: ['TG', 'BJ'], match: 'all' } },
+        });
+        expect((await createFilter().filter([rule], inCountry('TG'), at)).passed).toEqual([rule]);
+        expect((await createFilter().filter([rule], inCountry('CI'), at)).skipped).toEqual([
+          {
+            rule,
+            reason: 'DIMENSION_MISMATCH',
+            detail: 'country: rule {"anyOf":["TG","BJ"],"match":"all"}, input CI',
+          },
+        ]);
+      });
+
+      it('a qualified value matches as written', async () => {
+        const rule = makeRule({
+          id: 'r1',
+          model: 'M',
+          dimensions: { activity: 'nace-2.1:62.10' },
+        });
+        const input = makeInput({
+          meta: { tenantId: 't', dimensions: { activity: 'nace-2.1:62.10' } },
+        });
+        expect((await createFilter().filter([rule], input, at)).passed).toEqual([rule]);
+      });
+
+      it('a ref names the spec error: no referential is provided yet, never a silent mismatch', async () => {
+        const rule = makeRule({
+          id: 'r1',
+          model: 'M',
+          dimensions: { country: { ref: 'ue', anyOf: ['EU'], except: ['FR'] } },
+        });
+        const result = await createFilter().filter([rule], inCountry('TG'), at);
+        expect(result.passed).toEqual([]);
+        expect(result.skipped).toEqual([
+          {
+            rule,
+            reason: 'INVALID_RULE',
+            detail: 'Invalid rule r1@1: dimension country: unknown referential ue',
+          },
+        ]);
+      });
+    });
+
     it('checks tags before dimensions', async () => {
       const rule = makeRule({
         id: 'r1',

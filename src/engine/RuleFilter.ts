@@ -4,7 +4,8 @@ import type { Diagnostic } from '../types/diagnostic.js';
 import type { SkippedRule } from '../types/result.js';
 import type { DSLRegistry } from '../registry/DSLRegistry.js';
 import type { PluginSandbox } from '../security/PluginSandbox.js';
-import { isEffectiveAt } from '@run-iq/spec';
+import { SpecError, canonicalize, isEffectiveAt, matchDimension } from '@run-iq/spec';
+import type { DimensionSpec, Referential } from '@run-iq/spec';
 import { DSLEvaluationError } from '../errors/DSLEvaluationError.js';
 import { DSLTimeoutError } from '../errors/DSLTimeoutError.js';
 import { describeThrown } from '../utils/values.js';
@@ -34,6 +35,13 @@ function resolvePath(data: Record<string, unknown>, path: string): unknown {
   }
   return current;
 }
+
+/** The referentials the dimension filter can resolve a `ref` in: none until 9Q provides them. */
+const NO_REFERENTIALS: ReadonlyMap<string, Referential> = new Map();
+
+/** A rule's dimension as the detail names it: a plain value as written, a spec in JSON. */
+const describeSpec = (spec: DimensionSpec): string =>
+  typeof spec === 'string' ? spec : canonicalize(spec);
 
 /** A bound as the detail names it: a civil date as written, an instant in ISO form. */
 function formatDate(date: string | Date): string {
@@ -97,15 +105,33 @@ export class RuleFilter {
       }
     }
 
-    // 3. Dimension filter (only when the input declares dimensions)
+    // 3. Dimension filter (only when the input declares dimensions), by spec's matchDimension
     const inputDimensions = input.meta.dimensions;
     if (inputDimensions !== undefined && rule.dimensions !== undefined) {
-      for (const [key, expected] of Object.entries(rule.dimensions)) {
+      // The civil date of the evaluation, in UTC: 9P refines it (the rule's reference date).
+      const on = now.toISOString().slice(0, 10);
+      for (const [key, spec] of Object.entries(rule.dimensions)) {
         const actual = Object.hasOwn(inputDimensions, key) ? inputDimensions[key] : undefined;
-        if (actual !== expected) {
+        const rulePart = `${key}: rule ${describeSpec(spec)}`;
+        if (actual === undefined) {
+          return { reason: 'DIMENSION_MISMATCH', detail: `${rulePart}, input has no ${key}` };
+        }
+        let match: ReturnType<typeof matchDimension>;
+        try {
+          match = matchDimension(spec, actual, on, NO_REFERENTIALS);
+        } catch (error) {
+          // A rule spec or a referential refuses (`unknown referential`): named, never a mismatch.
+          if (!(error instanceof SpecError)) throw error;
+          return {
+            reason: 'INVALID_RULE',
+            detail: `Invalid rule ${rule.id}@${rule.version}: dimension ${key}: ${error.message}`,
+          };
+        }
+        if (match.result !== true) {
+          const unknown = match.result === 'unknown' ? ` (unknown: ${match.why})` : '';
           return {
             reason: 'DIMENSION_MISMATCH',
-            detail: `${key}: rule ${expected}, ${actual === undefined ? `input has no ${key}` : `input ${actual}`}`,
+            detail: `${rulePart}, input ${actual}${unknown}`,
           };
         }
       }
