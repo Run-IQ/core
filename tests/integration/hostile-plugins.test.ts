@@ -1,7 +1,7 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import type { PPEPlugin, PluginContext, BeforeEvaluateResult } from '../../src/types/plugin.js';
-import type { EvaluationResult } from '../../src/types/result.js';
+import type { UnsealedResult } from '../../src/types/result.js';
 import type { DSLEvaluator } from '../../src/types/dsl.js';
 import type { PPEEngineConfig } from '../../src/engine/PPEEngine.js';
 import { PipelineTimeoutError, UnexpectedEngineError } from '../../src/index.js';
@@ -194,7 +194,7 @@ describe('hostile afterEvaluate results', () => {
     ['str', '"str"'],
   ] as const) {
     it(`ignores a result that is ${described}`, async () => {
-      const bad = pluginWith('bad', { afterEvaluate: () => untyped<EvaluationResult>(returned) });
+      const bad = pluginWith('bad', { afterEvaluate: () => untyped<UnsealedResult>(returned) });
       const result = await engineWith([bad]).evaluate([rule()], makeInput());
       expect(result.value).toBe(100);
       expect(result.diagnostics.map((d) => d.message)).toEqual([
@@ -205,8 +205,7 @@ describe('hostile afterEvaluate results', () => {
 
   it('ignores a result whose appliedRules is not an array of objects', async () => {
     const bad = pluginWith('bad', {
-      afterEvaluate: (_input, result) =>
-        untyped<EvaluationResult>({ ...result, appliedRules: [5] }),
+      afterEvaluate: (_input, result) => untyped<UnsealedResult>({ ...result, appliedRules: [5] }),
     });
     const result = await engineWith([bad]).evaluate([rule()], makeInput());
     expect(result.appliedRules.map((r) => r.id)).toEqual(['r1']);
@@ -218,7 +217,7 @@ describe('hostile afterEvaluate results', () => {
   it('reads value once: a getter answering 7, 7, then "evil" leaves value and outputs in sync', async () => {
     let reads = 0;
     const bad = pluginWith('bad', {
-      afterEvaluate(_input, result): EvaluationResult {
+      afterEvaluate(_input, result): UnsealedResult {
         const out = { ...result };
         Object.defineProperty(out, 'value', {
           enumerable: true,
@@ -266,7 +265,7 @@ describe('hostile afterEvaluate results', () => {
       dslVersions: Record<string, string>;
     }
     const bad = pluginWith('bad', {
-      afterEvaluate(_input, result): EvaluationResult {
+      afterEvaluate(_input, result): UnsealedResult {
         const writable = untyped<Writable>(result);
         writable.pluginState['st']!.a = 999;
         writable.diagnostics.push({ source: 'engine', message: 'forged' });
@@ -322,7 +321,7 @@ describe('hostile afterEvaluate results', () => {
         value: 0,
         appliedRules: [
           ...result.appliedRules,
-          untyped<EvaluationResult['appliedRules'][number]>({
+          untyped<UnsealedResult['appliedRules'][number]>({
             id: 'SC',
             model: 'META_SHORT_CIRCUIT',
             priority: 9999,
@@ -352,7 +351,7 @@ describe('pipeline timeout abort', () => {
   it('stops the late pipeline: no afterEvaluate, no save, no onError', async () => {
     const adapter = new InMemorySnapshotAdapter();
     const save = vi.spyOn(adapter, 'save');
-    const afterEvaluate = vi.fn((_input: unknown, result: EvaluationResult) => result);
+    const afterEvaluate = vi.fn((_input: unknown, result: UnsealedResult) => result);
     const onError = vi.fn();
     let release: () => void = () => undefined;
     const slow = pluginWith('slow', {
@@ -422,7 +421,7 @@ describe('fields read by name', () => {
         reads.push('rules');
         return [];
       }
-      get skipped(): BeforeEvaluateResult['skipped'] {
+      get skipped(): NonNullable<BeforeEvaluateResult['skipped']> {
         reads.push('skipped');
         return this.source.map((r) => ({ rule: r, reason: 'SHORT_CIRCUITED' as const }));
       }
@@ -442,7 +441,7 @@ describe('fields read by name', () => {
   it('keeps a non-enumerable meta and reads each afterEvaluate field once', async () => {
     const reads = new Map<string, number>();
     const p = pluginWith('p', {
-      afterEvaluate(_input, result): EvaluationResult {
+      afterEvaluate(_input, result): UnsealedResult {
         const out = { ...result };
         for (const key of [
           'value',
@@ -485,7 +484,7 @@ describe('trace and breakdown shapes', () => {
   ] as const) {
     it(`ignores a result with ${label}`, async () => {
       const bad = pluginWith('bad', {
-        afterEvaluate: (_input, result) => untyped<EvaluationResult>({ ...result, ...change }),
+        afterEvaluate: (_input, result) => untyped<UnsealedResult>({ ...result, ...change }),
       });
       const result = await engineWith([bad]).evaluate([rule()], makeInput());
       expect(result.trace.steps).toHaveLength(1);

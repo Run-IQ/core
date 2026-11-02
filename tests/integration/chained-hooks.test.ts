@@ -3,7 +3,7 @@ import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import type { PPEPlugin, PluginContext, BeforeEvaluateResult } from '../../src/types/plugin.js';
 import type { EvaluationInput } from '../../src/types/input.js';
 import type { Rule } from '../../src/types/rule.js';
-import type { EvaluationResult } from '../../src/types/result.js';
+import type { UnsealedResult } from '../../src/types/result.js';
 import type { DSLEvaluator } from '../../src/types/dsl.js';
 import { makeRule, makeInput, StubModel, StubDSL, ValueModel } from '../helpers.js';
 // Imported from the package entry: both errors are public.
@@ -200,7 +200,7 @@ describe('Hook errors', () => {
 
   it('reports a failing onError as a second diagnostic', async () => {
     const broken = pluginWith('broken', {
-      afterEvaluate(): EvaluationResult {
+      afterEvaluate(): UnsealedResult {
         throw new Error('boom');
       },
       onError(): void {
@@ -237,7 +237,7 @@ describe('Hook errors', () => {
         beforeEvaluate(): BeforeEvaluateResult {
           throw new Error(`${name} before`);
         },
-        afterEvaluate(): EvaluationResult {
+        afterEvaluate(): UnsealedResult {
           throw new Error(`${name} after`);
         },
       });
@@ -262,7 +262,7 @@ describe('Plugin state', () => {
       beforeEvaluate(input, rules): BeforeEvaluateResult {
         return { input, rules, state: { a: 1 } };
       },
-      afterEvaluate(_input, result): EvaluationResult {
+      afterEvaluate(_input, result): UnsealedResult {
         seen = result.pluginState['stateful'];
         return result;
       },
@@ -330,7 +330,7 @@ describe('Plugin state', () => {
 describe('afterEvaluate transitions', () => {
   it('keeps outputs.value in sync when a plugin rewrites value, and says so', async () => {
     const rewriting = pluginWith('fiscal', {
-      afterEvaluate(_input, result): EvaluationResult {
+      afterEvaluate(_input, result): UnsealedResult {
         return { ...result, value: 0 };
       },
     });
@@ -359,7 +359,7 @@ describe('afterEvaluate transitions', () => {
   it('names the rules a plugin adds to or removes from the applied and skipped lists', async () => {
     const pseudo = makeRule({ id: 'SC', model: 'META_SHORT_CIRCUIT', priority: 9999 });
     const rewriting = pluginWith('fiscal', {
-      afterEvaluate(_input, result): EvaluationResult {
+      afterEvaluate(_input, result): UnsealedResult {
         const r2 = result.appliedRules.find((r) => r.id === 'r2')!;
         return {
           ...result,
@@ -387,7 +387,7 @@ describe('afterEvaluate transitions', () => {
 
   it('refuses a rewritten value that is not a finite number', async () => {
     const rewriting = pluginWith('fiscal', {
-      afterEvaluate(_input, result): EvaluationResult {
+      afterEvaluate(_input, result): UnsealedResult {
         return { ...result, value: 'zero', appliedRules: [] };
       },
     });
@@ -411,7 +411,7 @@ describe('afterEvaluate transitions', () => {
   it('hands plugins a copy: in-place writes do not reach the engine records or the rules', async () => {
     const rule = makeRule({ id: 'r1', model: 'M', params: { rate: 1 } });
     const careless = pluginWith('careless', {
-      afterEvaluate(_input, result): EvaluationResult {
+      afterEvaluate(_input, result): UnsealedResult {
         // A careless plugin writing through the readonly types.
         const writable: MutableResult = result as unknown as MutableResult;
         writable.value = 0;
@@ -423,7 +423,7 @@ describe('afterEvaluate transitions', () => {
     });
     let seenByNext: unknown;
     const next = pluginWith('next', {
-      afterEvaluate(_input, result): EvaluationResult {
+      afterEvaluate(_input, result): UnsealedResult {
         seenByNext = result.value;
         return result;
       },
@@ -469,7 +469,7 @@ describe('Outputs belong to the engine', () => {
 
   it('ignores a direct change of outputs.value.value and says so', async () => {
     const sneaky = pluginWith('sneaky', {
-      afterEvaluate(_input, result): EvaluationResult {
+      afterEvaluate(_input, result): UnsealedResult {
         const value = { ...result.outputs['value']!, value: 7 };
         return { ...result, outputs: { ...result.outputs, value } };
       },
@@ -490,7 +490,7 @@ describe('Outputs belong to the engine', () => {
 
   it('ignores added, removed or changed outputs of any name', async () => {
     const sneaky = pluginWith('sneaky', {
-      afterEvaluate(_input, result): EvaluationResult {
+      afterEvaluate(_input, result): UnsealedResult {
         const kept = Object.fromEntries(
           Object.entries(result.outputs).filter(([name]) => name !== 'risk'),
         );
@@ -510,7 +510,7 @@ describe('Outputs belong to the engine', () => {
 
   it('accepts a value rewrite that also syncs outputs.value itself, without a second diagnostic', async () => {
     const tidy = pluginWith('tidy', {
-      afterEvaluate(_input, result): EvaluationResult {
+      afterEvaluate(_input, result): UnsealedResult {
         const value = { ...result.outputs['value']!, value: 0 };
         return { ...result, value: 0, outputs: { ...result.outputs, value } };
       },
@@ -568,7 +568,7 @@ describe('Hook timeouts and onError typing', () => {
     const thrown = new TypeError('bad shape');
     const onError = vi.fn();
     const broken = pluginWith('broken', {
-      afterEvaluate(): EvaluationResult {
+      afterEvaluate(): UnsealedResult {
         throw thrown;
       },
       onError,

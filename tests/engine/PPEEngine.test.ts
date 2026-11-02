@@ -18,7 +18,7 @@ import {
 } from '../helpers.js';
 import type { CalculationModel } from '../../src/types/model.js';
 import type { DSLEvaluator } from '../../src/types/dsl.js';
-import type { EvaluationResult } from '../../src/types/result.js';
+import type { UnsealedResult } from '../../src/types/result.js';
 import type { OutputValue } from '../../src/types/output.js';
 import type { EvaluationInput } from '../../src/types/input.js';
 import type { PPEPlugin } from '../../src/types/plugin.js';
@@ -364,7 +364,7 @@ describe('PPEEngine', () => {
 
     it('refuses an overflowing amount instead of returning a partial decision', async () => {
       const plugin = new StubPlugin('test', [new StubModel('H', 1e308)]);
-      const afterEvaluate = vi.fn((_input: EvaluationInput, result: EvaluationResult) => result);
+      const afterEvaluate = vi.fn((_input: EvaluationInput, result: UnsealedResult) => result);
       const watcher: PPEPlugin = {
         name: 'watcher',
         version: '1.0.0',
@@ -398,7 +398,7 @@ describe('PPEEngine', () => {
         { a: `1${'0'.repeat(999)}`, b: '0.1' },
       );
       const plugin = new StubPlugin('test', [big]);
-      const afterEvaluate = vi.fn((_input: EvaluationInput, result: EvaluationResult) => result);
+      const afterEvaluate = vi.fn((_input: EvaluationInput, result: UnsealedResult) => result);
       const watcher: PPEPlugin = {
         name: 'watcher',
         version: '1.0.0',
@@ -429,7 +429,7 @@ describe('PPEEngine', () => {
 
     it('refuses a short-circuit beyond a span of 1000 digits instead of a partial decision', async () => {
       const amount = new ValueModel('AMOUNT', { type: 'decimal', combine: 'max' }, { a: '1' });
-      const afterEvaluate = vi.fn((_input: EvaluationInput, result: EvaluationResult) => result);
+      const afterEvaluate = vi.fn((_input: EvaluationInput, result: UnsealedResult) => result);
       const watcher: PPEPlugin = {
         name: 'watcher',
         version: '1.0.0',
@@ -576,7 +576,7 @@ describe('PPEEngine', () => {
         makeRule({ id: 'no', model: 'M', condition: { dsl: 'never', value: null } }),
         makeRule({ id: 'v', model: 'M' }),
       ];
-      const project = (r: EvaluationResult): unknown => ({
+      const project = (r: UnsealedResult): unknown => ({
         outputs: r.outputs,
         outputNames: Object.keys(r.outputs),
         applied: r.appliedRules.map((x) => x.id),

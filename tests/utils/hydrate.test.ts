@@ -23,7 +23,7 @@ describe('hydrateRule', () => {
   it('converts effectiveFrom string to Date', () => {
     const rule = hydrateRule(validRaw());
     expect(rule.effectiveFrom).toBeInstanceOf(Date);
-    expect(rule.effectiveFrom.toISOString()).toBe('2024-01-01T00:00:00.000Z');
+    expect((rule.effectiveFrom as Date).toISOString()).toBe('2024-01-01T00:00:00.000Z');
     expect(rule.effectiveUntil).toBeNull();
   });
 
@@ -33,7 +33,7 @@ describe('hydrateRule', () => {
 
     const rule = hydrateRule(raw);
     expect(rule.effectiveUntil).toBeInstanceOf(Date);
-    expect(rule.effectiveUntil!.toISOString()).toBe('2025-12-31T23:59:59.999Z');
+    expect((rule.effectiveUntil as Date).toISOString()).toBe('2025-12-31T23:59:59.999Z');
   });
 
   it('preserves all other fields', () => {

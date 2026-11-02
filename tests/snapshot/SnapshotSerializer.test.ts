@@ -1,19 +1,22 @@
 import { describe, it, expect } from 'vitest';
 import { SnapshotSerializer } from '../../src/snapshot/SnapshotSerializer.js';
 import { makeInput } from '../helpers.js';
-import type { EvaluationResult } from '../../src/types/result.js';
+import type { UnsealedResult } from '../../src/types/result.js';
 import type { EvaluationTrace } from '../../src/types/trace.js';
 
 describe('SnapshotSerializer', () => {
   const input = makeInput();
-  const result: EvaluationResult = {
+  const result: UnsealedResult = {
     requestId: 'req-1',
     value: 500,
     breakdown: [],
     appliedRules: [],
+    outputs: {},
     skippedRules: [],
+    diagnostics: [],
+    missingFacts: [],
+    pluginState: {},
     trace: { steps: [], totalDurationMs: 0 },
-    snapshotId: '',
     engineVersion: '0.1.0',
     pluginVersions: {},
     dslVersions: {},

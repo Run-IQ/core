@@ -8,11 +8,8 @@ export default defineConfig({
     // The timeout only catches a hang: the exhaustive tests prove their bounds with counted
     // assertions, never with time, so a slow runner must not fail them.
     testTimeout: 60_000,
-    typecheck: {
-      enabled: true,
-      include: ['tests/**/*.test-d.ts'],
-      tsconfig: './tsconfig.test.json',
-    },
+    // The type tests (tests/*.test-d.ts) and the test files are checked by `npm run typecheck`
+    // (tsc on tsconfig.test.json), not by Vitest's experimental typecheck runner.
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],

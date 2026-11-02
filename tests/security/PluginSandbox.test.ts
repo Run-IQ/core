@@ -62,10 +62,11 @@ describe('PluginSandbox', () => {
     const slowDSL: DSLEvaluator = {
       dsl: 'slow',
       version: '1.0.0',
-      evaluate: () =>
+      // An async evaluator, which the contract does not declare: only the timeout stops it.
+      evaluate: (() =>
         new Promise<boolean>((resolve) => {
           setTimeout(() => resolve(true), 200);
-        }),
+        })) as unknown as DSLEvaluator['evaluate'],
     };
     await expect(sandbox.runDSL(slowDSL, {}, {})).rejects.toThrow(DSLTimeoutError);
   });
