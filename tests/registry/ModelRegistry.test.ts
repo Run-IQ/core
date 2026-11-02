@@ -54,7 +54,7 @@ describe('ModelRegistry', () => {
         'Model "BAD" declares an invalid output: output.combine "sum" cannot combine a string output: it applies to number, decimal',
       );
       expect(refusal({ type: 'number', combine: 'avg' }).issues).toEqual([
-        'output.combine must be one of sum, max, min, highestPriority, union, all, any',
+        'output.combine must be one of sum, max, min, highestPriority, union, all, any, count',
       ]);
       expect(refusal({ type: 'enum', combine: 'highestPriority' }).issues).toEqual([
         'output.values is required for an enum output: list its allowed strings',

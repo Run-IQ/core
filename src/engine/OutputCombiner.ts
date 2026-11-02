@@ -8,7 +8,7 @@ import { DecimalPrecisionError } from '../errors/DecimalPrecisionError.js';
 import { describeValue } from '../utils/json.js';
 import { ruleLabel } from '../utils/values.js';
 import { compareByPriorityThenIdentity, compareRuleIdentity, resolveTie } from './resolveTie.js';
-import { describeMismatch, readOutputValue } from './outputDeclaration.js';
+import { describeMismatch, readContribution, readOutputValue } from './outputDeclaration.js';
 import {
   DECIMAL_DIGITS_LIMIT,
   compareNumeric,
@@ -191,12 +191,12 @@ export const OutputCombiner = {
     const recorded = new Map<Rule, RecordedContribution>();
     for (const contribution of [...contributions].sort(byPriorityThenIdentity)) {
       const { rule } = contribution;
-      const read = readOutputValue(contribution.value, declaration);
+      const read = readContribution(contribution.value, declaration);
       if (read === undefined) {
         skipped.push({
           rule,
           reason: 'OUTPUT_MISMATCH',
-          detail: `output ${name}: ${describeMismatch(contribution.value, declaration)}`,
+          detail: `output ${name}: ${describeMismatch(contribution.value, declaration, true)}`,
         });
         continue;
       }
@@ -238,6 +238,9 @@ export const OutputCombiner = {
         break;
       case 'any':
         value = values.some((v) => v === true);
+        break;
+      case 'count':
+        value = values.filter((v) => v === true).length;
         break;
       case 'union':
         value = unionOf(values);

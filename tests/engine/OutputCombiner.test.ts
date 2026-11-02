@@ -22,6 +22,59 @@ const RISK: OutputDeclaration = {
 const LIST: OutputDeclaration = { type: 'list', combine: 'union' };
 
 describe('OutputCombiner', () => {
+  describe('count', () => {
+    const COUNT: OutputDeclaration = { type: 'number', combine: 'count' };
+    const [a, b, c] = [rule('a'), rule('b'), rule('c')] as [Rule, Rule, Rule];
+
+    it('counts the contributions that are true', () => {
+      const { output, skipped } = OutputCombiner.combine(
+        'flags',
+        COUNT,
+        [of(a, true), of(b, false), of(c, true)],
+        'throw',
+      );
+      expect(skipped).toEqual([]);
+      expect(output).toEqual({
+        name: 'flags',
+        type: 'number',
+        combine: 'count',
+        value: 2,
+        contributors: ['a', 'b', 'c'],
+      });
+    });
+
+    it('counts none as 0 when every contribution is false', () => {
+      expect(
+        OutputCombiner.combine('flags', COUNT, [of(a, false), of(b, false)], 'throw').output?.value,
+      ).toBe(0);
+    });
+
+    it('refuses a contribution that is not a boolean, with OUTPUT_MISMATCH', () => {
+      const { output, skipped } = OutputCombiner.combine(
+        'flags',
+        COUNT,
+        [of(a, true), of(b, 1)],
+        'throw',
+      );
+      expect(output?.value).toBe(1);
+      expect(skipped).toEqual([
+        {
+          rule: b,
+          reason: 'OUTPUT_MISMATCH',
+          detail:
+            'output flags: value 1 does not match type number: a count takes a boolean (true is counted)',
+        },
+      ]);
+    });
+
+    it('takes a short-circuit value as the count itself', () => {
+      expect(OutputCombiner.impose('flags', COUNT, a, 3).output.value).toBe(3);
+      expect(() => OutputCombiner.impose('flags', COUNT, a, true)).toThrow(
+        'short-circuit of a@1 on output flags: value true does not match type number',
+      );
+    });
+  });
+
   describe('sum, max, min', () => {
     const a = rule('a');
     const b = rule('b');
@@ -337,9 +390,10 @@ describe('OutputCombiner', () => {
 
     it('throws on a combine strategy it does not know', () => {
       // A declaration that skipped registration (ModelRegistry refuses it): only a cast builds it.
+      // Spec reads the declaration first and refuses it, naming the strategies it knows.
       const unknown = JSON.parse('{"type":"number","combine":"avg"}') as OutputDeclaration;
       expect(() => OutputCombiner.combine('o', unknown, [of(rule('a'), 1)], 'throw')).toThrow(
-        'Unknown combine strategy "avg" for output o',
+        'invalid output declaration: output.combine must be one of sum, max, min, highestPriority, union, all, any, count',
       );
     });
   });

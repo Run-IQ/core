@@ -2,6 +2,8 @@ import {
   DEFAULT_OUTPUT,
   DEFAULT_OUTPUT_DECLARATION,
   canonicalize,
+  contributionMatchesDeclaration,
+  normalizeOutputDeclaration,
   valueMatchesOutputType,
 } from '@run-iq/spec';
 import type { JsonValue, OutputDeclaration } from '@run-iq/spec';
@@ -23,17 +25,13 @@ export function declarationOf(models: ModelRegistry, rule: Rule): OutputDeclarat
 }
 
 /**
- * What two declarations are compared by: their canonical form as it is, so the order of enum
- * `values` is part of the declaration, except that `rounding.at: 'output'`, the default, is
- * dropped (R37): an absent `at` and `'output'` are the same declaration.
+ * What two declarations are compared by: the canonical text of their normal form in
+ * `@run-iq/spec` (`normalizeOutputDeclaration`), so the order of enum `values` is part of the
+ * declaration, while `rounding.at: 'output'`, `empty: false` and an increment that is a power of
+ * ten (written as its `scale`) are the same declaration as their one written form.
  */
 export function declarationKey(declaration: OutputDeclaration): string {
-  const { rounding } = declaration;
-  if (rounding?.at !== 'output') return canonicalize(declaration);
-  return canonicalize({
-    ...declaration,
-    rounding: { scale: rounding.scale, mode: rounding.mode },
-  });
+  return canonicalize(normalizeOutputDeclaration(declaration));
 }
 
 /** The type of a declaration, for messages: `number`, `enum (low, high)`. */
@@ -57,6 +55,19 @@ export function readOutputValue(
   return valueMatchesOutputType(value, declaration) ? value : undefined;
 }
 
+/**
+ * The value one rule's contribution enters an output with: `readOutputValue`, except that a
+ * `count` takes a boolean (the contributions that are `true` are counted) and keeps it as it is.
+ * `undefined` when the declaration refuses the value.
+ */
+export function readContribution(
+  value: JsonValue,
+  declaration: OutputDeclaration,
+): JsonValue | undefined {
+  if (declaration.combine !== 'count') return readOutputValue(value, declaration);
+  return contributionMatchesDeclaration(value, declaration) ? value : undefined;
+}
+
 /** What a `decimal` value may be, for messages. */
 const DECIMAL_EXPECTED =
   'expected a decimal string (an optional "-", digits, an optional "." and digits, no exponent) ' +
@@ -66,8 +77,15 @@ const DECIMAL_EXPECTED =
  * Why `readOutputValue` refuses a value, for messages: `value "x" does not match type number`,
  * with what a decimal may be for a `decimal` output.
  */
-export function describeMismatch(value: unknown, declaration: OutputDeclaration): string {
-  const expected = declaration.type === 'decimal' ? `: ${DECIMAL_EXPECTED}` : '';
+export function describeMismatch(
+  value: unknown,
+  declaration: OutputDeclaration,
+  contribution = false,
+): string {
+  let expected = declaration.type === 'decimal' ? `: ${DECIMAL_EXPECTED}` : '';
+  if (contribution && declaration.combine === 'count') {
+    expected = ': a count takes a boolean (true is counted)';
+  }
   return `value ${describeValue(value)} does not match type ${describeType(declaration)}${expected}`;
 }
 
@@ -78,10 +96,12 @@ export function describeMismatch(value: unknown, declaration: OutputDeclaration)
 export function describeDeclaration(declaration: OutputDeclaration): string {
   const { values, rounding } = declaration;
   const listed = values === undefined ? '' : ` (${values.join(', ')})`;
+  const step =
+    rounding?.increment === undefined ? rounding?.scale : `increment ${rounding.increment}`;
   const rounded =
     rounding === undefined
       ? ''
-      : ` rounding ${rounding.scale} ${rounding.mode}${rounding.at === undefined ? '' : ` at ${rounding.at}`}`;
+      : ` rounding ${step} ${rounding.mode}${rounding.at === undefined ? '' : ` at ${rounding.at}`}`;
   return `${declaration.type}/${declaration.combine}${listed}${rounded}`;
 }
 
