@@ -45,15 +45,21 @@ export interface PPEPlugin {
    *   `{ rule: object, reason: string, detail?: string }`; a `state` that is not JSON
    *   (`a state that is not JSON at $.a[1] (Date)`); a getter that throws. A skip without `detail`
    *   gets `skipped by plugin <name>`.
+   * - The hook is handed the engine's own frozen copies: the input (`data`, `meta` and the dates
+   *   in it) and the rules. Writing into them throws, so the hook fails; it returns new objects
+   *   to change anything.
    * - The returned `input` is checked as the caller's is: the bounds (`maxInputDepth`,
    *   `maxInputLeaves`), `validateProofInput` on its canonical form (D-3, D-5, portable JSON,
    *   unknown `meta` keys), and in strict mode the evaluation date. Changing the data is allowed
-   *   once it passes.
-   * - Rules dropped from `rules` without being listed in `skipped` fail the evaluation.
+   *   once it passes; changing `requestId` or `meta.tenantId` is not (the idempotence check and
+   *   the record rest on them). At most `limits.maxRules` rules may be returned.
+   * - Rules dropped from `rules` without being listed in `skipped` fail the evaluation. A
+   *   skip names a given rule (same content), once, and that rule is not also returned; a rule
+   *   returned more often than it was given fails.
    * - A rule returned under the `id@version` of a given rule must be that rule: its checksum is
    *   the given one and it is the checksum of its content. A rule rewritten under the same name
-   *   fails the evaluation. A rule it adds has its checksum verified as a source rule's is; a
-   *   mismatch fails. An added rule that passes is evaluated and named in a diagnostic,
+   *   fails the evaluation. A rule it adds goes through the validation of a source rule (its
+   *   checksum, then the params its model accepts), once; a refusal fails. An added rule that passes is evaluated and named in a diagnostic,
    *   `plugin <name> added rules: <id@version, ...>`.
    * - A `state` that is JSON is kept, as a copy, in `result.pluginState[name]`.
    */
@@ -68,8 +74,9 @@ export interface PPEPlugin {
    * cannot change the decision. The result it returns is read once (every field by name, own,
    * non-enumerable or inherited, then a deep copy), and:
    *
-   * - it may set `meta` (an object: annotations on the result) and its own entry of
-   *   `pluginState` (`pluginState[<name>]`, JSON);
+   * - it may set `meta` (an object: annotations on the result; it may add keys, and changing or
+   *   removing a key another plugin set fails) and its own entry of `pluginState`
+   *   (`pluginState[<name>]`, JSON);
    * - any change to `value`, `outputs`, `appliedRules`, `skippedRules`, `breakdown`, `trace` or
    *   any other field of the result (a field it adds, one it drops), and any change to another
    *   plugin's `pluginState` entry, fails the evaluation: `plugin <name> afterEvaluate changed

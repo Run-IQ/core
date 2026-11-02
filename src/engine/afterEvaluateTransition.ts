@@ -28,7 +28,8 @@ export const PLUGIN_SETTABLE_FIELDS: ReadonlySet<string> = new Set(['meta', 'plu
  *   plugin adds), compared in canonical form, throws `TypeError` (`plugin <name> afterEvaluate
  *   changed the decision: <fields>`). So does a change to the `pluginState` entry of another
  *   plugin, or the removal of one.
- * - **What it may set.** `meta` (an object or nothing) and `pluginState[<its name>]` (JSON).
+ * - **What it may set.** `meta` (an object or nothing: it may add keys, and changing or removing
+ *   one set before is refused) and `pluginState[<its name>]` (JSON).
  * - **Shape.** A result that is not an object, a `meta` that is neither absent nor an object, a
  *   `pluginState` that is not an object, or an entry that is not JSON, throws `TypeError`.
  *
@@ -67,6 +68,18 @@ export function acceptAfterEvaluate(
   }
   const meta: unknown = theirs['meta'];
   if (meta !== undefined && !isObject(meta)) throw refuse('a malformed meta');
+  // A plugin may add annotations; changing or removing one another plugin set is a change to
+  // the record, as for `pluginState`.
+  const metaChanged: string[] = [];
+  for (const [name, set] of Object.entries(before.meta ?? {})) {
+    const kept: unknown = meta === undefined ? undefined : Reflect.get(meta as object, name);
+    if (!sameData(set, kept)) metaChanged.push(name);
+  }
+  if (metaChanged.length > 0) {
+    throw new TypeError(
+      `plugin ${pluginName} afterEvaluate changed meta keys another plugin set: ${metaChanged.sort().join(', ')}`,
+    );
+  }
 
   const state: unknown = theirs['pluginState'];
   if (typeof state !== 'object' || state === null || !isObject(state)) {

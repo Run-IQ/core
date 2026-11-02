@@ -74,7 +74,7 @@ A decision is never returned without the work a plugin was to do. Every hook fai
 1. Check the options and the number of rules (`maxRules`), then validate the input: its bounds (`maxInputDepth`, `maxInputLeaves`) and its canonical form (`validateProofInput` of `@run-iq/spec`)
 2. Refuse a `requestId` whose snapshot already exists (`DuplicateRequestError`, code `DUPLICATE_REQUEST`)
 3. Verify rule checksums and params
-4. Run plugin `beforeEvaluate` hooks (fail closed: see below)
+4. Run plugin `beforeEvaluate` hooks (fail closed: see above)
 5. Filter rules by validity period, tags and condition
 6. Resolve conflicts between rules by priority
 7. Run the models and sum their contributions

@@ -5,7 +5,6 @@ import { ValidationError } from '../errors/ValidationError.js';
 import { InputCopier } from '../input/copyInput.js';
 import { evaluationDate, normalizeMeta } from '../input/normalizeMeta.js';
 import type { NormalizedMeta } from '../input/normalizeMeta.js';
-import { describeThrown } from '../utils/values.js';
 import { DEFAULT_LIMITS } from '../limits.js';
 import type { EngineLimits } from '../limits.js';
 
@@ -49,15 +48,20 @@ export class InputSanitizer {
     }
 
     const obj = input as Record<string, unknown>;
+    // Each member of the input is read once, here: the checks and the copy below work on these
+    // values, whatever a getter or a Proxy would answer to a second read.
+    const requestId: unknown = obj['requestId'];
+    const dataIn: unknown = obj['data'];
+    const metaIn: unknown = obj['meta'];
 
-    if (typeof obj['requestId'] !== 'string' || obj['requestId'].length === 0) {
+    if (typeof requestId !== 'string' || requestId.length === 0) {
       reasons.push('requestId must be a non-empty string');
     }
 
-    if (!isRecord(obj['data'])) {
+    if (!isRecord(dataIn)) {
       reasons.push('data must be a non-null object');
     } else {
-      for (const key of Object.keys(obj['data'])) {
+      for (const key of Object.keys(dataIn)) {
         if (FORBIDDEN_KEYS.has(key)) {
           reasons.push(`data contains forbidden key: "${key}"`);
         }
@@ -65,14 +69,16 @@ export class InputSanitizer {
     }
 
     let meta: Record<string, unknown> | undefined;
-    if (!isRecord(obj['meta'])) {
+    let metaKeys: string[] = [];
+    if (!isRecord(metaIn)) {
       reasons.push('meta must be a non-null object');
     } else {
-      meta = obj['meta'];
+      meta = metaIn;
+      metaKeys = Object.keys(meta);
       if (typeof meta['tenantId'] !== 'string' || meta['tenantId'].length === 0) {
         reasons.push('meta.tenantId must be a non-empty string');
       }
-      for (const key of Object.keys(meta)) {
+      for (const key of metaKeys) {
         if (FORBIDDEN_KEYS.has(key)) {
           reasons.push(`meta contains forbidden key: "${key}"`);
         }
@@ -86,21 +92,29 @@ export class InputSanitizer {
     // The one walk: copy and bounds. Each part of the input is a root at level 1 and they share
     // the count of leaves; a too large input is refused before spec reads it.
     const copier = new InputCopier(limits);
-    const data = copier.copy(obj['data'], '/data') as Record<string, unknown>;
+    const data = copier.copy(dataIn, '/data') as Record<string, unknown>;
+    // defineProperty: an own `__proto__` key stays a member of the copy and cannot set its
+    // prototype. The keys are the ones listed above, once.
     const metaCopy: Record<string, unknown> = {};
-    for (const key of Object.keys(meta)) {
+    for (const key of metaKeys) {
       let member: unknown;
       try {
         member = meta[key];
       } catch (error) {
-        copier.reasons.push(`/meta/${key} could not be read: ${describeThrown(error)}`);
+        copier.unreadable(`/meta/${key}`, error);
         continue;
       }
-      metaCopy[key] = copier.copy(member, `/meta/${key}`);
+      Object.defineProperty(metaCopy, key, {
+        value: copier.copy(member, `/meta/${key}`),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
     }
     if (copier.reasons.length > 0) {
       throw new ValidationError('Invalid evaluation input', copier.reasons);
     }
+    Object.freeze(metaCopy);
 
     let canonical: NormalizedMeta | undefined;
     try {
@@ -120,11 +134,12 @@ export class InputSanitizer {
     }
 
     return {
-      input: {
-        requestId: obj['requestId'] as string,
+      input: Object.freeze({
+        requestId: requestId as string,
         data,
+        // justification: `validateProofInput` accepted the canonical form of these members.
         meta: metaCopy as unknown as EvaluationInput['meta'],
-      },
+      }),
       meta: canonical,
       evaluationDate: evaluationDate(canonical),
     };

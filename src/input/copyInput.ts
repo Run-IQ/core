@@ -27,8 +27,14 @@ interface Frame {
  *   read once): the copy holds the values the checks see, whatever a getter or a Proxy would
  *   answer to a second read. A property that cannot be read is named in `reasons`
  *   (`<pointer> could not be read: <reason>`, spec's words) and left out of the copy.
- * - Plain objects and lists are copied; anything else (a `Date`, a `Map`, a function, a symbol)
- *   is kept as it is, for `validateProofInput` to refuse it. A hole of a list stays a hole.
+ * - Plain objects and lists are copied, and every copied container is frozen: nothing that holds
+ *   the copy (a hook, a DSL, a model) can write into it. A `Date` is copied (frozen it would still
+ *   be writable). Anything else (a `Map`, a function, a symbol) is kept as it is, for
+ *   `validateProofInput` to refuse it.
+ * - A list stops at its first hole (`<pointer> has a hole at index i: arrays must be dense`), so a
+ *   sparse list of any length costs one step. A symbol key or a non-enumerable property of an
+ *   object is named too (`<pointer> has a symbol key: Symbol(s)`, `<pointer>/k is not
+ *   enumerable`): it would vanish from the copy.
  * - `-0` is written `0`, so that the value evaluated is the value hashed (D-5).
  * - An own `__proto__` key stays an own key; the prototype of the copy is never changed.
  * - `leaves` counts, over every part copied by this instance (`data`, then each member of
@@ -62,7 +68,8 @@ export class InputCopier {
     return `${rootPointer}/${segments.join('/')}`;
   }
 
-  private unreadable(pointer: string, error: unknown): void {
+  /** Names a property that cannot be read, and counts it as a leaf. */
+  unreadable(pointer: string, error: unknown): void {
     this.reasons.push(`${pointer} could not be read: ${describeThrown(error)}`);
     this.leaf();
   }
@@ -102,6 +109,13 @@ export class InputCopier {
       }
       const at = (): string =>
         key === undefined ? rootPointer : this.pointer(rootPointer, parent, key);
+      if (value instanceof Date) {
+        // A Date is copied, so that nobody holds the one the evaluation records. Spec refuses it
+        // in `data` and `meta.context`; `meta.effectiveDate` and `meta.dates` take it.
+        this.leaf();
+        put(parent, key, new Date(value.getTime()));
+        return;
+      }
       let isList: boolean;
       let keys: string[] | undefined;
       let length: number;
@@ -119,6 +133,20 @@ export class InputCopier {
           }
           keys = Object.keys(value);
           length = keys.length;
+          // A symbol key or a non-enumerable property is not JSON, and would vanish from the
+          // copy: it is named instead (the keys are listed once more only to count them).
+          const owned = Reflect.ownKeys(value);
+          if (owned.length !== length) {
+            const listed = new Set<string | symbol>(keys);
+            for (const extra of owned) {
+              if (listed.has(extra)) continue;
+              this.reasons.push(
+                typeof extra === 'symbol'
+                  ? `${at()} has a symbol key: ${extra.toString()}`
+                  : `${at()}/${escapeSegment(extra)} is not enumerable`,
+              );
+            }
+          }
         }
       } catch (error) {
         this.unreadable(at(), error);
@@ -128,7 +156,10 @@ export class InputCopier {
       if (isList || length === 0) this.leaf();
       const dst: Record<string, unknown> | unknown[] = isList ? [] : {};
       put(parent, key, dst);
-      if (length === 0) return;
+      if (length === 0) {
+        Object.freeze(dst);
+        return;
+      }
       if (depth > this.limits.maxInputDepth) {
         throw new EngineLimitError('maxInputDepth', this.limits.maxInputDepth, depth);
       }
@@ -141,13 +172,24 @@ export class InputCopier {
       if (frame.index >= frame.length) {
         stack.pop();
         if (Array.isArray(frame.dst)) frame.dst.length = frame.length; // trailing holes
+        // Frozen as soon as it is complete: nothing that holds the copy can write into it.
+        Object.freeze(frame.dst);
         continue;
       }
       const i = frame.index++;
       const memberKey = frame.keys === undefined ? i : (frame.keys[i] as string);
       let member: unknown;
       try {
-        if (frame.keys === undefined && !Object.hasOwn(frame.src, i)) continue; // a hole
+        if (frame.keys === undefined && !Object.hasOwn(frame.src, i)) {
+          // The first hole ends the list: a sparse list of any length costs one step, and spec
+          // refuses it in these very words.
+          this.reasons.push(
+            `${frame.key === undefined ? rootPointer : this.pointer(rootPointer, frame.parent, frame.key)} has a hole at index ${i}: arrays must be dense`,
+          );
+          this.leaf();
+          frame.index = frame.length;
+          continue;
+        }
         member =
           frame.keys === undefined
             ? (frame.src as unknown[])[i]

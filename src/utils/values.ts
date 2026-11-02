@@ -51,7 +51,13 @@ function copyUnknown(value: unknown, copies: Map<object, unknown>): unknown {
   if (Array.isArray(value)) {
     const copy: unknown[] = [];
     copies.set(value, copy);
-    for (const item of value) copy.push(copyUnknown(item, copies));
+    for (let index = 0; index < value.length; index += 1) {
+      // The first hole ends the copy with an error: a sparse list of any length costs one step.
+      if (!Object.hasOwn(value, index)) {
+        throw new TypeError(`a list with a hole at index ${index}: arrays must be dense`);
+      }
+      copy.push(copyUnknown(value[index], copies));
+    }
     return copy;
   }
   const proto: unknown = Object.getPrototypeOf(value);
@@ -59,6 +65,14 @@ function copyUnknown(value: unknown, copies: Map<object, unknown>): unknown {
   const copy: Record<string, unknown> = {};
   if (proto === null) Object.setPrototypeOf(copy, null);
   copies.set(value, copy);
-  for (const [key, item] of Object.entries(value)) copy[key] = copyUnknown(item, copies);
+  for (const [key, item] of Object.entries(value)) {
+    // defineProperty: an own `__proto__` key stays a member and never sets the prototype.
+    Object.defineProperty(copy, key, {
+      value: copyUnknown(item, copies),
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
   return copy;
 }
