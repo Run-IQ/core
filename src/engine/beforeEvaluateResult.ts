@@ -71,6 +71,8 @@ export function readBeforeEvaluate(
     }
   }
 
+  // justification: typed as JSON only to be handed to `findNonJson` on the next line, which checks
+  // it before anything uses it.
   const state = readBounded(stateIn, limits, 'state') as JsonValue | undefined;
   const stateNotJson = state === undefined ? undefined : findNonJson(state);
   if (stateNotJson !== undefined) throw refuse(`a state that is not JSON at ${stateNotJson}`);
