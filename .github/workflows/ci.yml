@@ -35,7 +35,7 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
-          if ! git ls-remote --exit-code --heads https://github.com/Run-IQ/spec.git "$BASE_REF" > /dev/null; then
+          if ! git ls-remote --exit-code https://github.com/Run-IQ/spec.git "refs/heads/$BASE_REF" > /dev/null; then
             echo "::error::Run-IQ/spec has no branch $BASE_REF. Core is checked against the spec branch named like the base of the pull request."
             exit 1
           fi
