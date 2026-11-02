@@ -14,6 +14,14 @@ import { ModelRegistry } from '../registry/ModelRegistry.js';
 import { PluginRegistry } from '../registry/PluginRegistry.js';
 import { DSLRegistry } from '../registry/DSLRegistry.js';
 import { InputSanitizer } from '../security/InputSanitizer.js';
+import { EngineLimitError } from '../errors/EngineLimitError.js';
+import { evaluationDate } from '../input/normalizeMeta.js';
+import { checkDerivedSeed, readInputSeedConfig } from '../input/inputSeed.js';
+import type { InputSeedConfig } from '../input/inputSeed.js';
+import { resolveLimits } from '../limits.js';
+import type { EngineLimits, EngineLimitsInput } from '../limits.js';
+import { EVALUATE_OPTION_NAMES } from '../types/options.js';
+import type { EvaluateOptions } from '../types/options.js';
 import { RuleFilter } from './RuleFilter.js';
 import { RuleValidator } from '../security/RuleValidator.js';
 import { DominanceResolver } from './DominanceResolver.js';
@@ -46,9 +54,39 @@ export interface PPEEngineConfig {
   readonly onChecksumMismatch?: 'throw' | 'skip' | undefined;
   readonly dryRun?: boolean | undefined;
   readonly onSnapshotError?: ((error: unknown) => void) | undefined;
+  /**
+   * The bounds of an evaluation, over `DEFAULT_LIMITS`. Refused at construction (`ValidationError`)
+   * when a value is not a positive integer, a key is unknown, or `maxInputDepth` is above 1000.
+   */
+  readonly limits?: EngineLimitsInput | undefined;
+  /**
+   * Where the salt of the input digest comes from (Task 10 uses it): `{ secret }` of at least 32
+   * bytes, or `{ derive(requestId) }` returning exactly 32. Checked in 9L: the secret at
+   * construction, `derive` at each evaluation.
+   */
+  readonly inputSeed?: InputSeedConfig | undefined;
 }
 
 const ENGINE_VERSION = VERSION;
+
+/**
+ * Checks the names of the options of `evaluate`: an object (or none), whose members are among
+ * `EVALUATE_OPTION_NAMES` (a member that is `undefined` is absent). Their values are checked by
+ * the tasks that wire them. Throws `ValidationError` (`Invalid evaluate options`).
+ */
+function checkEvaluateOptions(options: unknown): void {
+  if (options === undefined) return;
+  if (options === null || typeof options !== 'object' || Array.isArray(options)) {
+    throw new ValidationError('Invalid evaluate options', ['evaluate options must be an object']);
+  }
+  const reasons: string[] = [];
+  for (const [name, value] of Object.entries(options)) {
+    if (value !== undefined && !EVALUATE_OPTION_NAMES.includes(name)) {
+      reasons.push(`unknown evaluate option: ${name}`);
+    }
+  }
+  if (reasons.length > 0) throw new ValidationError('Invalid evaluate options', reasons);
+}
 
 export class PPEEngine {
   private readonly modelRegistry: ModelRegistry;
@@ -66,12 +104,16 @@ export class PPEEngine {
   private readonly conflictMode: 'throw' | 'first';
   private readonly dryRun: boolean;
   private readonly pipelineTimeout: number | undefined;
+  private readonly limits: EngineLimits;
+  private readonly inputSeed: InputSeedConfig | undefined;
 
   constructor(config: PPEEngineConfig) {
     this.strict = config.strict ?? true;
     this.conflictMode = config.onConflict ?? (this.strict ? 'throw' : 'first');
     this.dryRun = config.dryRun ?? false;
     this.pipelineTimeout = config.timeout?.pipeline;
+    this.limits = resolveLimits(config.limits);
+    this.inputSeed = readInputSeedConfig(config.inputSeed);
 
     this.modelRegistry = new ModelRegistry();
     this.pluginRegistry = new PluginRegistry();
@@ -121,10 +163,14 @@ export class PPEEngine {
    * cleared whatever the outcome. The pipeline still running then is aborted: it stops at its
    * next step, before any further hook, before saving, and without calling `onError`.
    */
-  async evaluate(rules: ReadonlyArray<Rule>, input: EvaluationInput): Promise<UnsealedResult> {
+  async evaluate(
+    rules: ReadonlyArray<Rule>,
+    input: EvaluationInput,
+    options?: EvaluateOptions,
+  ): Promise<UnsealedResult> {
     const abort = new AbortController();
     const timeoutMs = this.pipelineTimeout;
-    if (timeoutMs === undefined) return this.executeEvaluation(rules, input, abort.signal);
+    if (timeoutMs === undefined) return this.executeEvaluation(rules, input, options, abort.signal);
 
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_resolve, reject) => {
@@ -135,7 +181,10 @@ export class PPEEngine {
       }, timeoutMs);
     });
     try {
-      return await Promise.race([this.executeEvaluation(rules, input, abort.signal), timeout]);
+      return await Promise.race([
+        this.executeEvaluation(rules, input, options, abort.signal),
+        timeout,
+      ]);
     } finally {
       clearTimeout(timer);
     }
@@ -148,10 +197,11 @@ export class PPEEngine {
   private async executeEvaluation(
     rules: ReadonlyArray<Rule>,
     input: EvaluationInput,
+    options: EvaluateOptions | undefined,
     signal: AbortSignal,
   ): Promise<UnsealedResult> {
     try {
-      return await this.runPipeline(rules, input, signal);
+      return await this.runPipeline(rules, input, options, signal);
     } catch (error) {
       if (signal.aborted) throw error;
       for (const plugin of this.plugins) {
@@ -169,18 +219,27 @@ export class PPEEngine {
   private async runPipeline(
     rules: ReadonlyArray<Rule>,
     input: EvaluationInput,
+    options: EvaluateOptions | undefined,
     signal: AbortSignal,
   ): Promise<UnsealedResult> {
+    // The options and the number of rules come first: no hook runs, nothing is read, for a call
+    // that is refused whatever the input.
+    checkEvaluateOptions(options);
+    if (rules.length > this.limits.maxRules) {
+      throw new EngineLimitError('maxRules', this.limits.maxRules, rules.length);
+    }
+
     const traceBuilder = new TraceBuilder();
     const allSkipped: SkippedRule[] = [];
 
     // Step 1: Input validation
-    InputSanitizer.validate(input);
+    InputSanitizer.validate(input, this.limits);
+    checkDerivedSeed(this.inputSeed, input.requestId);
 
-    // Strict mode requires effectiveDate
-    if (this.strict && input.meta.effectiveDate === undefined) {
+    // Strict mode requires the evaluation date, as meta.effectiveDate or meta.dates.effective
+    if (this.strict && evaluationDate(input.meta) === undefined) {
       throw new ValidationError('effectiveDate is required in strict mode', [
-        'meta.effectiveDate must be provided when strict mode is enabled',
+        'meta.effectiveDate or meta.dates.effective must be provided when strict mode is enabled',
       ]);
     }
 
@@ -257,7 +316,7 @@ export class PPEEngine {
 
     // Step 5: Rule filtering (on potentially mutated rules)
     signal.throwIfAborted();
-    const now = currentInput.meta.effectiveDate ?? new Date();
+    const now = evaluationDate(currentInput.meta) ?? new Date();
     const filterResult = await this.ruleFilter.filter(currentRules, currentInput, now);
     allSkipped.push(...filterResult.skipped);
 
