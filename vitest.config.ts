@@ -5,12 +5,13 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['tests/**/*.test.ts'],
+    // The timeout only catches a hang: the exhaustive tests prove their bounds with counted
+    // assertions, never with time, so a slow runner must not fail them.
+    testTimeout: 60_000,
     typecheck: {
       enabled: true,
       include: ['tests/**/*.test-d.ts'],
       tsconfig: './tsconfig.test.json',
-      // Transitional: removed in Task 10 once src typechecks (phase 2).
-      ignoreSourceErrors: true,
     },
     coverage: {
       provider: 'v8',
