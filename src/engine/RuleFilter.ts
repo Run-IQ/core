@@ -4,37 +4,81 @@ import type { Diagnostic } from '../types/diagnostic.js';
 import type { SkippedRule } from '../types/result.js';
 import type { DSLRegistry } from '../registry/DSLRegistry.js';
 import type { PluginSandbox } from '../security/PluginSandbox.js';
-import { SpecError, canonicalize, isEffectiveAt, matchDimension } from '@run-iq/spec';
+import {
+  SpecError,
+  canonicalize,
+  comparePointers,
+  isEffectiveAt,
+  matchDimension,
+  parsePointer,
+} from '@run-iq/spec';
 import type { DimensionSpec, Referential } from '@run-iq/spec';
 import { DSLEvaluationError } from '../errors/DSLEvaluationError.js';
 import { DSLTimeoutError } from '../errors/DSLTimeoutError.js';
-import { describeThrown } from '../utils/values.js';
+import { buildContext } from '../context/buildContext.js';
+import { readsOf } from '../context/reads.js';
+import { normalizeMeta } from '../input/normalizeMeta.js';
+import type { NormalizedMeta } from '../input/normalizeMeta.js';
 
 export interface FilterResult {
   readonly passed: readonly Rule[];
   readonly skipped: readonly SkippedRule[];
-  /** Sorted, unique dotted paths read by the evaluated conditions but absent from `input.data`. */
+  /**
+   * The pointers of the evaluation context (`/revenue/total`, `/$dates/effective`) read by the
+   * evaluated conditions but absent from it, unique, sorted by `comparePointers`.
+   */
   readonly missingFacts: readonly string[];
-  /** Non-fatal problems met while filtering (a failing `listVariables`). */
+  /** Non-fatal problems met while filtering (a `listVariables` that does not conform). */
   readonly diagnostics: readonly Diagnostic[];
 }
 
 type Exclusion = Pick<SkippedRule, 'reason'> & { readonly detail: string };
 
-/**
- * Resolves a dotted path object by object. Only own enumerable properties count (inherited ones
- * such as `constructor`, and array `length`, are not facts); an own array index does. A
- * non-object intermediate makes the path unresolvable.
- */
-function resolvePath(data: Record<string, unknown>, path: string): unknown {
-  let current: unknown = data;
-  for (const key of path.split('.')) {
-    if (typeof current !== 'object' || current === null) return undefined;
-    if (!Object.prototype.propertyIsEnumerable.call(current, key)) return undefined;
-    current = Reflect.get(current, key);
-  }
-  return current;
+/** Where a rule is filtered: the canonical meta, and the context its conditions are given. */
+interface Scope {
+  readonly input: EvaluationInput;
+  readonly meta: NormalizedMeta;
+  readonly context: Readonly<Record<string, unknown>>;
 }
+
+/** A list index as D-1 writes it: `0` or digits without a leading zero. */
+const LIST_INDEX = /^(0|[1-9][0-9]*)$/;
+
+/** The engine variables whose facts are in the context before any rule runs. */
+const KNOWN_VARIABLES: ReadonlySet<string> = new Set(['$dates', '$dimensions']);
+
+/**
+ * True when the fact at `pointer` is absent from `context`: resolved segment by segment on own
+ * properties only (an inherited property, `length` of a list, is not a fact), a list element by
+ * its canonical index (`01` names nothing, a hole is absent), a value that is `undefined` absent,
+ * a path through a non-object absent. The root is never absent. An engine variable that is not
+ * built yet (`$outputs`, `$item`, `$params`...) is not a fact: it is not asked about here.
+ */
+function isMissing(context: Readonly<Record<string, unknown>>, pointer: string): boolean {
+  const segments = parsePointer(pointer);
+  const [head] = segments;
+  if (head === undefined) return false;
+  if (head.startsWith('$') && !KNOWN_VARIABLES.has(head)) return false;
+  let current: unknown = context;
+  for (const segment of segments) {
+    if (Array.isArray(current)) {
+      // `Number('01')` is 1, but `01` names no element: only the canonical index text does.
+      const index = LIST_INDEX.test(segment) ? Number(segment) : -1;
+      if (!Object.hasOwn(current, index)) return true;
+      current = current[index];
+    } else if (typeof current === 'object' && current !== null) {
+      if (!Object.prototype.propertyIsEnumerable.call(current, segment)) return true;
+      current = Reflect.get(current, segment);
+    } else {
+      return true;
+    }
+  }
+  return current === undefined;
+}
+
+/** The input values of a dimension as the detail names them: one value, or `[a, b]`. */
+const describeInput = (value: string | readonly string[]): string =>
+  typeof value === 'string' ? value : `[${value.join(', ')}]`;
 
 /** The referentials the dimension filter can resolve a `ref` in: none until 9Q provides them. */
 const NO_REFERENTIALS: ReadonlyMap<string, Referential> = new Map();
@@ -74,13 +118,20 @@ export class RuleFilter {
     // The evaluation date is an input: an invalid one rejects the evaluation with spec's own
     // error (INVALID_DATE), before any rule. A fault after this point is a rule's bound.
     isEffectiveAt(ALWAYS_OPEN, now);
+    const meta = normalizeMeta(input.meta);
+    // No output exists while rules are filtered: the context is the same for every rule.
+    const context = buildContext(
+      { data: input.data, dates: meta.dates, dimensions: meta.dimensions },
+      { outputs: [] },
+    );
+    const scope: Scope = { input, meta, context };
     const passed: Rule[] = [];
     const skipped: SkippedRule[] = [];
     const missing = new Set<string>();
     const diagnostics: Diagnostic[] = [];
 
     for (const rule of rules) {
-      const exclusion = await this.checkRule(rule, input, now, missing, diagnostics);
+      const exclusion = await this.checkRule(rule, scope, now, missing, diagnostics);
       if (exclusion) {
         skipped.push({ rule, reason: exclusion.reason, detail: exclusion.detail });
       } else {
@@ -88,12 +139,12 @@ export class RuleFilter {
       }
     }
 
-    return { passed, skipped, missingFacts: [...missing].sort(), diagnostics };
+    return { passed, skipped, missingFacts: [...missing].sort(comparePointers), diagnostics };
   }
 
   private async checkRule(
     rule: Rule,
-    input: EvaluationInput,
+    scope: Scope,
     now: Date,
     missing: Set<string>,
     diagnostics: Diagnostic[],
@@ -117,7 +168,7 @@ export class RuleFilter {
     }
 
     // 2. Tag filter
-    const inputTags = input.meta.tags;
+    const inputTags = scope.input.meta.tags;
     if (inputTags && inputTags.length > 0 && rule.tags.length > 0) {
       const hasIntersection = rule.tags.some((tag) => inputTags.includes(tag));
       if (!hasIntersection) {
@@ -129,8 +180,8 @@ export class RuleFilter {
     }
 
     // 3. Dimension filter (only when the input declares dimensions), by spec's matchDimension
-    const inputDimensions = input.meta.dimensions;
-    if (inputDimensions !== undefined && rule.dimensions !== undefined) {
+    const inputDimensions = scope.meta.dimensions;
+    if (scope.input.meta.dimensions !== undefined && rule.dimensions !== undefined) {
       // The civil date of the evaluation, in UTC: 9P refines it (the rule's reference date).
       const on = now.toISOString().slice(0, 10);
       for (const [key, spec] of Object.entries(rule.dimensions)) {
@@ -155,7 +206,7 @@ export class RuleFilter {
           const unknown = match.result === 'unknown' ? ` (unknown: ${match.why})` : '';
           return {
             reason: 'DIMENSION_MISMATCH',
-            detail: `${rulePart}, input ${actual}${unknown}`,
+            detail: `${rulePart}, input ${describeInput(actual)}${unknown}`,
           };
         }
       }
@@ -168,24 +219,18 @@ export class RuleFilter {
         return { reason: 'DSL_NOT_FOUND', detail: `DSL not found: ${rule.condition.dsl}` };
       }
 
-      // listVariables only feeds missingFacts: its failure never changes the rule's outcome.
-      if (evaluator.listVariables) {
-        try {
-          // Collected first: a lazy iterable throwing midway contributes nothing.
-          const absent = [...evaluator.listVariables(rule.condition.value)].filter(
-            (path) => path !== '' && resolvePath(input.data, path) === undefined,
-          );
-          for (const path of absent) missing.add(path);
-        } catch (error) {
-          diagnostics.push({
-            source: 'engine',
-            message: `listVariables failed for ${rule.id}@${rule.version} (${rule.condition.dsl}): ${describeThrown(error)}`,
-          });
-        }
+      // The reads only feed missingFacts: a listVariables that does not conform never changes the
+      // rule's outcome (D-39: the effect on its status is 9M1's).
+      const reads = readsOf(rule, evaluator, undefined);
+      for (const problem of reads.problems) {
+        diagnostics.push({ source: 'engine', message: problem.message });
+      }
+      for (const pointer of reads.pointers) {
+        if (isMissing(scope.context, pointer)) missing.add(pointer);
       }
 
       try {
-        const result = await this.sandbox.runDSL(evaluator, rule.condition.value, input.data);
+        const result = await this.sandbox.runDSL(evaluator, rule.condition.value, scope.context);
         if (!result) {
           return { reason: 'CONDITION_FALSE', detail: 'condition evaluated to false' };
         }

@@ -246,7 +246,7 @@ describe('Hook errors', () => {
       makeInput(),
     );
     expect(result.diagnostics.map((d) => [d.source, d.plugin, d.hook, d.message])).toEqual([
-      ['engine', undefined, undefined, 'listVariables failed for r1@1 (facts): cannot parse'],
+      ['engine', undefined, undefined, 'listVariables of facts for r1@1 failed: cannot parse'],
       ['hook', 'p1', 'beforeEvaluate', 'p1 before'],
       ['hook', 'p2', 'beforeEvaluate', 'p2 before'],
       ['hook', 'p1', 'afterEvaluate', 'p1 after'],

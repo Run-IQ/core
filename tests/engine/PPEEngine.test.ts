@@ -525,7 +525,7 @@ describe('PPEEngine', () => {
         evaluate: () => true,
         listVariables: (expression) => {
           if (expression === 'broken') throw new Error('cannot parse');
-          return ['amount', 'income.total', 'household.size'];
+          return ['/amount', '/income/total', '/household/size'];
         },
       };
       const engine = engineWith([new StubModel('M', 1)], [facts]);
@@ -536,9 +536,9 @@ describe('PPEEngine', () => {
         ],
         makeInput(),
       );
-      expect(result.missingFacts).toEqual(['household.size', 'income.total']);
+      expect(result.missingFacts).toEqual(['/household/size', '/income/total']);
       expect(result.diagnostics).toEqual([
-        { source: 'engine', message: 'listVariables failed for b@1 (facts): cannot parse' },
+        { source: 'engine', message: 'listVariables of facts for b@1 failed: cannot parse' },
       ]);
     });
 

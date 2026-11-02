@@ -171,6 +171,18 @@ describe('RuleFilter', () => {
       ]);
     });
 
+    it('rejects an invalid evaluation date with spec INVALID_DATE, before any rule', async () => {
+      const rule = makeRule({ id: 'r1', model: 'M' });
+      const error = await createFilter()
+        .filter([rule], makeInput(), new Date('x'))
+        .then(
+          () => undefined,
+          (caught: unknown) => caught,
+        );
+      expect(error).toBeInstanceOf(SpecError);
+      expect(error).toMatchObject({ code: 'INVALID_DATE', message: 'at must be a valid Date' });
+    });
+
     it('skips a rule whose bound is invalid, naming the code and message of spec', async () => {
       // makeRule seals a checksum, which refuses an invalid date: corrupt the rule afterwards
       // (a rule that a beforeEvaluate hook changed is not checked again).
@@ -355,22 +367,37 @@ describe('RuleFilter', () => {
         ]);
       });
 
-      it('match all: the one input value must match, as with any', async () => {
-        // The input carries one value per dimension until 9L: `match` changes nothing yet, and a
-        // dropped `match` is seen only in the detail, which writes the spec as given.
-        const rule = makeRule({
-          id: 'r1',
+      it('match all asks every input value to match, match any (the default) one of them', async () => {
+        const inZones = (zone: string[]) =>
+          makeInput({ meta: { tenantId: 't', dimensions: { zone } } });
+        const all = makeRule({
+          id: 'all',
           model: 'M',
-          dimensions: { country: { anyOf: ['TG', 'BJ'], match: 'all' } },
+          dimensions: { zone: { anyOf: ['FR', 'US'], match: 'all' } },
         });
-        expect((await createFilter().filter([rule], inCountry('TG'), at)).passed).toEqual([rule]);
-        expect((await createFilter().filter([rule], inCountry('CI'), at)).skipped).toEqual([
+        const any = makeRule({
+          id: 'any',
+          model: 'M',
+          dimensions: { zone: { anyOf: ['FR', 'US'] } },
+        });
+        const both = await createFilter().filter([all, any], inZones(['US', 'FR']), at);
+        expect(both.passed).toEqual([all, any]);
+        // `FR` matches, `DE` does not: any passes, all does not.
+        const mixed = await createFilter().filter([all, any], inZones(['FR', 'DE']), at);
+        expect(mixed.passed).toEqual([any]);
+        expect(mixed.skipped).toEqual([
           {
-            rule,
+            rule: all,
             reason: 'DIMENSION_MISMATCH',
-            detail: 'country: rule {"anyOf":["TG","BJ"],"match":"all"}, input CI',
+            detail: 'zone: rule {"anyOf":["FR","US"],"match":"all"}, input [DE, FR]',
           },
         ]);
+        const none = await createFilter().filter([all, any], inZones(['DE', 'IT']), at);
+        expect(none.passed).toEqual([]);
+        // One value: all and any agree.
+        expect((await createFilter().filter([all, any], inZones(['FR', 'FR']), at)).passed).toEqual(
+          [all, any],
+        );
       });
 
       it('a qualified value matches as written', async () => {
@@ -438,7 +465,7 @@ describe('RuleFilter', () => {
     });
   });
 
-  describe('missing facts', () => {
+  describe('missing facts (JSON pointers of the evaluation context)', () => {
     const at = new Date('2024-06-01');
 
     class ListingDSL implements DSLEvaluator {
@@ -458,30 +485,28 @@ describe('RuleFilter', () => {
       return new RuleFilter(registry, new PluginSandbox(500, 100));
     }
 
-    it('reports dotted paths absent from data, sorted and unique', async () => {
+    const reading = (id: string, ...pointers: string[]) =>
+      makeRule({ id, model: 'M', condition: { dsl: 'listing', value: pointers } });
+
+    it('reports pointers absent from data, sorted and unique', async () => {
       const rules = [
-        makeRule({
-          id: 'r1',
-          model: 'M',
-          condition: { dsl: 'listing', value: ['revenue.total', 'amount', 'zone'] },
-        }),
-        makeRule({
-          id: 'r2',
-          model: 'M',
-          condition: { dsl: 'listing', value: ['revenue.total', 'a.b.c'] },
-        }),
+        reading('r1', '/revenue/total', '/amount', '/zone'),
+        reading('r2', '/revenue/total', '/a/b/c'),
       ];
       const input = makeInput({ data: { amount: 5, zone: undefined, a: { b: {} } } });
       const result = await listingFilter().filter(rules, input, at);
-      expect(result.missingFacts).toEqual(['a.b.c', 'revenue.total', 'zone']);
+      expect(result.missingFacts).toEqual(['/a/b/c', '/revenue/total', '/zone']);
     });
 
-    it('resolves a present dotted path object by object', async () => {
-      const rule = makeRule({
-        id: 'r1',
-        model: 'M',
-        condition: { dsl: 'listing', value: ['revenue.total'] },
-      });
+    it('sorts by the decoded segments, not by the escaped text', async () => {
+      // `~1` is "/" and `~0` is "~": decoded, "/" (0x2F) comes before "~" (0x7E).
+      const rule = reading('r1', '/~0a', '/~1a');
+      const result = await listingFilter().filter([rule], makeInput(), at);
+      expect(result.missingFacts).toEqual(['/~1a', '/~0a']);
+    });
+
+    it('resolves a present pointer object by object', async () => {
+      const rule = reading('r1', '/revenue/total');
       const input = makeInput({ data: { revenue: { total: 0 } } });
       const result = await listingFilter().filter([rule], input, at);
       expect(result.missingFacts).toEqual([]);
@@ -492,7 +517,7 @@ describe('RuleFilter', () => {
         id: 'r1',
         model: 'M',
         dimensions: { country: 'BJ' },
-        condition: { dsl: 'listing', value: ['revenue.total'] },
+        condition: { dsl: 'listing', value: ['/revenue/total'] },
       });
       const input = makeInput({ meta: { tenantId: 't', dimensions: { country: 'TG' } } });
       const result = await listingFilter().filter([rule], input, at);
@@ -500,105 +525,219 @@ describe('RuleFilter', () => {
     });
 
     it('does not resolve inherited properties', async () => {
-      const rule = makeRule({
-        id: 'r1',
-        model: 'M',
-        condition: {
-          dsl: 'listing',
-          value: ['constructor', 'toString', '__proto__', 'a.constructor', 'items.length'],
-        },
-      });
+      const rule = reading(
+        'r1',
+        '/constructor',
+        '/toString',
+        '/__proto__',
+        '/a/constructor',
+        '/items/length',
+      );
       const input = makeInput({ data: { a: {}, items: [1, 2] } });
       const result = await listingFilter().filter([rule], input, at);
       expect(result.missingFacts).toEqual([
-        '__proto__',
-        'a.constructor',
-        'constructor',
-        'items.length',
-        'toString',
+        '/__proto__',
+        '/a/constructor',
+        '/constructor',
+        '/items/length',
+        '/toString',
       ]);
     });
 
     it('resolves an own __proto__ key and own array indices', async () => {
-      const rule = makeRule({
-        id: 'r1',
-        model: 'M',
-        condition: { dsl: 'listing', value: ['__proto__.x', 'items.0', 'items.5'] },
-      });
+      const rule = reading('r1', '/__proto__/x', '/items/0', '/items/5');
       const data: Record<string, unknown> = JSON.parse('{"__proto__":{"x":1},"items":[7]}');
       const result = await listingFilter().filter([rule], makeInput({ data }), at);
-      expect(result.missingFacts).toEqual(['items.5']);
+      expect(result.missingFacts).toEqual(['/items/5']);
     });
 
-    it('treats a path through a non-object as missing', async () => {
-      const rule = makeRule({
-        id: 'r1',
-        model: 'M',
-        condition: { dsl: 'listing', value: ['s.b', 'n.b', 'z.b', 'z'] },
-      });
+    it('names a list element by its index written without a leading zero', async () => {
+      // `enfants[1]` exists, but `/enfants/01/age` does not name it: that fact is absent.
+      const rule = reading('r1', '/enfants/01/age', '/enfants/1/age', '/enfants/2/age');
+      const data = { enfants: [{ age: 4 }, { age: 6 }] };
+      const result = await listingFilter().filter([rule], makeInput({ data }), at);
+      expect(result.missingFacts).toEqual(['/enfants/01/age', '/enfants/2/age']);
+    });
+
+    it('does not read an index past the end, or a hole', async () => {
+      const rule = reading('r1', '/items/1', '/items/2');
+      // eslint-disable-next-line no-sparse-arrays
+      const data = { items: [1, , 3] };
+      const result = await listingFilter().filter([rule], makeInput({ data }), at);
+      expect(result.missingFacts).toEqual(['/items/1']);
+    });
+
+    it('does not read a list element inherited from Array.prototype', async () => {
+      const rule = reading('r1', '/items/0', '/items/1');
+      const polluted = Array.prototype as unknown as Record<string, unknown>;
+      polluted['1'] = 'inherited';
+      try {
+        const result = await listingFilter().filter(
+          [rule],
+          makeInput({ data: { items: [7] } }),
+          at,
+        );
+        expect(result.missingFacts).toEqual(['/items/1']);
+      } finally {
+        delete polluted['1'];
+      }
+    });
+
+    it('compares keys as they are: two spellings of é are two facts', async () => {
+      const precomposed = 'é';
+      const combining = 'é';
+      const rule = reading('r1', `/${precomposed}`, `/${combining}`);
+      const result = await listingFilter().filter(
+        [rule],
+        makeInput({ data: { [precomposed]: 1 } }),
+        at,
+      );
+      expect(result.missingFacts).toEqual([`/${combining}`]);
+    });
+
+    it('treats a pointer through a non-object as missing', async () => {
+      const rule = reading('r1', '/s/b', '/n/b', '/z/b', '/z');
       const input = makeInput({ data: { s: 'text', n: 3, z: null } });
       const result = await listingFilter().filter([rule], input, at);
-      expect(result.missingFacts).toEqual(['n.b', 's.b', 'z.b']);
+      expect(result.missingFacts).toEqual(['/n/b', '/s/b', '/z/b']);
     });
 
-    it('ignores an empty path', async () => {
-      const rule = makeRule({
-        id: 'r1',
-        model: 'M',
-        condition: { dsl: 'listing', value: ['', 'x'] },
+    it('never calls the root a missing fact', async () => {
+      const result = await listingFilter().filter([reading('r1', '', '/x')], makeInput(), at);
+      expect(result.missingFacts).toEqual(['/x']);
+    });
+
+    it('reads $dates and $dimensions from the normalized meta', async () => {
+      const rule = reading(
+        'r1',
+        '/$dates/effective',
+        '/$dates/facture',
+        '/$dimensions/country',
+        '/$dimensions/zone',
+      );
+      const input = makeInput({
+        meta: {
+          tenantId: 't',
+          dates: { effective: '2026-01-01T01:00:00+01:00' },
+          dimensions: { country: ['TG'] },
+        },
       });
+      const result = await listingFilter().filter([rule], input, at);
+      expect(result.missingFacts).toEqual(['/$dates/facture', '/$dimensions/zone']);
+    });
+
+    it('does not take the other engine variables for facts: they are not read here', async () => {
+      const rule = reading('r1', '/$outputs/risk/level', '/$item/age', '/$params/rate', '/$foo');
       const result = await listingFilter().filter([rule], makeInput(), at);
-      expect(result.missingFacts).toEqual(['x']);
-    });
-
-    it.each([
-      ['an Error', new Error('boom'), 'boom'],
-      ['a string', 'plain', 'plain'],
-      ['an object', { code: 1 }, '[object Object]'],
-    ])(
-      'keeps the outcome and reports a diagnostic when listVariables throws %s',
-      async (_n, thrown, text) => {
-        const registry = new DSLRegistry();
-        registry.register({
-          dsl: 'flaky',
-          version: '1.0.0',
-          evaluate: () => true,
-          listVariables: () => {
-            throw thrown;
-          },
-        });
-        const filter = new RuleFilter(registry, new PluginSandbox(500, 100));
-        const rule = makeRule({ id: 'r1', model: 'M', condition: { dsl: 'flaky', value: {} } });
-        const result = await filter.filter([rule], makeInput(), at);
-        expect(result.passed).toEqual([rule]);
-        expect(result.skipped).toEqual([]);
-        expect(result.missingFacts).toEqual([]);
-        expect(result.diagnostics).toEqual([
-          { source: 'engine', message: `listVariables failed for r1@1 (flaky): ${text}` },
-        ]);
-      },
-    );
-
-    it('adds nothing when listVariables throws midway through a lazy iterable', async () => {
-      const registry = new DSLRegistry();
-      registry.register({
-        dsl: 'lazy',
-        version: '1.0.0',
-        evaluate: () => true,
-        // A hostile plugin returns a lazy iterable, not the array the contract asks for.
-        listVariables: function* () {
-          yield 'first.missing';
-          throw new Error('midway');
-        } as unknown as NonNullable<DSLEvaluator['listVariables']>,
-      });
-      const filter = new RuleFilter(registry, new PluginSandbox(500, 100));
-      const rule = makeRule({ id: 'r1', model: 'M', condition: { dsl: 'lazy', value: {} } });
-      const result = await filter.filter([rule], makeInput(), at);
       expect(result.missingFacts).toEqual([]);
       expect(result.passed).toEqual([rule]);
-      expect(result.diagnostics).toEqual([
-        { source: 'engine', message: 'listVariables failed for r1@1 (lazy): midway' },
+    });
+
+    it('hands the DSL the context: data at the root, $dates, $dimensions and an empty $outputs', async () => {
+      const seen: unknown[] = [];
+      const registry = new DSLRegistry();
+      registry.register({
+        dsl: 'spy',
+        version: '1.0.0',
+        evaluate: (_expression, context) => {
+          seen.push(context);
+          return true;
+        },
+      });
+      const filter = new RuleFilter(registry, new PluginSandbox(500, 100));
+      const rule = makeRule({ id: 'r1', model: 'M', condition: { dsl: 'spy', value: {} } });
+      const input = makeInput({
+        data: { amount: 5 },
+        meta: { tenantId: 't', dates: { effective: '2026-01-01' }, dimensions: { country: 'TG' } },
+      });
+      await filter.filter([rule], input, at);
+      expect(seen).toEqual([
+        {
+          amount: 5,
+          $dates: { effective: '2026-01-01' },
+          $dimensions: { country: 'TG' },
+          $outputs: {},
+        },
       ]);
+      expect(Object.isFrozen(seen[0])).toBe(true);
+    });
+
+    describe('a listVariables that does not conform (D-39)', () => {
+      it('names a dotted path, keeps the pointers it gave, and keeps the outcome', async () => {
+        const rule = reading('r1', 'revenue.total', '/x');
+        const result = await listingFilter().filter([rule], makeInput(), at);
+        expect(result.passed).toEqual([rule]);
+        expect(result.missingFacts).toEqual(['/x']);
+        expect(result.diagnostics).toEqual([
+          {
+            source: 'engine',
+            message: 'listVariables of listing for r1@1 returned a non-pointer: revenue.total',
+          },
+        ]);
+      });
+
+      it("names a '-' index as an invalid path", async () => {
+        const rule = reading('r1', '/enfants/-');
+        const result = await listingFilter().filter([rule], makeInput(), at);
+        expect(result.missingFacts).toEqual([]);
+        expect(result.diagnostics).toEqual([
+          {
+            source: 'engine',
+            message:
+              "listVariables of listing for r1@1 returned an invalid path: /enfants/- ('-' is not an index)",
+          },
+        ]);
+      });
+
+      it.each([
+        ['an Error', new Error('boom'), 'boom'],
+        ['a string', 'plain', 'plain'],
+        ['an object', { code: 1 }, '[object Object]'],
+      ])(
+        'keeps the outcome and reports a diagnostic when listVariables throws %s',
+        async (_n, thrown, text) => {
+          const registry = new DSLRegistry();
+          registry.register({
+            dsl: 'flaky',
+            version: '1.0.0',
+            evaluate: () => true,
+            listVariables: () => {
+              throw thrown;
+            },
+          });
+          const filter = new RuleFilter(registry, new PluginSandbox(500, 100));
+          const rule = makeRule({ id: 'r1', model: 'M', condition: { dsl: 'flaky', value: {} } });
+          const result = await filter.filter([rule], makeInput(), at);
+          expect(result.passed).toEqual([rule]);
+          expect(result.skipped).toEqual([]);
+          expect(result.missingFacts).toEqual([]);
+          expect(result.diagnostics).toEqual([
+            { source: 'engine', message: `listVariables of flaky for r1@1 failed: ${text}` },
+          ]);
+        },
+      );
+
+      it('adds nothing when listVariables throws midway through a lazy iterable', async () => {
+        const registry = new DSLRegistry();
+        registry.register({
+          dsl: 'lazy',
+          version: '1.0.0',
+          evaluate: () => true,
+          // A hostile plugin returns a lazy iterable, not the array the contract asks for.
+          listVariables: function* () {
+            yield '/first/missing';
+            throw new Error('midway');
+          } as unknown as NonNullable<DSLEvaluator['listVariables']>,
+        });
+        const filter = new RuleFilter(registry, new PluginSandbox(500, 100));
+        const rule = makeRule({ id: 'r1', model: 'M', condition: { dsl: 'lazy', value: {} } });
+        const result = await filter.filter([rule], makeInput(), at);
+        expect(result.missingFacts).toEqual([]);
+        expect(result.passed).toEqual([rule]);
+        expect(result.diagnostics).toEqual([
+          { source: 'engine', message: 'listVariables of lazy for r1@1 failed: midway' },
+        ]);
+      });
     });
 
     it('stays empty when the DSL has no listVariables', async () => {
@@ -613,6 +752,7 @@ describe('RuleFilter', () => {
         at,
       );
       expect(result.missingFacts).toEqual([]);
+      expect(result.diagnostics).toEqual([]);
       expect(result.passed).toEqual([rule]);
     });
   });
