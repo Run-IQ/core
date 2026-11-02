@@ -516,7 +516,9 @@ function countRules(rules: unknown): number {
   try {
     if (Array.isArray(rules)) return rules.length;
   } catch (error) {
-    throw new ValidationError('Invalid rules', [`rules could not be read: ${describeThrown(error)}`]);
+    throw new ValidationError('Invalid rules', [
+      `rules could not be read: ${describeThrown(error)}`,
+    ]);
   }
   // Not a list: `readItems` says so, as a `ValidationError`.
   return 0;

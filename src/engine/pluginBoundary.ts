@@ -129,7 +129,8 @@ export function readItems(
 ): unknown[] {
   if (!Array.isArray(value)) throw new TypeError(`${what} is not a list`);
   const length = value.length;
-  if (!Number.isSafeInteger(length) || length < 0) throw new TypeError(`${what} has no valid length`);
+  if (!Number.isSafeInteger(length) || length < 0)
+    throw new TypeError(`${what} has no valid length`);
   if (length > limits.maxRules) throw new EngineLimitError('maxRules', limits.maxRules, length);
   const items: unknown[] = [];
   for (let index = 0; index < length; index += 1) {
@@ -165,7 +166,8 @@ export function readSkips(
 ): { rule: unknown; reason: unknown; detail: unknown }[] {
   if (!Array.isArray(value)) throw new TypeError('skipped is not a list');
   const length = value.length;
-  if (!Number.isSafeInteger(length) || length < 0) throw new TypeError('skipped has no valid length');
+  if (!Number.isSafeInteger(length) || length < 0)
+    throw new TypeError('skipped has no valid length');
   if (length > limits.maxRules) throw new EngineLimitError('maxRules', limits.maxRules, length);
   const skips: { rule: unknown; reason: unknown; detail: unknown }[] = [];
   for (let index = 0; index < length; index += 1) {
