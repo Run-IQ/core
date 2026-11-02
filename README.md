@@ -58,7 +58,7 @@ result.breakdown; // [{ ruleId: 'shipping-fee', contribution: 10, modelUsed: 'PE
 - **Calculation model**: a pure function `(input, rule, params) => number`. Plugins register models.
 - **Plugin**: registers models and can hook into `beforeEvaluate` / `afterEvaluate`.
 - **DSL evaluator**: decides whether a rule's `condition` applies to the input.
-- **Snapshot**: an optional record of every evaluation, saved through an adapter you provide. It is also used to make `requestId` idempotent.
+- **Snapshot**: an optional record of every evaluation, saved through an adapter you provide. A `requestId` whose snapshot already exists is refused with `DUPLICATE_REQUEST`; until Task 10 core returns no stored decision.
 
 ## How `evaluate()` works
 
