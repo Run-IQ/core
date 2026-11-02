@@ -34,7 +34,7 @@ import { PluginSandbox } from '../security/PluginSandbox.js';
 import { SnapshotManager } from '../snapshot/SnapshotManager.js';
 import { SnapshotSerializer } from '../snapshot/SnapshotSerializer.js';
 import { VERSION } from '../utils/version.js';
-import { copyData, ruleLabel } from '../utils/values.js';
+import { copyData } from '../utils/values.js';
 import { acceptAfterEvaluate } from './afterEvaluateTransition.js';
 import { readBeforeEvaluate } from './beforeEvaluateResult.js';
 import { checkHookRules } from './hookRules.js';
@@ -252,14 +252,20 @@ export class PPEEngine {
     // Step 1: Input validation. One plain copy of the input is made and checked; the hooks, the
     // rules and the models all work on it, never on the caller's object (D-5).
     const prepared = this.acceptInput(input);
-    checkDerivedSeed(this.inputSeed, input.requestId);
+    // The request id read once, by `prepare`: the seed, the duplicate check, the result and the
+    // record all use this one, never the caller's object again.
+    const requestId = prepared.input.requestId;
+    const tenantId = prepared.input.meta.tenantId;
+    checkDerivedSeed(this.inputSeed, requestId);
 
     // Step 2: Idempotence check
-    const alreadyExists = await this.snapshotManager.exists(input.requestId);
-    if (alreadyExists) throw new DuplicateRequestError(input.requestId);
+    const alreadyExists = await this.snapshotManager.exists(requestId);
+    if (alreadyExists) throw new DuplicateRequestError(requestId);
 
-    // Step 3: Rule validation (checksum of the source rules)
-    const initialValidation = this.ruleValidator.validate(rules);
+    // Step 3: Rule validation (checksum of the source rules). The engine works on its own frozen
+    // copies of the rules: the caller's objects are never handed to a hook, so a hook cannot
+    // rewrite a rule in place, and a caller cannot change one while hooks are awaited.
+    const initialValidation = this.ruleValidator.validate(rules.map(frozenCopy));
     allSkipped.push(...initialValidation.invalid);
 
     // Continue with valid source rules
@@ -277,6 +283,7 @@ export class PPEEngine {
       signal.throwIfAborted();
       let reading: BeforeEvaluateReading;
       let accepted: PreparedInput;
+      let added: string[];
       try {
         // Read once and checked as a whole: nothing is committed unless every check passes.
         reading = readBeforeEvaluate(
@@ -287,29 +294,35 @@ export class PPEEngine {
             'beforeEvaluate',
             signal,
           ),
+          this.limits,
         );
-        // The input a hook returns is checked as the caller's was (bounds, spec, strict mode).
+        // The input a hook returns is checked as the caller's was (bounds, spec, strict mode),
+        // and it is the same request: the idempotence check and the record rest on these two.
         accepted = this.acceptInput(reading.input);
-        // Rules dropped without a skip would be lost in silence: the engine does not accept it.
-        const lost = ruleChanges(currentRules, reading).removed;
-        if (lost.length > 0) {
-          throw new Error(`plugin ${plugin.name} removed rules without a skip: ${lost.join(', ')}`);
+        if (accepted.input.requestId !== requestId) {
+          throw new Error(
+            `plugin ${plugin.name} changed requestId from ${JSON.stringify(requestId)} to ${JSON.stringify(accepted.input.requestId)}`,
+          );
         }
-        // Rules rewritten under the same name, or added with a checksum that does not hold, would
-        // be evaluated as if they were the source rules.
-        checkHookRules(plugin.name, currentRules, reading.rules);
+        if (accepted.input.meta.tenantId !== tenantId) {
+          throw new Error(
+            `plugin ${plugin.name} changed meta.tenantId from ${JSON.stringify(tenantId)} to ${JSON.stringify(accepted.input.meta.tenantId)}`,
+          );
+        }
+        // The rules and the skips are the given ones, or verified new ones: nothing rewritten,
+        // doubled, dropped or invented.
+        added = checkHookRules(plugin.name, currentRules, reading, this.ruleValidator);
       } catch (error) {
         // Fail closed: a decision computed without what a plugin was to prepare is not returned.
         signal.throwIfAborted();
         throw new PluginHookError(plugin.name, 'beforeEvaluate', error);
       }
       signal.throwIfAborted();
-      const { added } = ruleChanges(currentRules, reading);
       currentInput = accepted.input;
       currentMeta = accepted.meta;
       currentDate = accepted.evaluationDate;
-      currentRules = reading.rules;
-      allSkipped.push(...reading.skipped);
+      currentRules = reading.rules.map(deepFreeze);
+      allSkipped.push(...reading.skipped.map(deepFreeze));
       if (reading.state !== undefined) pluginState[plugin.name] = reading.state;
       if (added.length > 0) {
         hookDiagnostics.push(
@@ -368,7 +381,7 @@ export class PPEEngine {
 
     // Build initial result
     let result: UnsealedResult = {
-      requestId: input.requestId,
+      requestId,
       value: pipelineResult.outputs.value.value,
       outputs: pipelineResult.outputs,
       breakdown: pipelineResult.breakdown,
@@ -394,7 +407,7 @@ export class PPEEngine {
       const handed = copyData(before);
       try {
         const returned = await this.sandbox.runHook(
-          () => hook.call(plugin, currentInput, handed),
+          () => hook.call(plugin, hookView(currentInput), handed),
           plugin.name,
           'afterEvaluate',
           signal,
@@ -428,34 +441,41 @@ export class PPEEngine {
 
 type HookName = 'beforeEvaluate' | 'afterEvaluate';
 
-/**
- * What a `beforeEvaluate` did to the rules it was given, as `id@version` labels sorted by
- * `compareRuleIdentity`, matched as multisets (a dropped or added duplicate is named):
- * - `removed`: given rules neither in the returned `rules` nor in `skipped`;
- * - `added`: returned rules not among the given ones.
- * The plugin's copies, possibly rewritten, count as the same rule when their label is the same.
- */
-function ruleChanges(
-  given: ReadonlyArray<Rule>,
-  reading: BeforeEvaluateReading,
-): { removed: string[]; added: string[] } {
-  return {
-    removed: unmatched(given, [...reading.rules, ...reading.skipped.map((skip) => skip.rule)]),
-    added: unmatched(reading.rules, given),
-  };
+/** A deep, frozen copy of a rule: the engine's own, which nobody else holds. */
+function frozenCopy(rule: Rule): Rule {
+  return deepFreeze(copyData(rule));
 }
 
-/** The rules of `from` left once each rule of `take` cancels one of the same label. */
-function unmatched(from: ReadonlyArray<Rule>, take: ReadonlyArray<Rule>): string[] {
-  const left = new Map<string, number>();
-  for (const rule of take) left.set(ruleLabel(rule), (left.get(ruleLabel(rule)) ?? 0) + 1);
-  const rest: Rule[] = [];
-  for (const rule of from) {
-    const count = left.get(ruleLabel(rule)) ?? 0;
-    if (count > 0) left.set(ruleLabel(rule), count - 1);
-    else rest.push(rule);
-  }
-  return rest.sort(compareRuleIdentity).map(ruleLabel);
+/** Freezes `value` and everything it holds that is a plain object or a list. */
+function deepFreeze<T>(value: T): T {
+  if (typeof value !== 'object' || value === null || Object.isFrozen(value)) return value;
+  if (value instanceof Date) return value;
+  Object.freeze(value);
+  for (const member of Object.values(value)) deepFreeze(member);
+  return value;
+}
+
+/**
+ * The input as a hook gets it: the engine's frozen data, and its own copies of the dates of
+ * `meta` (a frozen `Date` can still be written with `setTime`).
+ */
+function hookView(input: EvaluationInput): EvaluationInput {
+  const { effectiveDate, dates } = input.meta;
+  const meta = {
+    ...input.meta,
+    ...(effectiveDate === undefined ? {} : { effectiveDate: new Date(effectiveDate.getTime()) }),
+    ...(dates === undefined
+      ? {}
+      : {
+          dates: Object.fromEntries(
+            Object.entries(dates).map(([name, date]) => [
+              name,
+              date instanceof Date ? new Date(date.getTime()) : date,
+            ]),
+          ),
+        }),
+  };
+  return Object.freeze({ ...input, meta: Object.freeze(meta) });
 }
 
 function hookDiagnostic(plugin: PPEPlugin, hook: HookName, message: string): Diagnostic {

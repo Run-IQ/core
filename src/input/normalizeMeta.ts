@@ -71,6 +71,7 @@ export function normalizeMeta(meta: EvaluationInput['meta']): NormalizedMeta {
   const dimensionsIn = isRecord(meta.dimensions) ? meta.dimensions : {};
   for (const [name, value] of Object.entries(dimensionsIn)) {
     if (typeof value === 'string' || !Array.isArray(value)) {
+      // A value that is not a string is passed on as it is, for `validateProofInput` to name.
       put(dimensions, name, value as string);
       continue;
     }
@@ -101,7 +102,12 @@ export function normalizeMeta(meta: EvaluationInput['meta']): NormalizedMeta {
     dates: (isRecord(meta.dates) || meta.dates === undefined
       ? dates
       : meta.dates) as NormalizedMeta['dates'],
-    tags: (Array.isArray(meta.tags) ? sortedUnique(meta.tags) : (meta.tags ?? [])) as string[],
+    // `null` is not absence: only `undefined` is, and spec refuses the rest.
+    tags: (Array.isArray(meta.tags)
+      ? sortedUnique(meta.tags)
+      : meta.tags === undefined
+        ? []
+        : meta.tags) as string[],
     dimensions: (isRecord(meta.dimensions) || meta.dimensions === undefined
       ? dimensions
       : meta.dimensions) as NormalizedMeta['dimensions'],

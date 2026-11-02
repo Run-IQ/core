@@ -409,7 +409,7 @@ describe('a rule a beforeEvaluate hook returns is the rule it was given, or a ve
     });
     await expectHookFailure(s, 'beforeEvaluate', (cause) => {
       expect((cause as Error).message).toBe(
-        'plugin bad added rule extra@1 whose checksum does not match its content',
+        'plugin bad added rule extra@1: Checksum mismatch for rule extra@1',
       );
     });
   });

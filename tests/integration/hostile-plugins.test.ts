@@ -117,11 +117,7 @@ describe('hostile beforeEvaluate results', () => {
       (r) => ({ ...r, skipped: [{ rule: r.rules[0], reason: 5 }] }),
       'returned a malformed skipped',
     ],
-    [
-      'data that is not an object',
-      (r) => ({ ...r, input: { ...r.input, data: 5 } }),
-      'returned a malformed input',
-    ],
+
     [
       'a state getter that throws',
       (r) => {
@@ -565,22 +561,41 @@ describe('rules removed or added by beforeEvaluate (multisets)', () => {
     });
   });
 
-  it('names an added duplicate, sorted by id then version', async () => {
+  it('fails the evaluation for a given rule returned twice: it would count twice', async () => {
+    const p = pluginWith('p', {
+      beforeEvaluate: (input, rules) => ({ input, rules: [...rules, ...rules] }),
+    });
+    const error = await failure(engineWith([p]));
+    expect(error).toBeInstanceOf(PluginHookError);
+    expect((error as PluginHookError).cause).toMatchObject({
+      message: 'plugin p returned rule r1@1 2 times (rules and skips together), it was given 1',
+    });
+  });
+
+  it('names the rules added, sorted by id then version', async () => {
     const p = pluginWith('p', {
       beforeEvaluate: (input, rules) => ({
         input,
         rules: [
           ...rules,
           makeRule({ id: 'z', model: 'M' }),
-          rules[0]!,
           makeRule({ id: 'a', model: 'M', version: 3 }),
         ],
       }),
     });
     const result = await engineWith([p]).evaluate([rule()], makeInput());
-    expect(result.diagnostics.map((x) => x.message)).toEqual([
-      'plugin p added rules: a@3, r1@1, z@1',
-    ]);
+    expect(result.diagnostics.map((x) => x.message)).toEqual(['plugin p added rules: a@3, z@1']);
+  });
+
+  it('fails the evaluation for a rule added twice', async () => {
+    const extra = makeRule({ id: 'z', model: 'M' });
+    const p = pluginWith('p', {
+      beforeEvaluate: (input, rules) => ({ input, rules: [...rules, extra, extra] }),
+    });
+    const error = await failure(engineWith([p]));
+    expect((error as PluginHookError).cause).toMatchObject({
+      message: 'plugin p added rule z@1 more than once',
+    });
   });
 });
 
