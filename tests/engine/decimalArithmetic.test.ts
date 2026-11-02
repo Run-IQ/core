@@ -146,6 +146,62 @@ describe('decimalArithmetic', () => {
     });
   });
 
+  describe('rounding to an increment, or with no step', () => {
+    // Each expectation worked out by hand: value / increment, rounded to an integer in the mode,
+    // times the increment. 1.075 and 1.025 are ties of 0.05 (21.5 and 20.5 steps).
+    const cases: ReadonlyArray<readonly [string, string, RoundingMode, string]> = [
+      ['1.07', '0.05', 'halfUp', '1.05'],
+      ['1.07', '0.05', 'up', '1.1'],
+      ['1.07', '0.05', 'down', '1.05'],
+      ['1.07', '0.05', 'ceiling', '1.1'],
+      ['1.07', '0.05', 'floor', '1.05'],
+      ['1.075', '0.05', 'halfUp', '1.1'],
+      ['1.075', '0.05', 'halfDown', '1.05'],
+      ['1.075', '0.05', 'halfEven', '1.1'],
+      ['1.025', '0.05', 'halfUp', '1.05'],
+      ['1.025', '0.05', 'halfDown', '1'],
+      ['1.025', '0.05', 'halfEven', '1'],
+      ['-1.075', '0.05', 'halfUp', '-1.1'],
+      ['-1.075', '0.05', 'halfDown', '-1.05'],
+      ['-1.075', '0.05', 'halfEven', '-1.1'],
+      ['-1.075', '0.05', 'up', '-1.1'],
+      ['-1.075', '0.05', 'down', '-1.05'],
+      ['-1.075', '0.05', 'ceiling', '-1.05'],
+      ['-1.075', '0.05', 'floor', '-1.1'],
+      ['14', '10', 'halfUp', '10'],
+      ['15', '10', 'halfUp', '20'],
+      ['25', '10', 'halfEven', '20'],
+      ['35', '10', 'halfEven', '40'],
+      ['10', '3', 'halfUp', '9'],
+      ['11', '3', 'halfUp', '12'],
+      ['11', '3', 'floor', '9'],
+      ['11', '3', 'ceiling', '12'],
+      ['0.04', '0.05', 'down', '0'],
+    ];
+
+    it.each(cases)('%s to the increment %s, %s: %s', (value, increment, mode, expected) => {
+      expect(roundDecimal(value, { increment, mode })).toBe(expected);
+      expect(roundNumber(Number(value), { increment, mode })).toBe(Number(expected));
+    });
+
+    it('is exact past 20 significant digits', () => {
+      const big = `${'9'.repeat(40)}.5`;
+      expect(roundDecimal(big, { increment: '1', mode: 'halfUp' })).toBe(`1${'0'.repeat(40)}`);
+      expect(roundDecimal(`${'9'.repeat(40)}.4`, { increment: '0.5', mode: 'halfUp' })).toBe(
+        `${'9'.repeat(40)}.5`,
+      );
+    });
+
+    it('never gives -0', () => {
+      expect(Object.is(roundNumber(-0.01, { increment: '0.05', mode: 'halfUp' }), 0)).toBe(true);
+    });
+
+    it('leaves a value as it is when the rounding has no scale and no increment', () => {
+      expect(roundDecimal('1.234', { mode: 'halfUp' })).toBe('1.234');
+      expect(roundNumber(1.234, { mode: 'halfUp' })).toBe(1.234);
+    });
+  });
+
   describe('floatSum and compareNumeric', () => {
     it('sums numbers in Decimal to 20 significant digits, as before', () => {
       expect(floatSum([0.1, 0.2]).toNumber()).toBe(0.3);

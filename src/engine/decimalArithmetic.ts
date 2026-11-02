@@ -118,9 +118,25 @@ export function exactSum(values: readonly string[]): Decimal {
 export const floatSum = (values: readonly number[]): Decimal =>
   values.reduce<Decimal>((total, value) => total.plus(String(value)), new Float(0));
 
-/** `value` rounded to `rounding.scale` places in `rounding.mode`. */
-export const round = (value: Decimal, rounding: OutputRounding): Decimal =>
-  value.toDecimalPlaces(rounding.scale, ROUNDING[rounding.mode]);
+/**
+ * For the quotient of a value by an increment: wide enough to hold it whole, a value spanning
+ * `DECIMAL_DIGITS_LIMIT` positions and an increment of at most 20 places. A quotient that does
+ * not end (an increment of `3`) is never a tie: it is at least 10^-20 from one.
+ */
+const Wide = Decimal.clone({ ...SETTINGS, precision: 2 * DECIMAL_DIGITS_LIMIT + 100 });
+
+/**
+ * `value` rounded in `rounding.mode` to `rounding.scale` places, or to a multiple of
+ * `rounding.increment`; a rounding with neither (the type allows it, a valid declaration has
+ * exactly one) leaves it as it is.
+ */
+export const round = (value: Decimal, rounding: OutputRounding): Decimal => {
+  const mode = ROUNDING[rounding.mode];
+  if (rounding.scale !== undefined) return value.toDecimalPlaces(rounding.scale, mode);
+  if (rounding.increment === undefined) return value;
+  const step = new Wide(rounding.increment);
+  return new Wide(value).div(step).toDecimalPlaces(0, mode).times(step);
+};
 
 /** A decimal string rounded, in canonical form. */
 export const roundDecimal = (value: string, rounding: OutputRounding): string =>
