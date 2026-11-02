@@ -2,13 +2,17 @@ import { validateProofInput } from '@run-iq/spec';
 import type { ProofInput } from '@run-iq/spec';
 import type { EvaluationInput } from '../types/input.js';
 import { ValidationError } from '../errors/ValidationError.js';
-import { InputCopier } from '../input/copyInput.js';
+import { InputCopier, listKeys } from '../input/copyInput.js';
+import { describeThrown } from '../utils/values.js';
 import { evaluationDate, normalizeMeta } from '../input/normalizeMeta.js';
 import type { NormalizedMeta } from '../input/normalizeMeta.js';
 import { DEFAULT_LIMITS } from '../limits.js';
 import type { EngineLimits } from '../limits.js';
 
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/** The only keys an evaluation input has. */
+const INPUT_KEYS: ReadonlySet<string> = new Set(['requestId', 'data', 'meta']);
 
 /** An input that was checked, with the copies the engine goes on with. */
 export interface PreparedInput {
@@ -27,6 +31,17 @@ export interface PreparedInput {
 /** True for a non-null, non-array object. */
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
+
+/** Freezes the maps and lists `normalizeMeta` built (the rest is already the frozen copy). */
+function freezeCanonical(meta: NormalizedMeta): void {
+  for (const values of Object.values(meta.dimensions)) {
+    if (typeof values !== 'string') Object.freeze(values);
+  }
+  Object.freeze(meta.dimensions);
+  Object.freeze(meta.dates);
+  Object.freeze(meta.tags);
+  Object.freeze(meta);
+}
 
 export class InputSanitizer {
   /**
@@ -48,25 +63,29 @@ export class InputSanitizer {
     }
 
     const obj = input as Record<string, unknown>;
-    // Each member of the input is read once, here: the checks and the copy below work on these
-    // values, whatever a getter or a Proxy would answer to a second read.
-    const requestId: unknown = obj['requestId'];
-    const dataIn: unknown = obj['data'];
-    const metaIn: unknown = obj['meta'];
+    // The input is read once: its keys are listed once (a symbol key or a non-enumerable property
+    // is named, as it would vanish), then each member once. The checks and the copy below work on
+    // these values, whatever a getter or a Proxy would answer to a second read.
+    let requestId: unknown;
+    let dataIn: unknown;
+    let metaIn: unknown;
+    try {
+      for (const key of listKeys(obj, '', reasons)) {
+        if (!INPUT_KEYS.has(key)) reasons.push(`input has an unknown key ${JSON.stringify(key)}`);
+      }
+      requestId = obj['requestId'];
+      dataIn = obj['data'];
+      metaIn = obj['meta'];
+    } catch (error) {
+      throw new ValidationError('Invalid evaluation input', [
+        `input could not be read: ${describeThrown(error)}`,
+      ]);
+    }
 
     if (typeof requestId !== 'string' || requestId.length === 0) {
       reasons.push('requestId must be a non-empty string');
     }
-
-    if (!isRecord(dataIn)) {
-      reasons.push('data must be a non-null object');
-    } else {
-      for (const key of Object.keys(dataIn)) {
-        if (FORBIDDEN_KEYS.has(key)) {
-          reasons.push(`data contains forbidden key: "${key}"`);
-        }
-      }
-    }
+    if (!isRecord(dataIn)) reasons.push('data must be a non-null object');
 
     let meta: Record<string, unknown> | undefined;
     let metaKeys: string[] = [];
@@ -74,9 +93,10 @@ export class InputSanitizer {
       reasons.push('meta must be a non-null object');
     } else {
       meta = metaIn;
-      metaKeys = Object.keys(meta);
-      if (typeof meta['tenantId'] !== 'string' || meta['tenantId'].length === 0) {
-        reasons.push('meta.tenantId must be a non-empty string');
+      try {
+        metaKeys = listKeys(meta, '/meta', reasons);
+      } catch (error) {
+        reasons.push(`/meta could not be read: ${describeThrown(error)}`);
       }
       for (const key of metaKeys) {
         if (FORBIDDEN_KEYS.has(key)) {
@@ -85,14 +105,20 @@ export class InputSanitizer {
       }
     }
 
-    if (reasons.length > 0 || meta === undefined) {
+    if (reasons.length > 0 || meta === undefined || !isRecord(dataIn)) {
       throw new ValidationError('Invalid evaluation input', reasons);
     }
 
     // The one walk: copy and bounds. Each part of the input is a root at level 1 and they share
     // the count of leaves; a too large input is refused before spec reads it.
     const copier = new InputCopier(limits);
+    // justification: `copy` of a plain object returns a plain object (`dataIn` is a record).
     const data = copier.copy(dataIn, '/data') as Record<string, unknown>;
+    // The forbidden keys are looked for on the copy: the keys that are evaluated are the ones
+    // that are checked.
+    for (const key of Object.keys(data)) {
+      if (FORBIDDEN_KEYS.has(key)) reasons.push(`data contains forbidden key: "${key}"`);
+    }
     // defineProperty: an own `__proto__` key stays a member of the copy and cannot set its
     // prototype. The keys are the ones listed above, once.
     const metaCopy: Record<string, unknown> = {};
@@ -111,8 +137,13 @@ export class InputSanitizer {
         configurable: true,
       });
     }
-    if (copier.reasons.length > 0) {
-      throw new ValidationError('Invalid evaluation input', copier.reasons);
+    // The tenant is checked on the copy: it is the one that is recorded.
+    const tenantId: unknown = metaCopy['tenantId'];
+    if (typeof tenantId !== 'string' || tenantId.length === 0) {
+      reasons.push('meta.tenantId must be a non-empty string');
+    }
+    if (copier.reasons.length > 0 || reasons.length > 0) {
+      throw new ValidationError('Invalid evaluation input', [...reasons, ...copier.reasons]);
     }
     Object.freeze(metaCopy);
 
@@ -133,6 +164,9 @@ export class InputSanitizer {
       throw new ValidationError('Invalid evaluation input', reasons);
     }
 
+    // The canonical meta is the one the rules read ($dates, $dimensions): frozen at every depth,
+    // so that nothing a rule or a DSL does can change what a later rule sees.
+    freezeCanonical(canonical);
     return {
       input: Object.freeze({
         requestId: requestId as string,

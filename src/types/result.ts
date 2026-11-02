@@ -58,7 +58,14 @@ export type SkipReason =
   /** Another rule with the same priority won the conflict (`onConflict: 'first'`). */
   | 'RULE_CONFLICT'
   /** No model is registered for the rule's `model` (for plugins; core throws `ModelNotFoundError`). */
-  | 'MODEL_NOT_FOUND';
+  | 'MODEL_NOT_FOUND'
+  /** A plugin skipped the rule in `beforeEvaluate`; `detail` carries the plugin's words. */
+  | 'PLUGIN'
+  /**
+   * A model wrote into its frozen arguments (the rule, its params or the input): that rule is
+   * excluded and `detail` says `wrote to its input: ...`.
+   */
+  | 'MODEL_ERROR';
 
 /** One contribution that entered the decision, as the trace step of the same rule records it. */
 export interface BreakdownItem {

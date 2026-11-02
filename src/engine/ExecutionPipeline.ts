@@ -6,10 +6,11 @@ import type { BreakdownItem, SkippedRule } from '../types/result.js';
 import type { DecisionOutput } from '../types/output.js';
 import type { ModelRegistry } from '../registry/ModelRegistry.js';
 import { findNonJson, isJsonValue } from '../utils/json.js';
-import { isPlainObject, ruleLabel } from '../utils/values.js';
+import { describeThrown, isPlainObject, ruleLabel } from '../utils/values.js';
 import type { ShortCircuit } from './ExceptionProcessor.js';
 import type { TraceBuilder } from './TraceBuilder.js';
 import { OutputCombiner } from './OutputCombiner.js';
+import { ruleView } from './pluginBoundary.js';
 import type { Contribution } from './OutputCombiner.js';
 import { compareByPriorityThenIdentity, compareRuleIdentity } from './resolveTie.js';
 import {
@@ -183,7 +184,22 @@ export class ExecutionPipeline {
       for (const rule of feeders) {
         const model = this.modelRegistry.get(rule.model);
         const start = performance.now();
-        const raw: unknown = model.calculate(input.data, rule, rule.params);
+        // The model gets a view of the rule: its own objects and its own `Date`s, frozen.
+        const view = ruleView(rule);
+        let raw: unknown;
+        try {
+          raw = model.calculate(input.data, view, view.params);
+        } catch (error) {
+          // A write into a frozen argument (the rule, its params, the input) is that rule's
+          // error, named; any other throw is the model's and fails the evaluation as before.
+          if (!isWriteAttempt(error)) throw error;
+          skipped.push({
+            rule,
+            reason: 'MODEL_ERROR',
+            detail: `wrote to its input: ${describeThrown(error)}`,
+          });
+          continue;
+        }
         const durationMs = Math.round((performance.now() - start) * 100) / 100;
         const { value, detail } = readCalculation(raw, declaration);
         if (!isJsonValue(value)) {
@@ -264,4 +280,12 @@ export class ExecutionPipeline {
       skipped: skipped.sort((a, b) => compareByPriorityThenIdentity(a.rule, b.rule)),
     };
   }
+}
+
+/** True for the `TypeError` a strict-mode write into a frozen or sealed object throws. */
+function isWriteAttempt(error: unknown): boolean {
+  return (
+    error instanceof TypeError &&
+    /read only|read-only|not extensible|Cannot (assign|add|delete|define)/.test(error.message)
+  );
 }

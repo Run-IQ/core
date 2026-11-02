@@ -34,10 +34,11 @@ import { PluginSandbox } from '../security/PluginSandbox.js';
 import { SnapshotManager } from '../snapshot/SnapshotManager.js';
 import { SnapshotSerializer } from '../snapshot/SnapshotSerializer.js';
 import { VERSION } from '../utils/version.js';
-import { copyData } from '../utils/values.js';
+import { copyData, describeThrown, ruleLabel } from '../utils/values.js';
 import { acceptAfterEvaluate } from './afterEvaluateTransition.js';
 import { readBeforeEvaluate } from './beforeEvaluateResult.js';
-import { checkHookRules } from './hookRules.js';
+import { RuleLedger, readItems } from './pluginBoundary.js';
+import type { LedgerOutcome } from './pluginBoundary.js';
 import type { BeforeEvaluateReading } from './beforeEvaluateResult.js';
 
 export interface PPEEngineConfig {
@@ -219,6 +220,22 @@ export class PPEEngine {
   }
 
   /**
+   * The engine's own copies of the source rules: the list read once (its length once, each item
+   * once), each rule bounded on its own (`maxInputLeaves`, `maxInputDepth`), frozen, with its own
+   * `Date`s. A rule that cannot be read is a `ValidationError`; the caller's objects are never
+   * frozen, read again, or handed to a plugin.
+   */
+  private copySourceRules(rules: ReadonlyArray<Rule>): Rule[] {
+    try {
+      // justification: each item is a copy of a rule; the validator checks it as one.
+      return readItems(rules, this.limits, 'rules') as Rule[];
+    } catch (error) {
+      if (error instanceof EngineLimitError) throw error;
+      throw new ValidationError('Invalid rules', [describeThrown(error)]);
+    }
+  }
+
+  /**
    * Checks an input and makes its plain copy (`InputSanitizer.prepare`), then holds it to strict
    * mode: the evaluation date, as `meta.effectiveDate` or `meta.dates.effective`, must be given.
    * The caller's input and each input a `beforeEvaluate` hook returns go through here.
@@ -265,11 +282,14 @@ export class PPEEngine {
     // Step 3: Rule validation (checksum of the source rules). The engine works on its own frozen
     // copies of the rules: the caller's objects are never handed to a hook, so a hook cannot
     // rewrite a rule in place, and a caller cannot change one while hooks are awaited.
-    const initialValidation = this.ruleValidator.validate(rules.map(frozenCopy));
+    const sourceCopies = this.copySourceRules(rules);
+    const initialValidation = this.ruleValidator.validate(sourceCopies);
     allSkipped.push(...initialValidation.invalid);
 
-    // Continue with valid source rules
-    let currentRules: ReadonlyArray<Rule> = initialValidation.valid;
+    // The ledger of the given rules: held by the engine alone, from here on. Hooks get views of
+    // it and what they return is checked against it; a label refused here cannot come back.
+    const ledger = new RuleLedger(initialValidation.valid, sourceCopies.map(ruleLabel));
+    let currentRules: ReadonlyArray<Rule> = ledger.current();
 
     // Step 4: Plugin beforeEvaluate hooks. Their diagnostics follow the engine's own ones.
     const hookDiagnostics: Diagnostic[] = [];
@@ -283,13 +303,13 @@ export class PPEEngine {
       signal.throwIfAborted();
       let reading: BeforeEvaluateReading;
       let accepted: PreparedInput;
-      let added: string[];
+      let outcome: LedgerOutcome;
       try {
         // Read once and checked as a whole: nothing is committed unless every check passes.
         reading = readBeforeEvaluate(
           plugin.name,
           await this.sandbox.runHook(
-            () => hook.call(plugin, currentInput, currentRules),
+            () => hook.call(plugin, hookView(currentInput), ledger.view()),
             plugin.name,
             'beforeEvaluate',
             signal,
@@ -311,7 +331,7 @@ export class PPEEngine {
         }
         // The rules and the skips are the given ones, or verified new ones: nothing rewritten,
         // doubled, dropped or invented.
-        added = checkHookRules(plugin.name, currentRules, reading, this.ruleValidator);
+        outcome = ledger.apply(plugin.name, reading, this.ruleValidator);
       } catch (error) {
         // Fail closed: a decision computed without what a plugin was to prepare is not returned.
         signal.throwIfAborted();
@@ -321,15 +341,15 @@ export class PPEEngine {
       currentInput = accepted.input;
       currentMeta = accepted.meta;
       currentDate = accepted.evaluationDate;
-      currentRules = reading.rules.map(deepFreeze);
-      allSkipped.push(...reading.skipped.map(deepFreeze));
+      currentRules = outcome.rules;
+      allSkipped.push(...outcome.skipped);
       if (reading.state !== undefined) pluginState[plugin.name] = reading.state;
-      if (added.length > 0) {
+      if (outcome.added.length > 0) {
         hookDiagnostics.push(
           hookDiagnostic(
             plugin,
             'beforeEvaluate',
-            `plugin ${plugin.name} added rules: ${added.join(', ')}`,
+            `plugin ${plugin.name} added rules: ${outcome.added.join(', ')}`,
           ),
         );
       }
@@ -413,7 +433,7 @@ export class PPEEngine {
           signal,
         );
         signal.throwIfAborted();
-        result = acceptAfterEvaluate(plugin.name, before, returned).result;
+        result = acceptAfterEvaluate(plugin.name, before, returned, this.limits).result;
       } catch (error) {
         signal.throwIfAborted();
         throw new PluginHookError(plugin.name, 'afterEvaluate', error);
@@ -440,20 +460,6 @@ export class PPEEngine {
 }
 
 type HookName = 'beforeEvaluate' | 'afterEvaluate';
-
-/** A deep, frozen copy of a rule: the engine's own, which nobody else holds. */
-function frozenCopy(rule: Rule): Rule {
-  return deepFreeze(copyData(rule));
-}
-
-/** Freezes `value` and everything it holds that is a plain object or a list. */
-function deepFreeze<T>(value: T): T {
-  if (typeof value !== 'object' || value === null || Object.isFrozen(value)) return value;
-  if (value instanceof Date) return value;
-  Object.freeze(value);
-  for (const member of Object.values(value)) deepFreeze(member);
-  return value;
-}
 
 /**
  * The input as a hook gets it: the engine's frozen data, and its own copies of the dates of

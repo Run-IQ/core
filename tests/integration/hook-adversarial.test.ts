@@ -480,7 +480,7 @@ describe('N8 and N9: the rules and the skips of a hook are the given ones', () =
         beforeEvaluate: (input, rules) => ({
           input,
           rules,
-          skipped: [{ rule: ghost, reason: 'SHORT_CIRCUITED' }],
+          skipped: [{ rule: ghost, reason: 'PLUGIN' }],
         }),
       }),
     ]);
@@ -496,7 +496,7 @@ describe('N8 and N9: the rules and the skips of a hook are the given ones', () =
         beforeEvaluate: (input, rules) => ({
           input,
           rules,
-          skipped: [{ rule: rules[0]!, reason: 'SHORT_CIRCUITED' }],
+          skipped: [{ rule: rules[0]!, reason: 'PLUGIN' }],
         }),
       }),
     ]);
@@ -512,9 +512,7 @@ describe('N8 and N9: the rules and the skips of a hook are the given ones', () =
         beforeEvaluate: (input, rules) => ({
           input,
           rules: [],
-          skipped: [
-            { rule: { ...rules[0]!, params: { evil: true } } as Rule, reason: 'SHORT_CIRCUITED' },
-          ],
+          skipped: [{ rule: { ...rules[0]!, params: { evil: true } } as Rule, reason: 'PLUGIN' }],
         }),
       }),
     ]);
@@ -530,7 +528,7 @@ describe('N8 and N9: the rules and the skips of a hook are the given ones', () =
         beforeEvaluate: (input, rules) => ({
           input,
           rules: [],
-          skipped: [{ rule: rules[0]!, reason: 'SHORT_CIRCUITED' }],
+          skipped: [{ rule: rules[0]!, reason: 'PLUGIN' }],
         }),
       }),
     ]);

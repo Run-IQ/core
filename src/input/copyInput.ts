@@ -109,17 +109,19 @@ export class InputCopier {
       }
       const at = (): string =>
         key === undefined ? rootPointer : this.pointer(rootPointer, parent, key);
-      if (value instanceof Date) {
-        // A Date is copied, so that nobody holds the one the evaluation records. Spec refuses it
-        // in `data` and `meta.context`; `meta.effectiveDate` and `meta.dates` take it.
-        this.leaf();
-        put(parent, key, new Date(value.getTime()));
-        return;
-      }
       let isList: boolean;
       let keys: string[] | undefined;
       let length: number;
       try {
+        // A Date is copied, so that nobody holds the one the evaluation records. Spec refuses it
+        // in `data` and `meta.context`; `meta.effectiveDate` and `meta.dates` take it. A fake
+        // Date or a revoked Proxy throws here, and is named as unreadable.
+        if (value instanceof Date) {
+          const copy = new Date(value.getTime());
+          this.leaf();
+          put(parent, key, copy);
+          return;
+        }
         isList = Array.isArray(value);
         if (isList) {
           length = (value as unknown[]).length;
@@ -186,7 +188,6 @@ export class InputCopier {
           this.reasons.push(
             `${frame.key === undefined ? rootPointer : this.pointer(rootPointer, frame.parent, frame.key)} has a hole at index ${i}: arrays must be dense`,
           );
-          this.leaf();
           frame.index = frame.length;
           continue;
         }
@@ -202,4 +203,24 @@ export class InputCopier {
     }
     return top.value;
   }
+}
+
+/**
+ * The enumerable string keys of `value`, listed once, plus a reason for each own key that would
+ * vanish from a copy: a symbol key (`<pointer> has a symbol key: Symbol(s)`) and a non-enumerable
+ * property (`<pointer>/k is not enumerable`). For the root of the input and for `meta`, which the
+ * copier does not walk as containers.
+ */
+export function listKeys(value: object, pointer: string, reasons: string[]): string[] {
+  const keys: string[] = [];
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key === 'symbol') {
+      reasons.push(`${pointer === '' ? 'input' : pointer} has a symbol key: ${key.toString()}`);
+    } else if (!Object.prototype.propertyIsEnumerable.call(value, key)) {
+      reasons.push(`${pointer}/${escapeSegment(key)} is not enumerable`);
+    } else {
+      keys.push(key);
+    }
+  }
+  return keys;
 }

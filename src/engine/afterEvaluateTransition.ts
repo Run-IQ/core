@@ -2,7 +2,9 @@ import { canonicalize } from '@run-iq/spec';
 import type { JsonValue } from '@run-iq/spec';
 import type { UnsealedResult } from '../types/result.js';
 import { describeValue, findNonJson } from '../utils/json.js';
-import { copyData, isObject } from '../utils/values.js';
+import type { EngineLimits } from '../limits.js';
+import { isObject } from '../utils/values.js';
+import { readBounded, resultLimits } from './pluginBoundary.js';
 
 /** What the engine keeps of a result returned by `afterEvaluate`. */
 export interface AfterEvaluateTransition {
@@ -22,13 +24,14 @@ export const PLUGIN_SETTABLE_FIELDS: ReadonlySet<string> = new Set(['meta', 'plu
  *
  * - **Single read.** Every field of `before`, every enumerable field of the returned result and
  *   `meta` and `pluginState` are read by name, once each (an own, non-enumerable or inherited
- *   getter runs once), then copied (`copyData`). Every check runs on that copy only.
+ *   getter runs once), then copied, each on its own and bounded by `limits` (`readBounded`).
+ *   Every check runs on that copy only.
  * - **The decision does not change.** A change to `value`, `outputs`, `appliedRules`,
  *   `skippedRules`, `breakdown`, `trace`, or to any other field of the result (also one the
  *   plugin adds), compared in canonical form, throws `TypeError` (`plugin <name> afterEvaluate
  *   changed the decision: <fields>`). So does a change to the `pluginState` entry of another
  *   plugin, or the removal of one.
- * - **What it may set.** `meta` (an object or nothing: it may add keys, and changing or removing
+ * - **What it may set.** `meta` (an object of JSON, or nothing: it may add keys, and changing or removing
  *   one set before is refused) and `pluginState[<its name>]` (JSON).
  * - **Shape.** A result that is not an object, a `meta` that is neither absent nor an object, a
  *   `pluginState` that is not an object, or an entry that is not JSON, throws `TypeError`.
@@ -39,6 +42,7 @@ export function acceptAfterEvaluate(
   pluginName: string,
   before: UnsealedResult,
   returned: UnsealedResult,
+  limits: Readonly<EngineLimits>,
 ): AfterEvaluateTransition {
   const refuse = (what: string): TypeError =>
     new TypeError(`plugin ${pluginName} afterEvaluate returned ${what}`);
@@ -58,7 +62,17 @@ export function acceptAfterEvaluate(
       configurable: true,
     });
   }
-  const theirs = copyData(read);
+  // Each field is copied on its own, bounded (leaves and depth) and without recursion.
+  const theirs: Record<string, unknown> = {};
+  const bounds = resultLimits(before, limits);
+  for (const [field, value] of Object.entries(read)) {
+    Object.defineProperty(theirs, field, {
+      value: readBounded(value, bounds, field),
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
 
   // A field the plugin left out was read as `undefined`: it differs, so it counts as changed.
   const changed: string[] = [];
@@ -68,6 +82,8 @@ export function acceptAfterEvaluate(
   }
   const meta: unknown = theirs['meta'];
   if (meta !== undefined && !isObject(meta)) throw refuse('a malformed meta');
+  const metaNotJson = meta === undefined ? undefined : findNonJson(meta);
+  if (metaNotJson !== undefined) throw refuse(`a meta that is not JSON at ${metaNotJson}`);
   // A plugin may add annotations; changing or removing one another plugin set is a change to
   // the record, as for `pluginState`.
   const metaChanged: string[] = [];

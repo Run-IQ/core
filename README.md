@@ -67,6 +67,9 @@ result.breakdown; // [{ ruleId: 'shipping-fee', contribution: 10, modelUsed: 'PE
 A decision is never returned without the work a plugin was to do. Every hook failure is a `PluginHookError` (`plugin`, `hook`, `cause`); `onError` is called on every plugin and nothing is saved.
 
 - `beforeEvaluate` fails the evaluation when it throws or times out, returns a malformed result or a state that is not JSON, returns an input that fails the checks of the caller's input (bounds, `validateProofInput`, strict mode), drops a rule without a skip, returns a rule under the `id@version` of a given rule with another content, or adds a rule whose checksum does not hold. Changing the data of a valid input is allowed.
+- A hook is handed views (frozen copies) of the input and of the rules, never the engine's own objects, and what it returns is read once, bounded, copied and checked against a ledger of the rules that were given: nothing rewritten, doubled, dropped, invented, or re-added under a name that already took part. A plugin skip has the reason `PLUGIN` (or one of the deprecated plugin reasons) and the keys `rule`, `reason`, `detail`.
+- A model that writes into its frozen arguments is excluded for that rule (`MODEL_ERROR`); a DSL that does is a `DSL_ERROR` exclusion.
+- The rules in the result are frozen.
 - `afterEvaluate` cannot change the decision: a change to `value`, `outputs`, the applied or skipped rules, `breakdown`, `trace` or any other field fails the evaluation. It may set `meta` and its own `pluginState` entry.
 
 ## How `evaluate()` works
