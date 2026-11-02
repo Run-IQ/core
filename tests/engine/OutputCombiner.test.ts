@@ -129,14 +129,23 @@ describe('OutputCombiner', () => {
       );
     });
 
-    it('keeps the first of equal extremes, in contribution order', () => {
-      const result = outputOf({ type: 'date', combine: 'max' }, [
-        '2025-01-01',
-        '2025-01-01',
-        '2024-01-01',
-      ]);
-      expect(result.output?.value).toBe('2025-01-01');
-      expect(result.skipped).toEqual([]);
+    it('keeps the first of equal extremes, in contribution order (-0 and 0 are equal)', () => {
+      // The two values are equal for max and min but not identical: which one is kept shows
+      // which contribution came first (a before b: same priority, by id).
+      const sign = (v: unknown): string => (Object.is(v, -0) ? '-0' : String(v));
+      const number = (combine: 'max' | 'min', first: number, second: number): string =>
+        sign(
+          OutputCombiner.combine(
+            'o',
+            { type: 'number', combine },
+            [of(a, first), of(b, second)],
+            'throw',
+          ).output?.value,
+        );
+      expect(number('max', -0, 0)).toBe('-0');
+      expect(number('max', 0, -0)).toBe('0');
+      expect(number('min', -0, 0)).toBe('-0');
+      expect(number('min', 0, -0)).toBe('0');
     });
   });
 
