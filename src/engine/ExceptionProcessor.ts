@@ -66,8 +66,8 @@ export interface ExceptionResult {
   readonly shortCircuits: Map<string, ShortCircuit>;
   /**
    * Every exception of every rule that fired, as the proof records it: by carrier in processing
-   * order, then in the carrier's own order. `affected` lists, sorted, the ids of the rules each
-   * one acted on (excluded, inhibited or substituted), possibly none: an inhibit whose targets
+   * order, then in the carrier's own order. `affected` lists, sorted by id, the `{ ruleId }` of the
+   * rules each one acted on (excluded, inhibited or substituted), possibly none: an inhibit whose targets
    * were already excluded, a substitution of excluded rules, or a short-circuit outranked on its
    * output (the winner is the one in `shortCircuits`).
    */
@@ -293,7 +293,7 @@ export class ExceptionProcessor {
           ruleId: rule.id,
           version: rule.version,
           kind: exception.kind,
-          affected: sortedIds(affected),
+          affected: sortedIds(affected).map((ruleId) => ({ ruleId })),
         });
       });
     });
