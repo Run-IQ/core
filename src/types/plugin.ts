@@ -38,24 +38,32 @@ export interface PPEPlugin {
    * nothing is saved. A decision is never returned without the preparation a plugin was to do.
    *
    * - The returned value is read once (`input`, `rules`, `skipped` and `state` by name, own,
-   *   non-enumerable or inherited, then a deep copy) and checked as a whole. These are failures:
-   *   a hook that throws or exceeds `timeout.hook` (`HookTimeoutError` is the `cause`); a result
-   *   that is not an object; an `input` that is not an object with object `data` and `meta`;
-   *   `rules` that are not an array of objects; `skipped` that is neither absent nor an array of
-   *   `{ rule: object, reason: string, detail?: string }`; a `state` that is not JSON
-   *   (`a state that is not JSON at $.a[1] (Date)`); a getter that throws. A skip without `detail`
-   *   gets `skipped by plugin <name>`.
-   * - The hook is handed the engine's own frozen copies: the input (`data`, `meta` and the dates
-   *   in it) and the rules. Writing into them throws, so the hook fails; it returns new objects
-   *   to change anything.
+   *   non-enumerable or inherited), then copied and bounded: a list's `length` is read once, at
+   *   most `limits.maxRules` rules, each rule, skip and the state bounded by `maxInputLeaves`
+   *   (a rule by a fixed 100000 leaves) and `maxInputDepth`, without recursion. These are
+   *   failures: a hook that throws or exceeds `timeout.hook` (`HookTimeoutError` is the `cause`);
+   *   a result that is not an object; an `input` that is not an object; `rules` that are not a
+   *   list of objects; `skipped` that is neither absent nor a list of exactly
+   *   `{ rule, reason, detail? }` with a plugin reason (`PLUGIN`, or one of the deprecated
+   *   `INHIBITED_BY_META_RULE`, `COUNTRY_MISMATCH`, `MODEL_NOT_FOUND`: never a reason of the
+   *   engine's own stages); a `state` that is not JSON (`a state that is not JSON at $.a[1]
+   *   (Date)`); a getter that throws. A skip without `detail` gets `skipped by plugin <name>`.
+   * - The hook is handed views, never the objects the engine holds: a fresh frozen input (with
+   *   its own copies of the dates in `meta`), and a fresh frozen list of fresh frozen copies of
+   *   the rules. A write into a view throws in strict mode and has no effect otherwise; a `Date`
+   *   it moves is its own copy. The engine never reads back anything it handed out: the hook
+   *   returns new objects to change anything.
    * - The returned `input` is checked as the caller's is: the bounds (`maxInputDepth`,
    *   `maxInputLeaves`), `validateProofInput` on its canonical form (D-3, D-5, portable JSON,
    *   unknown `meta` keys), and in strict mode the evaluation date. Changing the data is allowed
    *   once it passes; changing `requestId` or `meta.tenantId` is not (the idempotence check and
    *   the record rest on them). At most `limits.maxRules` rules may be returned.
-   * - Rules dropped from `rules` without being listed in `skipped` fail the evaluation. A
-   *   skip names a given rule (same content), once, and that rule is not also returned; a rule
-   *   returned more often than it was given fails.
+   * - The rules it returns are checked against a ledger the engine keeps, one entry per rule
+   *   instance given. A rule dropped without a skip, returned more often than it was given
+   *   (checked per `id@version` and checksum, so two contents under one name cannot be swapped),
+   *   or whose content differs, fails. A skip names a given rule (same content), once, and that
+   *   rule is not also returned. An `id@version` that already took part in the evaluation, given,
+   *   skipped or refused at the source, cannot be added again with other content.
    * - A rule returned under the `id@version` of a given rule must be that rule: its checksum is
    *   the given one and it is the checksum of its content. A rule rewritten under the same name
    *   fails the evaluation. A rule it adds goes through the validation of a source rule (its
@@ -74,7 +82,7 @@ export interface PPEPlugin {
    * cannot change the decision. The result it returns is read once (every field by name, own,
    * non-enumerable or inherited, then a deep copy), and:
    *
-   * - it may set `meta` (an object: annotations on the result; it may add keys, and changing or
+   * - it may set `meta` (an object of JSON: annotations on the result; it may add keys, and changing or
    *   removing a key another plugin set fails) and its own entry of `pluginState`
    *   (`pluginState[<name>]`, JSON);
    * - any change to `value`, `outputs`, `appliedRules`, `skippedRules`, `breakdown`, `trace` or

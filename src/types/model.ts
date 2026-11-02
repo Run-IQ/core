@@ -39,6 +39,13 @@ export interface CalculationModel<V extends OutputValue = number> {
 
   validateParams(params: unknown): ValidationResult;
 
+  /**
+   * Computes the rule's contribution. The arguments are frozen views: `input` is the evaluation's
+   * own frozen data, `rule` and its `params` are a fresh frozen copy of the rule (with its own
+   * `Date`s). A model that writes into them (strict mode throws) does not fail the evaluation: its
+   * rule is excluded with the reason `MODEL_ERROR` and the detail `wrote to its input: ...`.
+   * Any other throw is the model's and fails the evaluation.
+   */
   calculate(
     input: Record<string, unknown>,
     matchedRule: Readonly<Rule>,

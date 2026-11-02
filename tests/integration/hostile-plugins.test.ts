@@ -185,12 +185,12 @@ describe('hostile beforeEvaluate results', () => {
       beforeEvaluate: (input, rules) => ({
         input,
         rules: [],
-        skipped: rules.map((r) => ({ rule: r, reason: 'SHORT_CIRCUITED' as const })),
+        skipped: rules.map((r) => ({ rule: r, reason: 'PLUGIN' as const })),
       }),
     });
     const result = await engineWith([fiscal]).evaluate([rule()], makeInput());
     expect(result.skippedRules.map((s) => [s.rule.id, s.reason, s.detail])).toEqual([
-      ['r1', 'SHORT_CIRCUITED', 'skipped by plugin fiscal'],
+      ['r1', 'PLUGIN', 'skipped by plugin fiscal'],
     ]);
   });
 });
@@ -407,14 +407,14 @@ describe('fields read by name', () => {
       beforeEvaluate(input, rules): BeforeEvaluateResult {
         const out: BeforeEvaluateResult = { input, rules: [] };
         Object.defineProperty(out, 'skipped', {
-          value: rules.map((r) => ({ rule: r, reason: 'SHORT_CIRCUITED' })),
+          value: rules.map((r) => ({ rule: r, reason: 'PLUGIN' })),
         });
         return out;
       },
     });
     const result = await engineWith([p]).evaluate([rule()], makeInput());
     expect(result.skippedRules.map((s) => [s.rule.id, s.reason, s.detail])).toEqual([
-      ['r1', 'SHORT_CIRCUITED', 'skipped by plugin p'],
+      ['r1', 'PLUGIN', 'skipped by plugin p'],
     ]);
     expect(result.diagnostics).toEqual([]);
   });
@@ -436,7 +436,7 @@ describe('fields read by name', () => {
       }
       get skipped(): NonNullable<BeforeEvaluateResult['skipped']> {
         reads.push('skipped');
-        return this.source.map((r) => ({ rule: r, reason: 'SHORT_CIRCUITED' as const }));
+        return this.source.map((r) => ({ rule: r, reason: 'PLUGIN' as const }));
       }
       get state(): BeforeEvaluateResult['state'] {
         reads.push('state');
@@ -516,7 +516,7 @@ describe('rules removed without a skip', () => {
         rules: rules.filter((r) => r.id === 'keep'),
         skipped: rules
           .filter((r) => r.id === 'listed')
-          .map((r) => ({ rule: r, reason: 'SHORT_CIRCUITED' as const })),
+          .map((r) => ({ rule: r, reason: 'PLUGIN' as const })),
       }),
     });
     const error = await failure(engineWith([p]), [
