@@ -3,7 +3,8 @@ import { ValidationError } from './errors/ValidationError.js';
 /**
  * The bounds of one evaluation (D-26). Passing one throws `EngineLimitError`. In 9L, `maxRules`,
  * `maxInputLeaves` and `maxInputDepth` are enforced; the others are held here for the tasks that
- * need them (collections, strata, segments, recursion, referentials, groups).
+ * need them (collections, strata, segments, recursion, referentials, groups), and nothing reads
+ * them yet.
  */
 export interface EngineLimits {
   /** Rules given to one `evaluate`. */
@@ -14,7 +15,11 @@ export interface EngineLimits {
   maxCollectionLength: number;
   /** Leaves of the input tree (D-15): scalars, lists and empty objects, on every path. */
   maxInputLeaves: number;
-  /** Levels of containers below `data` (or `meta.context`). */
+  /**
+   * Levels of containers with members, in `data` and in each member of `meta` (`context`, `tags`,
+   * `dates`, `dimensions`, `assertions`): the container at the root of a part is level 1, and an
+   * empty container adds no level, as in `validateProofInput`.
+   */
   maxInputDepth: number;
   /** Evaluation strata. */
   maxStrata: number;
@@ -29,10 +34,12 @@ export interface EngineLimits {
 }
 
 /**
- * The defaults, lowered and completed by the pre-flight (I20, I30); each is held by a scale test
- * at its value, with a written budget (D-26).
+ * The defaults, lowered and completed by the pre-flight (I20, I30). In 9L, `maxRules` and
+ * `maxInputLeaves` are held by a scale test at their value, with a written budget (D-26);
+ * `maxInputDepth` is enforced and tested at its value, without a budget. The seven others are
+ * inert: the tasks that enforce them add their scale test (9H1, 9K1 and 9R1 per D-26).
  */
-export const DEFAULT_LIMITS: EngineLimits = Object.freeze({
+export const DEFAULT_LIMITS: Readonly<EngineLimits> = Object.freeze({
   maxRules: 100_000,
   maxInstances: 250_000,
   maxCollectionLength: 250_000,
@@ -56,7 +63,7 @@ const MAX_INPUT_DEPTH_CEILING = 1000;
  * `undefined`. Throws `ValidationError` (`Invalid limits`) listing every unknown key and every
  * value that is not a positive safe integer, and a `maxInputDepth` above 1000.
  */
-export function resolveLimits(given?: EngineLimitsInput): EngineLimits {
+export function resolveLimits(given?: EngineLimitsInput): Readonly<EngineLimits> {
   if (given === undefined) return DEFAULT_LIMITS;
   if (given === null || typeof given !== 'object' || Array.isArray(given)) {
     throw new ValidationError('Invalid limits', ['limits must be an object']);

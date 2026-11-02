@@ -10,12 +10,13 @@ import { ValidationError } from '../errors/ValidationError.js';
 import { DuplicateRequestError } from '../errors/DuplicateRequestError.js';
 import { PipelineTimeoutError } from '../errors/PipelineTimeoutError.js';
 import { UnexpectedEngineError } from '../errors/UnexpectedEngineError.js';
+import { PluginHookError } from '../errors/PluginHookError.js';
 import { ModelRegistry } from '../registry/ModelRegistry.js';
 import { PluginRegistry } from '../registry/PluginRegistry.js';
 import { DSLRegistry } from '../registry/DSLRegistry.js';
 import { InputSanitizer } from '../security/InputSanitizer.js';
+import type { PreparedInput } from '../security/InputSanitizer.js';
 import { EngineLimitError } from '../errors/EngineLimitError.js';
-import { evaluationDate } from '../input/normalizeMeta.js';
 import { checkDerivedSeed, readInputSeedConfig } from '../input/inputSeed.js';
 import type { InputSeedConfig } from '../input/inputSeed.js';
 import { resolveLimits } from '../limits.js';
@@ -33,9 +34,10 @@ import { PluginSandbox } from '../security/PluginSandbox.js';
 import { SnapshotManager } from '../snapshot/SnapshotManager.js';
 import { SnapshotSerializer } from '../snapshot/SnapshotSerializer.js';
 import { VERSION } from '../utils/version.js';
-import { copyData, describeThrown, ruleLabel } from '../utils/values.js';
+import { copyData, ruleLabel } from '../utils/values.js';
 import { acceptAfterEvaluate } from './afterEvaluateTransition.js';
 import { readBeforeEvaluate } from './beforeEvaluateResult.js';
+import { checkHookRules } from './hookRules.js';
 import type { BeforeEvaluateReading } from './beforeEvaluateResult.js';
 
 export interface PPEEngineConfig {
@@ -71,7 +73,8 @@ const ENGINE_VERSION = VERSION;
 
 /**
  * Checks the names of the options of `evaluate`: an object (or none), whose members are among
- * `EVALUATE_OPTION_NAMES` (a member that is `undefined` is absent). Their values are checked by
+ * `EVALUATE_OPTION_NAMES`, whatever the value (a misspelled name with an unset value is still a
+ * misspelling). Their values are checked by
  * the tasks that wire them. Throws `ValidationError` (`Invalid evaluate options`).
  */
 function checkEvaluateOptions(options: unknown): void {
@@ -80,10 +83,9 @@ function checkEvaluateOptions(options: unknown): void {
     throw new ValidationError('Invalid evaluate options', ['evaluate options must be an object']);
   }
   const reasons: string[] = [];
-  for (const [name, value] of Object.entries(options)) {
-    if (value !== undefined && !EVALUATE_OPTION_NAMES.includes(name)) {
+  for (const name of Object.keys(options)) {
+    if (!(EVALUATE_OPTION_NAMES as readonly string[]).includes(name))
       reasons.push(`unknown evaluate option: ${name}`);
-    }
   }
   if (reasons.length > 0) throw new ValidationError('Invalid evaluate options', reasons);
 }
@@ -216,6 +218,21 @@ export class PPEEngine {
     }
   }
 
+  /**
+   * Checks an input and makes its plain copy (`InputSanitizer.prepare`), then holds it to strict
+   * mode: the evaluation date, as `meta.effectiveDate` or `meta.dates.effective`, must be given.
+   * The caller's input and each input a `beforeEvaluate` hook returns go through here.
+   */
+  private acceptInput(input: unknown): PreparedInput {
+    const prepared = InputSanitizer.prepare(input, this.limits);
+    if (this.strict && prepared.evaluationDate === undefined) {
+      throw new ValidationError('effectiveDate is required in strict mode', [
+        'meta.effectiveDate or meta.dates.effective must be provided when strict mode is enabled',
+      ]);
+    }
+    return prepared;
+  }
+
   private async runPipeline(
     rules: ReadonlyArray<Rule>,
     input: EvaluationInput,
@@ -232,16 +249,10 @@ export class PPEEngine {
     const traceBuilder = new TraceBuilder();
     const allSkipped: SkippedRule[] = [];
 
-    // Step 1: Input validation
-    InputSanitizer.validate(input, this.limits);
+    // Step 1: Input validation. One plain copy of the input is made and checked; the hooks, the
+    // rules and the models all work on it, never on the caller's object (D-5).
+    const prepared = this.acceptInput(input);
     checkDerivedSeed(this.inputSeed, input.requestId);
-
-    // Strict mode requires the evaluation date, as meta.effectiveDate or meta.dates.effective
-    if (this.strict && evaluationDate(input.meta) === undefined) {
-      throw new ValidationError('effectiveDate is required in strict mode', [
-        'meta.effectiveDate or meta.dates.effective must be provided when strict mode is enabled',
-      ]);
-    }
 
     // Step 2: Idempotence check
     const alreadyExists = await this.snapshotManager.exists(input.requestId);
@@ -257,12 +268,15 @@ export class PPEEngine {
     // Step 4: Plugin beforeEvaluate hooks. Their diagnostics follow the engine's own ones.
     const hookDiagnostics: Diagnostic[] = [];
     const pluginState: Record<string, JsonValue> = {};
-    let currentInput = input;
+    let currentInput = prepared.input;
+    let currentMeta = prepared.meta;
+    let currentDate = prepared.evaluationDate;
     for (const plugin of this.plugins) {
       const hook = plugin.beforeEvaluate;
       if (!hook) continue;
       signal.throwIfAborted();
       let reading: BeforeEvaluateReading;
+      let accepted: PreparedInput;
       try {
         // Read once and checked as a whole: nothing is committed unless every check passes.
         reading = readBeforeEvaluate(
@@ -274,26 +288,29 @@ export class PPEEngine {
             signal,
           ),
         );
+        // The input a hook returns is checked as the caller's was (bounds, spec, strict mode).
+        accepted = this.acceptInput(reading.input);
+        // Rules dropped without a skip would be lost in silence: the engine does not accept it.
+        const lost = ruleChanges(currentRules, reading).removed;
+        if (lost.length > 0) {
+          throw new Error(`plugin ${plugin.name} removed rules without a skip: ${lost.join(', ')}`);
+        }
+        // Rules rewritten under the same name, or added with a checksum that does not hold, would
+        // be evaluated as if they were the source rules.
+        checkHookRules(plugin.name, currentRules, reading.rules);
       } catch (error) {
+        // Fail closed: a decision computed without what a plugin was to prepare is not returned.
         signal.throwIfAborted();
-        reportHookError(plugin, 'beforeEvaluate', error, currentInput, hookDiagnostics);
-        continue;
+        throw new PluginHookError(plugin.name, 'beforeEvaluate', error);
       }
       signal.throwIfAborted();
-      const { removed, added } = ruleChanges(currentRules, reading);
-      currentInput = reading.input;
+      const { added } = ruleChanges(currentRules, reading);
+      currentInput = accepted.input;
+      currentMeta = accepted.meta;
+      currentDate = accepted.evaluationDate;
       currentRules = reading.rules;
       allSkipped.push(...reading.skipped);
       if (reading.state !== undefined) pluginState[plugin.name] = reading.state;
-      if (removed.length > 0) {
-        hookDiagnostics.push(
-          hookDiagnostic(
-            plugin,
-            'beforeEvaluate',
-            `plugin ${plugin.name} removed rules without a skip: ${removed.join(', ')}`,
-          ),
-        );
-      }
       if (added.length > 0) {
         hookDiagnostics.push(
           hookDiagnostic(
@@ -303,21 +320,12 @@ export class PPEEngine {
           ),
         );
       }
-      if (reading.stateNotJson !== undefined) {
-        hookDiagnostics.push(
-          hookDiagnostic(
-            plugin,
-            'beforeEvaluate',
-            `state is not JSON at ${reading.stateNotJson}: state dropped`,
-          ),
-        );
-      }
     }
 
     // Step 5: Rule filtering (on potentially mutated rules)
     signal.throwIfAborted();
-    const now = evaluationDate(currentInput.meta) ?? new Date();
-    const filterResult = await this.ruleFilter.filter(currentRules, currentInput, now);
+    const now = currentDate ?? new Date();
+    const filterResult = await this.ruleFilter.filter(currentRules, currentInput, now, currentMeta);
     allSkipped.push(...filterResult.skipped);
 
     // Step 6: Native exceptions. The short-circuited values feed the output combination; the
@@ -392,16 +400,11 @@ export class PPEEngine {
           signal,
         );
         signal.throwIfAborted();
-        const transition = acceptAfterEvaluate(plugin.name, before, returned);
-        for (const message of transition.messages) {
-          hookDiagnostics.push(hookDiagnostic(plugin, 'afterEvaluate', message));
-        }
-        if (transition.result) result = transition.result;
+        result = acceptAfterEvaluate(plugin.name, before, returned).result;
       } catch (error) {
         signal.throwIfAborted();
-        reportHookError(plugin, 'afterEvaluate', error, currentInput, hookDiagnostics);
+        throw new PluginHookError(plugin.name, 'afterEvaluate', error);
       }
-      result = { ...result, diagnostics: [...filterResult.diagnostics, ...hookDiagnostics] };
     }
 
     // Step 10: Snapshot — use the rules that actually executed (post-plugin)
@@ -457,24 +460,4 @@ function unmatched(from: ReadonlyArray<Rule>, take: ReadonlyArray<Rule>): string
 
 function hookDiagnostic(plugin: PPEPlugin, hook: HookName, message: string): Diagnostic {
   return { source: 'hook', plugin: plugin.name, hook, message };
-}
-
-/**
- * A hook threw: the error becomes a diagnostic, then goes to the plugin's `onError`, whose own
- * failure becomes a second diagnostic. The evaluation goes on.
- */
-function reportHookError(
-  plugin: PPEPlugin,
-  hook: HookName,
-  error: unknown,
-  input: EvaluationInput,
-  diagnostics: Diagnostic[],
-): void {
-  diagnostics.push(hookDiagnostic(plugin, hook, describeThrown(error)));
-  if (!plugin.onError) return;
-  try {
-    plugin.onError(UnexpectedEngineError.wrap(error), input);
-  } catch (failure) {
-    diagnostics.push(hookDiagnostic(plugin, hook, `onError failed: ${describeThrown(failure)}`));
-  }
 }

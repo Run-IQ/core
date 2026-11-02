@@ -33,9 +33,9 @@ export interface EvaluateOptions {
 }
 
 /** The names `evaluate` accepts as options. */
-export const EVALUATE_OPTION_NAMES: readonly string[] = Object.freeze([
+export const EVALUATE_OPTION_NAMES = Object.freeze([
   'referentials',
   'ruleSets',
   'requested',
   'supersedes',
-]);
+] as const satisfies readonly (keyof EvaluateOptions)[]);

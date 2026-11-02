@@ -55,6 +55,11 @@ describe('resolveLimits', () => {
     expect(refusal({ maxRules: Infinity }).reasons).toEqual([
       'limits.maxRules must be a positive integer',
     ]);
+    // A number past 2^53 - 1 is not an integer a count can be exact in.
+    expect(refusal({ maxRules: 2 ** 53 }).reasons).toEqual([
+      'limits.maxRules must be a positive integer',
+    ]);
+    expect(resolveLimits({ maxRules: 2 ** 53 - 1 }).maxRules).toBe(2 ** 53 - 1);
   });
 
   it('refuses an unknown key', () => {

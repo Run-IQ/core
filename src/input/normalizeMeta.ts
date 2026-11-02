@@ -10,6 +10,14 @@ export type NormalizedMeta = ProofInput['meta'];
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
+/**
+ * Writes `map[key]` as an own data property: a plain assignment of `__proto__` would set the
+ * prototype (or be dropped), and the caller's date or dimension would vanish unseen.
+ */
+function put<T>(map: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(map, key, { value, enumerable: true, writable: true, configurable: true });
+}
+
 /** `values` sorted by UTF-16 code unit without duplicates, as a new array. */
 const sortedUnique = <T>(values: readonly T[]): T[] => [...new Set(values)].sort();
 
@@ -40,7 +48,7 @@ export function normalizeMeta(meta: EvaluationInput['meta']): NormalizedMeta {
   const datesIn = isRecord(meta.dates) ? meta.dates : {};
   for (const [name, value] of Object.entries(datesIn)) {
     try {
-      dates[name] = toReferenceDate(value);
+      put(dates, name, toReferenceDate(value));
     } catch (error) {
       reasons.push(dateReason(`meta.dates.${name}`, error));
     }
@@ -63,20 +71,40 @@ export function normalizeMeta(meta: EvaluationInput['meta']): NormalizedMeta {
   const dimensionsIn = isRecord(meta.dimensions) ? meta.dimensions : {};
   for (const [name, value] of Object.entries(dimensionsIn)) {
     if (typeof value === 'string' || !Array.isArray(value)) {
-      dimensions[name] = value as string;
+      put(dimensions, name, value as string);
       continue;
     }
     const values = sortedUnique(value as readonly string[]);
-    dimensions[name] = values.length === 1 ? (values[0] as string) : values;
+    put(dimensions, name, values.length === 1 ? (values[0] as string) : values);
+  }
+
+  // Every member but `effectiveDate` is passed on first; the canonical members below replace
+  // the ones the input defines, so what remains is a key it does not define. `validateProofInput`
+  // names it (`/meta has an unknown key "date"`): a misspelled `effectivedate` must not fall back
+  // to another date without a word. A member that is `undefined` is absent for spec.
+  const extra: Record<string, unknown> = {};
+  for (const key of Object.keys(meta)) {
+    if (key === 'effectiveDate') continue;
+    Object.defineProperty(extra, key, {
+      value: (meta as Record<string, unknown>)[key],
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
   }
 
   return {
+    ...(extra as object),
     tenantId: meta.tenantId,
-    dates: (isRecord(meta.dates) || meta.dates === undefined ? dates : meta.dates) as never,
+    // A `dates` or `dimensions` of another type is passed on as it is, for `validateProofInput`
+    // to name: the one place the canonical type is not true yet.
+    dates: (isRecord(meta.dates) || meta.dates === undefined
+      ? dates
+      : meta.dates) as NormalizedMeta['dates'],
     tags: (Array.isArray(meta.tags) ? sortedUnique(meta.tags) : (meta.tags ?? [])) as string[],
     dimensions: (isRecord(meta.dimensions) || meta.dimensions === undefined
       ? dimensions
-      : meta.dimensions) as never,
+      : meta.dimensions) as NormalizedMeta['dimensions'],
     context: (meta.context === undefined ? {} : meta.context) as NormalizedMeta['context'],
     assertions: (meta.assertions === undefined
       ? {}
@@ -85,12 +113,12 @@ export function normalizeMeta(meta: EvaluationInput['meta']): NormalizedMeta {
 }
 
 /**
- * The instant rules are evaluated at: `meta.dates.effective` (which is `meta.effectiveDate` when
- * that is given), or `undefined` when the input names none. A civil date is the start of that day
- * in UTC; the time zone of the rule set refines it in 9P. Throws like `normalizeMeta`.
+ * The instant rules are evaluated at: `dates.effective` of a canonical meta (it is
+ * `meta.effectiveDate` when that was given), or `undefined` when the input names none. A civil
+ * date is the start of that day in UTC; the time zone of the rule set refines it in 9P.
  */
-export function evaluationDate(meta: EvaluationInput['meta']): Date | undefined {
-  const effective = normalizeMeta(meta).dates['effective'];
+export function evaluationDate(meta: NormalizedMeta): Date | undefined {
+  const effective = meta.dates['effective'];
   if (effective === undefined) return undefined;
   // ECMAScript reads `YYYY-MM-DD` as midnight UTC, and the canonical instant as itself.
   return new Date(effective);

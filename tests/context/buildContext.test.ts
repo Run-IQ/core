@@ -68,6 +68,15 @@ describe('buildContext', () => {
     expect(context['$dates']).toEqual({ effective: '2026-01-01' });
   });
 
+  it('refuses a $ root key in the data: the context would overwrite it without a word', () => {
+    expect(() =>
+      buildContext({ ...base(), data: { fine: 1, $item: 2, $dates: 3 } }, { outputs: [] }),
+    ).toThrow(new TypeError('buildContext: data has the reserved root keys $item, $dates'));
+    expect(() => buildContext({ ...base(), data: { $x: 1 } }, { outputs: [] })).toThrow(
+      new TypeError('buildContext: data has the reserved root key $x'),
+    );
+  });
+
   describe('the variables of an instance', () => {
     it('adds the engine variables it is given', () => {
       const context = buildContext(

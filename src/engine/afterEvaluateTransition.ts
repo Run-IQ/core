@@ -1,58 +1,38 @@
-import { DEFAULT_OUTPUT, canonicalize } from '@run-iq/spec';
+import { canonicalize } from '@run-iq/spec';
+import type { JsonValue } from '@run-iq/spec';
 import type { UnsealedResult } from '../types/result.js';
-import { describeValue } from '../utils/json.js';
+import { describeValue, findNonJson } from '../utils/json.js';
 import { copyData, isObject } from '../utils/values.js';
-import { isSkip, withDetail } from './beforeEvaluateResult.js';
 
-/** What the engine keeps of a result returned by `afterEvaluate`, and what it says about it. */
+/** What the engine keeps of a result returned by `afterEvaluate`. */
 export interface AfterEvaluateTransition {
-  /** The accepted result, or `null` when the engine refuses it and keeps the previous one. */
-  readonly result: UnsealedResult | null;
-  /** One message per change the engine reports, in a fixed order (see `acceptAfterEvaluate`). */
-  readonly messages: readonly string[];
+  /** The accepted result: the decision as it was, with the annotations the plugin set. */
+  readonly result: UnsealedResult;
 }
 
-/** The fields `afterEvaluate` may change; every other field belongs to the engine. */
-export const PLUGIN_EDITABLE_FIELDS: ReadonlySet<string> = new Set([
-  'value',
-  'appliedRules',
-  'skippedRules',
-  'trace',
-  'breakdown',
-  'meta',
-]);
+/**
+ * What `afterEvaluate` may set: `meta` (annotations on the result) and its own entry of
+ * `pluginState`. Everything else is the decision, and the decision is the engine's.
+ */
+export const PLUGIN_SETTABLE_FIELDS: ReadonlySet<string> = new Set(['meta', 'pluginState']);
 
 /**
  * Accepts the result a plugin's `afterEvaluate` returned in place of `before`, the result the
  * plugin was handed a copy of (`before` itself is never written to).
  *
- * - **Single read.** `value`, `appliedRules`, `skippedRules`, `trace`, `breakdown` and `meta`
- *   are read by name, once each (an own, non-enumerable or inherited getter runs once), then
- *   copied (`copyData`). Every check runs on that copy, and the new result is built from it
- *   only. Engine-owned fields (those of `before` and the result's own enumerable keys) are read
- *   once each too, only to report changes.
- * - **Shape.** A result that is not an object, or whose `appliedRules` is not an array of
- *   objects, `skippedRules` not an array of `{ rule: object, reason: string, detail?: string }`,
- *   `breakdown` not an array of objects, `trace` not an object whose `steps` is an array of
- *   objects, or `meta` neither absent nor an object, throws
- *   `TypeError` (`plugin <name> afterEvaluate returned ...; ignored`): a hook error.
- * - **Engine-owned fields** are every field but `value`, `appliedRules`, `skippedRules`, `trace`,
- *   `breakdown` and `meta`: `requestId`, `engineVersion`, `outputs`, `diagnostics`,
- *   `missingFacts`, `pluginState`, `pluginVersions`, `dslVersions`, `timestamp`, `proof`,
- *   `fromStore`, and any field a plugin adds. The values of `before` are kept; those the plugin
- *   changed (canonical compare) are named in one message, `plugin <name> changed engine-owned
- *   fields <a, b>; ignored`, ending with ` (rewrite value instead)` when `outputs` is one of them.
- * - **`value`.** Rewriting it is the only way to change an output. It must be a finite number
- *   (the default output is a number): `outputs.value.value` is set to it, so that
- *   `value === outputs.value.value` holds. Any other rewritten value refuses the whole result
- *   (`result: null`). Returned `outputs` synced with the rewrite by the plugin itself are not a
- *   change.
- * - **Rules.** Ids added to and removed from `appliedRules` and `skippedRules` are compared as
- *   multisets (a pseudo-rule without a version is named too); an entry kept under the same id
- *   but different as a whole (canonical compare; for a skip, its reason and detail too) is
- *   named as changed. Skips without `detail` get `skipped by plugin <name>`.
- * - **Order of the messages:** the rewrite of `value`, the engine-owned fields, then for applied
- *   then skipped rules: added, removed, changed (ids sorted).
+ * - **Single read.** Every field of `before`, every enumerable field of the returned result and
+ *   `meta` and `pluginState` are read by name, once each (an own, non-enumerable or inherited
+ *   getter runs once), then copied (`copyData`). Every check runs on that copy only.
+ * - **The decision does not change.** A change to `value`, `outputs`, `appliedRules`,
+ *   `skippedRules`, `breakdown`, `trace`, or to any other field of the result (also one the
+ *   plugin adds), compared in canonical form, throws `TypeError` (`plugin <name> afterEvaluate
+ *   changed the decision: <fields>`). So does a change to the `pluginState` entry of another
+ *   plugin, or the removal of one.
+ * - **What it may set.** `meta` (an object or nothing) and `pluginState[<its name>]` (JSON).
+ * - **Shape.** A result that is not an object, a `meta` that is neither absent nor an object, a
+ *   `pluginState` that is not an object, or an entry that is not JSON, throws `TypeError`.
+ *
+ * The engine turns every throw into a `PluginHookError`: nothing of the result is used.
  */
 export function acceptAfterEvaluate(
   pluginName: string,
@@ -60,129 +40,79 @@ export function acceptAfterEvaluate(
   returned: UnsealedResult,
 ): AfterEvaluateTransition {
   const refuse = (what: string): TypeError =>
-    new TypeError(`plugin ${pluginName} afterEvaluate returned ${what}; ignored`);
+    new TypeError(`plugin ${pluginName} afterEvaluate returned ${what}`);
   const raw: unknown = returned;
   if (!isObject(raw) || typeof raw !== 'object' || raw === null) {
     throw refuse(`${describeValue(raw)}, not a result`);
   }
-  // The fields the engine uses: read by name, once each (own, non-enumerable or inherited
-  // getters alike), then copied. Nothing is read from `returned` again.
-  const snapshot = copyData({
-    value: returned.value,
-    appliedRules: returned.appliedRules,
-    skippedRules: returned.skippedRules,
-    trace: returned.trace,
-    breakdown: returned.breakdown,
-    meta: returned.meta,
-  });
-  // The engine-owned fields: those of `before` and the plugin's own enumerable ones, once each.
-  const ownedFields = new Set([...Object.keys(before), ...Object.keys(raw)]);
-  const owned: Record<string, unknown> = {};
-  for (const field of ownedFields) {
-    if (PLUGIN_EDITABLE_FIELDS.has(field)) continue;
+  // Read by name, once each, whatever the kind of property; then copied.
+  const fields = new Set([...Object.keys(before), ...Object.keys(raw), ...PLUGIN_SETTABLE_FIELDS]);
+  const read: Record<string, unknown> = {};
+  for (const field of fields) {
     // defineProperty: a field named `__proto__` stays a field.
-    Object.defineProperty(owned, field, {
+    Object.defineProperty(read, field, {
       value: Reflect.get(raw, field),
       enumerable: true,
       writable: true,
       configurable: true,
     });
   }
-  const ownedCopy = copyData(owned);
+  const theirs = copyData(read);
 
-  if (!Array.isArray(snapshot.appliedRules) || !snapshot.appliedRules.every(isObject)) {
-    throw refuse('a malformed appliedRules');
+  // A field the plugin left out was read as `undefined`: it differs, so it counts as changed.
+  const changed: string[] = [];
+  for (const [field, value] of Object.entries(theirs)) {
+    if (PLUGIN_SETTABLE_FIELDS.has(field)) continue;
+    if (!sameData(Reflect.get(before, field), value)) changed.push(field);
   }
-  if (!Array.isArray(snapshot.skippedRules) || !snapshot.skippedRules.every(isSkip)) {
-    throw refuse('a malformed skippedRules');
-  }
-  if (!Array.isArray(snapshot.breakdown) || !snapshot.breakdown.every(isObject)) {
-    throw refuse('a malformed breakdown');
-  }
-  const steps: unknown = isObject(snapshot.trace) ? snapshot.trace.steps : undefined;
-  if (!Array.isArray(steps) || !steps.every(isObject)) throw refuse('a malformed trace');
-  if (snapshot.meta !== undefined && !isObject(snapshot.meta)) throw refuse('a malformed meta');
+  const meta: unknown = theirs['meta'];
+  if (meta !== undefined && !isObject(meta)) throw refuse('a malformed meta');
 
-  const messages: string[] = [];
-  let value: unknown = before.value;
-  let outputs = before.outputs;
-  if (snapshot.value !== before.value) {
-    const rewritten: unknown = snapshot.value;
-    if (typeof rewritten !== 'number' || !Number.isFinite(rewritten)) {
-      return {
-        result: null,
-        messages: [
-          `plugin ${pluginName} rewrote output value to ${describeValue(rewritten)}, ` +
-            'not a finite number: result ignored',
-        ],
-      };
+  const state: unknown = theirs['pluginState'];
+  if (typeof state !== 'object' || state === null || !isObject(state)) {
+    throw refuse('a malformed pluginState');
+  }
+  const stateBefore: Readonly<Record<string, JsonValue>> = before.pluginState;
+  const pluginState: Record<string, JsonValue> = {};
+  for (const name of new Set([...Object.keys(stateBefore), ...Object.keys(state)])) {
+    const given: unknown = Reflect.get(state, name);
+    if (name === pluginName) {
+      if (given === undefined) continue;
+      const notJson = findNonJson(given);
+      if (notJson !== undefined) throw refuse(`a pluginState that is not JSON at ${notJson}`);
+      Object.defineProperty(pluginState, name, {
+        value: given as JsonValue,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+      continue;
     }
-    messages.push(
-      `plugin ${pluginName} rewrote output value from ${describeValue(before.value)} to ${describeValue(rewritten)}`,
-    );
-    value = rewritten;
-    const declared = before.outputs[DEFAULT_OUTPUT];
-    if (declared !== undefined) {
-      outputs = { ...before.outputs, [DEFAULT_OUTPUT]: { ...declared, value: rewritten } };
+    if (!sameData(Reflect.get(stateBefore, name), given)) {
+      if (!changed.includes('pluginState')) changed.push('pluginState');
+      continue;
     }
+    Object.defineProperty(pluginState, name, {
+      value: given as JsonValue,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
   }
 
-  const changedOwned = changedEngineFields(before, ownedCopy, outputs);
-  if (changedOwned.length > 0) {
-    const hint = changedOwned.includes('outputs') ? ' (rewrite value instead)' : '';
-    messages.push(
-      `plugin ${pluginName} changed engine-owned fields ${changedOwned.join(', ')}; ignored${hint}`,
+  if (changed.length > 0) {
+    throw new TypeError(
+      `plugin ${pluginName} afterEvaluate changed the decision: ${changed.sort().join(', ')}`,
     );
   }
-
-  const say = (verb: string, list: string, ids: readonly string[]): void => {
-    if (ids.length > 0) messages.push(`plugin ${pluginName} ${verb} ${list}: ${ids.join(', ')}`);
-  };
-  const report = <T extends object>(
-    list: string,
-    beforeEntries: readonly T[],
-    afterEntries: readonly T[],
-    idOf: (entry: T) => string,
-  ): void => {
-    const beforeIds = beforeEntries.map(idOf);
-    const afterIds = afterEntries.map(idOf);
-    say('added', list, minus(afterIds, beforeIds));
-    say('removed', list, minus(beforeIds, afterIds));
-    say('changed', list, changedEntries(beforeEntries, afterEntries, idOf));
-  };
-  const ruleId = (rule: object): string => String(Reflect.get(rule, 'id'));
-  report('applied rules', before.appliedRules, snapshot.appliedRules, ruleId);
-  report('skipped rules', before.skippedRules, snapshot.skippedRules, (skip) => ruleId(skip.rule));
 
   return {
     result: {
       ...before,
-      value,
-      outputs,
-      appliedRules: snapshot.appliedRules,
-      skippedRules: snapshot.skippedRules.map((skip) => withDetail(skip, pluginName)),
-      trace: snapshot.trace,
-      breakdown: snapshot.breakdown,
-      meta: snapshot.meta,
+      pluginState,
+      meta: meta as Record<string, unknown> | undefined,
     },
-    messages,
   };
-}
-
-/** The engine-owned fields whose returned values (read once, in `owned`) differ, sorted. */
-function changedEngineFields(
-  before: UnsealedResult,
-  owned: Readonly<Record<string, unknown>>,
-  syncedOutputs: UnsealedResult['outputs'],
-): string[] {
-  const changed: string[] = [];
-  for (const [field, theirs] of Object.entries(owned)) {
-    const mine: unknown = Reflect.get(before, field);
-    // Outputs left as handed, or synced with the rewritten value by the plugin itself.
-    const same = sameData(mine, theirs) || (field === 'outputs' && sameData(syncedOutputs, theirs));
-    if (!same) changed.push(field);
-  }
-  return changed.sort();
 }
 
 /** True when both values have the same canonical form; a value without one differs. */
@@ -193,37 +123,4 @@ function sameData(a: unknown, b: unknown): boolean {
   } catch {
     return false;
   }
-}
-
-/** Ids whose entries, paired by id in order, differ as a whole; sorted, each once. */
-function changedEntries<T extends object>(
-  before: readonly T[],
-  after: readonly T[],
-  idOf: (entry: T) => string,
-): string[] {
-  const pending = new Map<string, T[]>();
-  for (const entry of before) {
-    const id = idOf(entry);
-    pending.set(id, [...(pending.get(id) ?? []), entry]);
-  }
-  const changed = new Set<string>();
-  for (const entry of after) {
-    const id = idOf(entry);
-    const original = pending.get(id)?.shift();
-    if (original !== undefined && !sameData(original, entry)) changed.add(id);
-  }
-  return [...changed].sort();
-}
-
-/** The ids of `from` not matched in `take`, as multisets, sorted. */
-function minus(from: readonly string[], take: readonly string[]): string[] {
-  const left = new Map<string, number>();
-  for (const id of take) left.set(id, (left.get(id) ?? 0) + 1);
-  const rest: string[] = [];
-  for (const id of from) {
-    const count = left.get(id) ?? 0;
-    if (count > 0) left.set(id, count - 1);
-    else rest.push(id);
-  }
-  return rest.sort();
 }

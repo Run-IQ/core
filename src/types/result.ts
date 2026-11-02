@@ -98,7 +98,12 @@ export interface EvaluationResult {
   readonly trace: EvaluationTrace;
   /** What went wrong without stopping the evaluation (hook errors...). */
   readonly diagnostics: readonly Diagnostic[];
-  /** Sorted dotted paths read by the conditions but absent from `input.data`. */
+  /**
+   * The JSON pointers (sorted by `comparePointers`) read by the conditions but absent from the
+   * evaluation context: facts of `data`, `/$dates/...` and `/$dimensions/...`. The reads of a
+   * model are not included yet, nor those of a rule whose `listVariables` does not conform
+   * (its diagnostic says so; 9M1 adds the `provisional` status for such a rule).
+   */
   readonly missingFacts: readonly string[];
   /** The `state` each plugin returned from `beforeEvaluate`, by plugin name. */
   readonly pluginState: Readonly<Record<string, JsonValue>>;

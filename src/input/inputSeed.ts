@@ -35,10 +35,13 @@ export function readInputSeedConfig(value: unknown): InputSeedConfig | undefined
   if (secret !== undefined) {
     if (!(secret instanceof Uint8Array)) return refuse('inputSeed.secret must be a Uint8Array');
     if (secret.length < SEED_BYTES) return refuse('inputSeed.secret must be at least 32 bytes');
-    return { secret };
+    // A copy: the caller may change the bytes, or detach the buffer, after this check.
+    return { secret: new Uint8Array(secret) };
   }
   if (typeof derive !== 'function') return refuse('inputSeed.derive must be a function');
-  return { derive: derive as (requestId: string) => Uint8Array };
+  // Called on the caller's object, so that a method keeps its `this`.
+  const owner = value;
+  return { derive: (requestId) => Reflect.apply(derive, owner, [requestId]) as Uint8Array };
 }
 
 /**

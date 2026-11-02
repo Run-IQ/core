@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { readsOf } from '../../src/context/reads.js';
+import { readsOf, MAX_LISTED_POINTERS } from '../../src/context/reads.js';
 import type { CalculationModel } from '../../src/types/model.js';
 import type { DSLEvaluator } from '../../src/types/dsl.js';
 import { makeRule } from '../helpers.js';
@@ -53,11 +53,30 @@ describe('readsOf', () => {
     expect(readsOf(withCondition, dsl, modelReading([])).outputs).toEqual(['prime', 'total']);
   });
 
-  it('does not name an output for the root of $outputs, or for another variable', () => {
-    const dsl = dslReading(['/$outputs', '/$dates/effective', '/$dimensions/pays', '/$item/age']);
+  it('does not name an output for another variable', () => {
+    const dsl = dslReading(['/$dates/effective', '/$dimensions/pays', '/$item/age']);
     const reads = readsOf(withCondition, dsl, modelReading([]));
     expect(reads.outputs).toEqual([]);
-    expect(reads.pointers).toHaveLength(4);
+    expect(reads.pointers).toHaveLength(3);
+    expect(reads.declared).toBe(true);
+  });
+
+  it.each([
+    ['the whole context', ''],
+    ['all of $outputs', '/$outputs'],
+    ['all of $bounds', '/$bounds'],
+    ['all of $selected', '/$selected'],
+  ])('reading %s names no output: an invalid path, the rule has unknown reads', (what, pointer) => {
+    const reads = readsOf(withCondition, dslReading([pointer, '/ok']), modelReading([]));
+    expect(reads.pointers).toEqual(['/ok']);
+    expect(reads.outputs).toEqual([]);
+    expect(reads.declared).toBe(false);
+    expect(reads.problems).toEqual([
+      {
+        kind: 'invalid-path',
+        message: `listVariables of test for R1@1 returned an invalid path: ${pointer === '' ? "''" : pointer} (${what} is not a fact to read)`,
+      },
+    ]);
   });
 
   it('joins the reads of the condition and of the model, without repeating a pointer', () => {
@@ -187,17 +206,79 @@ describe('readsOf', () => {
       });
     });
 
-    it('a lazy list that throws midway contributes nothing', () => {
+    it('a lazy iterable is not a list, and is never iterated', () => {
+      let started = false;
       const dsl: DSLEvaluator = {
         ...dslReading([]),
         listVariables: function* () {
+          started = true;
           yield '/first';
-          throw new Error('midway');
         } as unknown as NonNullable<DSLEvaluator['listVariables']>,
       };
       const reads = readsOf(withCondition, dsl, modelReading([]));
+      expect(started).toBe(false);
       expect(reads.pointers).toEqual([]);
+      expect(reads.declared).toBe(false);
       expect(reads.problems).toEqual([
+        {
+          kind: 'failed',
+          message: 'listVariables of test for R1@1 failed: [object Generator] is not a list',
+        },
+      ]);
+    });
+
+    it.each([
+      ['a plain object', { a: '/x' }],
+      ['an array-like', { length: 2, 0: '/x', 1: '/y' }],
+      ['a Set', new Set(['/x'])],
+      ['a string', '/a'],
+      ['an empty string', ''],
+    ])('%s is not a list, whatever it holds', (_what, answer) => {
+      const reads = readsOf(withCondition, dslReading(answer), modelReading([]));
+      expect(reads.pointers).toEqual([]);
+      expect(reads.declared).toBe(false);
+      expect(reads.problems).toHaveLength(1);
+      expect(reads.problems[0]?.kind).toBe('failed');
+      expect(reads.problems[0]?.message).toMatch(/failed: .* is not a list$/);
+    });
+
+    it('refuses a list longer than the cap before reading one item', () => {
+      let reads = 0;
+      const huge = new Proxy([] as unknown[], {
+        get(target, key, receiver) {
+          if (key === 'length') return MAX_LISTED_POINTERS + 1;
+          reads += 1;
+          return Reflect.get(target, key, receiver);
+        },
+      });
+      const result = readsOf(withCondition, dslReading(huge), modelReading([]));
+      expect(reads).toBe(0);
+      expect(result.declared).toBe(false);
+      expect(result.problems).toEqual([
+        {
+          kind: 'failed',
+          message: `listVariables of test for R1@1 failed: ${MAX_LISTED_POINTERS + 1} pointers, more than the ${MAX_LISTED_POINTERS} allowed`,
+        },
+      ]);
+    });
+
+    it('accepts a list of exactly the cap', () => {
+      const items = Array.from({ length: MAX_LISTED_POINTERS }, (_v, i) => `/p${i}`);
+      const result = readsOf(withCondition, dslReading(items), modelReading([]));
+      expect(result.pointers).toHaveLength(MAX_LISTED_POINTERS);
+      expect(result.declared).toBe(true);
+    });
+
+    it('a list that throws while an item is read contributes nothing', () => {
+      const list = new Proxy(['/first', '/second'], {
+        get(target, key, receiver) {
+          if (key === '1') throw new Error('midway');
+          return Reflect.get(target, key, receiver);
+        },
+      });
+      const result = readsOf(withCondition, dslReading(list), modelReading([]));
+      expect(result.pointers).toEqual([]);
+      expect(result.problems).toEqual([
         { kind: 'failed', message: 'listVariables of test for R1@1 failed: midway' },
       ]);
     });

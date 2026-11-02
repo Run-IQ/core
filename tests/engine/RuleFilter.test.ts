@@ -717,7 +717,7 @@ describe('RuleFilter', () => {
         },
       );
 
-      it('adds nothing when listVariables throws midway through a lazy iterable', async () => {
+      it('adds nothing when listVariables returns a lazy iterable, which is not a list', async () => {
         const registry = new DSLRegistry();
         registry.register({
           dsl: 'lazy',
@@ -726,7 +726,6 @@ describe('RuleFilter', () => {
           // A hostile plugin returns a lazy iterable, not the array the contract asks for.
           listVariables: function* () {
             yield '/first/missing';
-            throw new Error('midway');
           } as unknown as NonNullable<DSLEvaluator['listVariables']>,
         });
         const filter = new RuleFilter(registry, new PluginSandbox(500, 100));
@@ -735,7 +734,10 @@ describe('RuleFilter', () => {
         expect(result.missingFacts).toEqual([]);
         expect(result.passed).toEqual([rule]);
         expect(result.diagnostics).toEqual([
-          { source: 'engine', message: 'listVariables of lazy for r1@1 failed: midway' },
+          {
+            source: 'engine',
+            message: 'listVariables of lazy for r1@1 failed: [object Generator] is not a list',
+          },
         ]);
       });
     });

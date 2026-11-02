@@ -32,8 +32,9 @@ const INSTANCE_VARIABLES: ReadonlySet<string> = new Set(
  * `$dimensions` and `$outputs` reduced to the outputs listed in `reads.outputs` that exist, then
  * the variables of `instance`. The context and each `$` object it builds are frozen; `data` is
  * the caller's, neither copied nor frozen (a copy per rule would not scale): its nested values
- * are shared. Throws `TypeError` for an instance variable that is not an engine variable or
- * that the context builds itself.
+ * are shared. Throws `TypeError` for a root key of `base.data` that starts with `$` (the input
+ * check refuses such a key; a caller that skips it would see it overwritten without a word), for
+ * an instance variable that is not an engine variable and for one that the context builds itself.
  */
 export function buildContext(
   base: ContextBase,
@@ -45,6 +46,12 @@ export function buildContext(
     if (base.outputs !== undefined && Object.hasOwn(base.outputs, name)) {
       outputs[name] = base.outputs[name];
     }
+  }
+  const reserved = Object.keys(base.data).filter((key) => key.startsWith('$'));
+  if (reserved.length > 0) {
+    throw new TypeError(
+      `buildContext: data has the reserved root key${reserved.length > 1 ? 's' : ''} ${reserved.join(', ')}`,
+    );
   }
   const context: Record<string, unknown> = { ...base.data };
   if (instance !== undefined) {

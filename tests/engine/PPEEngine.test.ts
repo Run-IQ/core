@@ -4,7 +4,12 @@ import type { OutputDeclaration } from '@run-iq/spec';
 import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import { ValidationError } from '../../src/errors/ValidationError.js';
 // Imported from the package entry: both errors are public.
-import { DecimalPrecisionError, InvalidModelError, OutputNotFiniteError } from '../../src/index.js';
+import {
+  DecimalPrecisionError,
+  InvalidModelError,
+  OutputNotFiniteError,
+  PluginHookError,
+} from '../../src/index.js';
 import { VERSION } from '../../src/utils/version.js';
 import {
   makeRule,
@@ -115,7 +120,7 @@ describe('PPEEngine', () => {
     expect(result.dslVersions['jsonlogic']).toBe('1.0.0');
   });
 
-  it('handles plugin hook errors gracefully', async () => {
+  it('fails the evaluation when a plugin hook throws, and tells the plugin', async () => {
     const model = new StubModel('M', 100);
 
     const errorPlugin = new StubPlugin('erroring', [model]);
@@ -131,10 +136,18 @@ describe('PPEEngine', () => {
     });
 
     const rules = [makeRule({ id: 'r1', model: 'M', params: {} })];
-    const result = await engine.evaluate(rules, makeInput());
-    // Pipeline should continue despite hook error
-    expect(result.value).toBe(100);
-    expect(errorPlugin.errors).toHaveLength(1);
+    // Fail closed: no decision is returned without what the plugin was to prepare.
+    const error = await engine.evaluate(rules, makeInput()).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(PluginHookError);
+    expect(error).toMatchObject({
+      plugin: 'erroring',
+      hook: 'beforeEvaluate',
+      message: 'plugin erroring beforeEvaluate failed: hook crash',
+    });
+    expect(errorPlugin.errors).toEqual([error]);
   });
 
   it('applies native exceptions before evaluation and never evaluates an exception-only rule', async () => {
