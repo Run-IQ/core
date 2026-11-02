@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 
 // `unknown` is a result of a membership in a referential, which core cannot provide before 9Q:
 // spec's matchDimension is replaced by one that answers it.
@@ -14,6 +14,17 @@ const { PluginSandbox } = await import('../../src/security/PluginSandbox.js');
 const { makeRule, makeInput } = await import('../helpers.js');
 
 describe('RuleFilter: a dimension that spec cannot decide', () => {
+  // The test pins its own zone: in Tokyo the evaluation instant below is already 2024-06-16, so
+  // a date taken from local time fails on every machine, CI (UTC) included.
+  const zone = process.env.TZ;
+  beforeEach(() => {
+    process.env.TZ = 'Asia/Tokyo';
+  });
+  afterEach(() => {
+    if (zone === undefined) delete process.env.TZ;
+    else process.env.TZ = zone;
+  });
+
   it('excludes the rule, naming why spec could not decide', async () => {
     matchDimension.mockReturnValue({
       result: 'unknown',
