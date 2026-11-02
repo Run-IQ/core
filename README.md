@@ -62,7 +62,7 @@ result.breakdown; // [{ ruleId: 'shipping-fee', contribution: 10, modelUsed: 'PE
 
 ## How `evaluate()` works
 
-1. Validate the input
+1. Check the options and the number of rules (`maxRules`), then validate the input: its bounds (`maxInputDepth`, `maxInputLeaves`) and its canonical form (`validateProofInput` of `@run-iq/spec`)
 2. Refuse a `requestId` whose snapshot already exists (`DuplicateRequestError`, code `DUPLICATE_REQUEST`)
 3. Verify rule checksums and params
 4. Run plugin `beforeEvaluate` hooks
@@ -78,16 +78,30 @@ Rules that are not applied appear in `result.skippedRules` with a reason (`CONDI
 
 | Option | Default | |
 |---|---|---|
-| `strict` | `true` | Requires `meta.effectiveDate`, throws on rule conflicts and on snapshot failures |
+| `strict` | `true` | Requires the evaluation date (`meta.effectiveDate` or `meta.dates.effective`), throws on rule conflicts and on snapshot failures |
 | `onConflict` | `'throw'` in strict mode, otherwise `'first'` | What to do when two rules have the same priority |
 | `onChecksumMismatch` | `'skip'` | `'throw'` to fail instead of skipping the rule. Covers checksum mismatches (throws `Error`) and malformed rules (throws `ValidationError`) |
 | `snapshot` | none | Adapter used to persist evaluations |
 | `dryRun` | `false` | Evaluate without saving a snapshot |
 | `timeout` | `{ dsl: 100, hook: 500 }` ms | Time limits for conditions, hooks and the whole pipeline |
+| `limits` | `DEFAULT_LIMITS` | The bounds of an evaluation, see below. A value that is not a positive integer, an unknown key, or a `maxInputDepth` above 1000 throws `ValidationError` at construction |
+| `inputSeed` | none | `{ secret }` (at least 32 bytes) or `{ derive(requestId) }` (exactly 32 bytes): where the salt of the input digest will come from. Only checked for now: the secret at construction, `derive` at each evaluation |
+
+`evaluate(rules, input, options?)` takes `referentials`, `ruleSets`, `requested` and `supersedes`. They are accepted and checked by name (`unknown evaluate option: foo` throws `ValidationError`), and change nothing yet: each is wired by its own task.
+
+## Limits
+
+`DEFAULT_LIMITS` bounds an evaluation. Passing a limit throws `EngineLimitError` (`limit`, `max`, `actual`) before anything is evaluated or saved; nothing is truncated. `maxRules` (100 000), `maxInputLeaves` (500 000, the leaves of the input tree: scalars, lists and empty objects, on every path) and `maxInputDepth` (128 levels of containers) are enforced; the others (`maxInstances`, `maxCollectionLength`, `maxStrata`, `maxSegments`, `maxRecursionDepth`, `maxReferentialNodes`, `maxGroupDepth`) are held for the tasks that need them. For an input bound, `actual` is the first value past the limit (`max + 1`): the walk stops there. The scale tests (`npm run test:heavy`) hold the defaults against a written budget: 100 000 simple rules in under 10 s, an input of 500 000 leaves checked in under 3 s.
+
+## Reading facts by JSON pointer
+
+A rule reads facts of its evaluation context by RFC 6901 pointer: `/revenue/total` in `data`, `/$dates/effective`, `/$dimensions/country`, `/$outputs/risk`. A DSL declares them with `listVariables(expression)`, a model with `listVariables(params)`; `readsOf(rule, dsl, model)` joins them. Pointers are compared as they are: `/children/01/age` names no element (a list index has no leading zero), `-` is refused, and two spellings of "é" are two facts. A `listVariables` that throws, or returns anything but pointers (a dotted path `revenue.total`), leaves the reads of its rule undeclared, with a diagnostic; `result.missingFacts` lists, sorted, the pointers absent from the context. The pointer functions of the spec are re-exported: `parsePointer`, `formatPointer`, `JsonPointer`.
+
+The input `meta` also takes `dates` (named dates, `Date` or string), `assertions` (the provenance of facts) and `dimensions` with several values (`{ country: ['FR', 'US'] }`). `normalizeMeta` writes them canonically: dates as a civil date or `YYYY-MM-DDTHH:MM:SS.sssZ`, dimension values sorted without duplicates (one value as a string), tags sorted.
 
 ## Evaluating at a past date
 
-`meta.effectiveDate` selects the rules that were in force at that date. This lets you recompute an old result with the rules that applied at the time.
+`meta.effectiveDate` (or `meta.dates.effective`: given together they must name the same date) selects the rules that were in force at that date. A civil date is the start of that day in UTC. This lets you recompute an old result with the rules that applied at the time.
 
 The window of a rule is `[effectiveFrom, effectiveUntil)`, as `@run-iq/spec` defines it: `effectiveUntil` itself is excluded. A bound is a `Date` (an instant) or a civil date `YYYY-MM-DD`, compared as a civil date in UTC. The checksum requires `effectiveUntil` to be after `effectiveFrom`, so a one-day rule ends the next day (`2025-03-01` to `2025-03-02`). A bound spec refuses (or a civil bound with an IANA `timeZone`, which core cannot resolve yet) skips that rule as `INVALID_RULE`, with spec's code and message in `detail`.
 
