@@ -35,7 +35,9 @@ function resolvePath(data: Record<string, unknown>, path: string): unknown {
   return current;
 }
 
-function formatDate(date: Date): string {
+/** A bound as the detail names it: a civil date as written, an instant in ISO form. */
+function formatDate(date: string | Date): string {
+  if (typeof date === 'string') return date;
   return Number.isNaN(date.getTime()) ? 'Invalid Date' : date.toISOString();
 }
 

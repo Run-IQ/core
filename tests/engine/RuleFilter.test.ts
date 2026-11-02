@@ -170,8 +170,10 @@ describe('RuleFilter', () => {
       ]);
     });
 
-    it('formats an invalid effectiveUntil defensively', async () => {
+    it('refuses an invalid effectiveUntil with the SpecError of the window', async () => {
       // makeRule seals a checksum, which refuses an invalid date: corrupt the rule afterwards.
+      // RuleValidator catches such a rule first (`INVALID_RULE`); the window now throws instead of
+      // naming an `Invalid Date` bound.
       const rule = {
         ...makeRule({
           id: 'r1',
@@ -180,15 +182,47 @@ describe('RuleFilter', () => {
         }),
         effectiveUntil: new Date('x'),
       };
-      const result = await createFilter().filter(
+      await expect(
+        createFilter().filter([rule], makeInput(), new Date('2024-06-01T00:00:00.000Z')),
+      ).rejects.toThrow(
+        'effectiveUntil must be a Date, a civil date YYYY-MM-DD or an instant YYYY-MM-DDTHH:MM:SS[.sss] with Z or ±HH:MM, in the years 0000 to 9999; got an invalid Date',
+      );
+    });
+
+    it('compares a civil date bound as a civil date, and names it as written', async () => {
+      const rule = makeRule({
+        id: 'r1',
+        model: 'M',
+        effectiveFrom: '2025-01-01',
+        effectiveUntil: '2025-06-01',
+      });
+      const last = await createFilter().filter(
         [rule],
         makeInput(),
-        new Date('2024-06-01T00:00:00.000Z'),
+        new Date('2025-05-31T23:59:59.999Z'),
       );
-      expect(result.skipped[0]).toMatchObject({
+      expect(last.passed).toEqual([rule]);
+      const until = await createFilter().filter(
+        [rule],
+        makeInput(),
+        new Date('2025-06-01T00:00:00.000Z'),
+      );
+      expect(until.passed).toEqual([]);
+      expect(until.skipped).toEqual([
+        {
+          rule,
+          reason: 'INACTIVE_DATE',
+          detail: 'window [2025-01-01, 2025-06-01), evaluated at 2025-06-01T00:00:00.000Z',
+        },
+      ]);
+      const before = await createFilter().filter(
+        [rule],
+        makeInput(),
+        new Date('2024-12-31T23:59:59.999Z'),
+      );
+      expect(before.skipped[0]).toMatchObject({
         reason: 'INACTIVE_DATE',
-        detail:
-          'window [2025-01-01T00:00:00.000Z, Invalid Date), evaluated at 2024-06-01T00:00:00.000Z',
+        detail: 'window [2025-01-01, 2025-06-01), evaluated at 2024-12-31T23:59:59.999Z',
       });
     });
 
