@@ -25,6 +25,23 @@ jobs:
           scope: '@run-iq'
           cache: npm
       - run: npm ci
+      # Pull requests into refonte/*: core is checked against the spec of refonte/phase-2, not
+      # against the published @run-iq/spec (an older version). Spec is built, then linked in
+      # place of the installed one. The install is per package, so no workspace is needed.
+      - name: Check out spec (refonte/phase-2)
+        if: startsWith(github.base_ref, 'refonte/')
+        uses: actions/checkout@v4
+        with:
+          repository: Run-IQ/spec
+          ref: refonte/phase-2
+          path: spec-refonte
+      - name: Build spec and link it
+        if: startsWith(github.base_ref, 'refonte/')
+        run: |
+          npm ci --prefix spec-refonte
+          npm run build --prefix spec-refonte
+          rm -rf node_modules/@run-iq/spec
+          ln -s "$PWD/spec-refonte" node_modules/@run-iq/spec
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
