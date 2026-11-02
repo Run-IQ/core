@@ -106,6 +106,7 @@ export function readItems(value: unknown, limits: Readonly<EngineLimits>, what: 
  * anything else (a non-plain object) is kept as it is and left unfrozen, as it is not the
  * engine's. Recursion is bounded by the depth the data was read with.
  */
+// justification: every `as T` below returns a copy of the same shape as the argument.
 export function frozenCopyOf<T>(value: T): T {
   if (typeof value !== 'object' || value === null) return value;
   if (value instanceof Date) return new Date(value.getTime()) as T;
@@ -234,8 +235,10 @@ export class RuleLedger {
     returned.rules.forEach(count);
     returned.skipped.forEach((skip) => count(skip.rule));
     for (const [pair, times] of returnedCount) {
+      // justification: `returnedCount` only holds pairs that `givenCount` holds.
       const given = givenCount.get(pair) as number;
       if (times > given) {
+        // justification: a pair is `label`, a separator and a checksum: `split` has two parts.
         const label = pair.split('\u0000')[0] as string;
         fail(
           `returned rule ${label} ${times} times (rules and skips together), it was given ${given}`,
@@ -284,6 +287,7 @@ export class RuleLedger {
       if (entry === undefined || !intact(skip.rule)) {
         fail(`skipped rule ${label} with a content other than the one it was given`);
       }
+      // justification: the `if` above throws when `entry` is `undefined`.
       used.add(entry as Entry);
       skipped.push(
         Object.freeze({ rule: (entry as Entry).rule, reason: skip.reason, detail: skip.detail }),
