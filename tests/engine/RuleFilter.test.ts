@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { SpecError } from '@run-iq/spec';
 import { RuleFilter } from '../../src/engine/RuleFilter.js';
 import { DSLRegistry } from '../../src/registry/DSLRegistry.js';
 import { PluginSandbox } from '../../src/security/PluginSandbox.js';
@@ -170,23 +171,57 @@ describe('RuleFilter', () => {
       ]);
     });
 
-    it('refuses an invalid effectiveUntil with the SpecError of the window', async () => {
-      // makeRule seals a checksum, which refuses an invalid date: corrupt the rule afterwards.
-      // RuleValidator catches such a rule first (`INVALID_RULE`); the window now throws instead of
-      // naming an `Invalid Date` bound.
-      const rule = {
+    it('skips a rule whose bound is invalid, naming the code and message of spec', async () => {
+      // makeRule seals a checksum, which refuses an invalid date: corrupt the rule afterwards
+      // (a rule that a beforeEvaluate hook changed is not checked again).
+      const bad = {
         ...makeRule({
-          id: 'r1',
+          id: 'bad',
           model: 'M',
           effectiveFrom: new Date('2025-01-01T00:00:00.000Z'),
         }),
         effectiveUntil: new Date('x'),
       };
-      await expect(
-        createFilter().filter([rule], makeInput(), new Date('2024-06-01T00:00:00.000Z')),
-      ).rejects.toThrow(
-        'effectiveUntil must be a Date, a civil date YYYY-MM-DD or an instant YYYY-MM-DDTHH:MM:SS[.sss] with Z or ±HH:MM, in the years 0000 to 9999; got an invalid Date',
+      const good = makeRule({ id: 'good', model: 'M' });
+      const result = await createFilter().filter(
+        [bad, good],
+        makeInput(),
+        new Date('2024-06-01T00:00:00.000Z'),
       );
+      expect(result.passed).toEqual([good]);
+      expect(result.skipped).toEqual([
+        {
+          rule: bad,
+          reason: 'INVALID_RULE',
+          detail:
+            'Invalid rule bad@1: INVALID_DATE: effectiveUntil must be a Date, a civil date YYYY-MM-DD or an instant YYYY-MM-DDTHH:MM:SS[.sss] with Z or ±HH:MM, in the years 0000 to 9999; got an invalid Date',
+        },
+      ]);
+    });
+
+    it('skips a rule with a civil bound and an IANA time zone, the others still pass', async () => {
+      // isEffectiveAt has no time zone database: only UTC and ±HH:MM.
+      const paris = makeRule({
+        id: 'paris',
+        model: 'M',
+        effectiveFrom: '2025-01-01',
+        timeZone: 'Europe/Paris',
+      });
+      const utc = makeRule({ id: 'utc', model: 'M', effectiveFrom: '2025-01-01' });
+      const result = await createFilter().filter(
+        [paris, utc],
+        makeInput(),
+        new Date('2025-06-01T00:00:00.000Z'),
+      );
+      expect(result.passed).toEqual([utc]);
+      expect(result.skipped).toEqual([
+        {
+          rule: paris,
+          reason: 'INVALID_RULE',
+          detail:
+            'Invalid rule paris@1: INVALID_DATE: isEffectiveAt knows UTC and ±HH:MM offsets only: use windowContains with a calendar for "Europe/Paris"',
+        },
+      ]);
     });
 
     it('compares a civil date bound as a civil date, and names it as written', async () => {
@@ -321,6 +356,8 @@ describe('RuleFilter', () => {
       });
 
       it('match all: the one input value must match, as with any', async () => {
+        // The input carries one value per dimension until 9L: `match` changes nothing yet, and a
+        // dropped `match` is seen only in the detail, which writes the spec as given.
         const rule = makeRule({
           id: 'r1',
           model: 'M',
@@ -348,6 +385,25 @@ describe('RuleFilter', () => {
         expect((await createFilter().filter([rule], input, at)).passed).toEqual([rule]);
       });
 
+      it('an input value spec cannot read rejects the evaluation, unchanged', async () => {
+        const rule = makeRule({ id: 'r1', model: 'M', dimensions: { country: 'TG' } });
+        const refused = async (country: string): Promise<unknown> =>
+          createFilter()
+            .filter([rule], inCountry(country), at)
+            .then(
+              () => undefined,
+              (error: unknown) => error,
+            );
+        for (const [value, message] of [
+          ['', 'input must not be empty'],
+          [':x', 'input has an empty code system before ":"'],
+        ] as const) {
+          const error = await refused(value);
+          expect(error).toBeInstanceOf(SpecError);
+          expect(error).toMatchObject({ code: 'INVALID_INPUT', message });
+        }
+      });
+
       it('a ref names the spec error: no referential is provided yet, never a silent mismatch', async () => {
         const rule = makeRule({
           id: 'r1',
@@ -360,7 +416,8 @@ describe('RuleFilter', () => {
           {
             rule,
             reason: 'INVALID_RULE',
-            detail: 'Invalid rule r1@1: dimension country: unknown referential ue',
+            detail:
+              'Invalid rule r1@1: dimension country: INVALID_REFERENTIAL: unknown referential ue',
           },
         ]);
       });
@@ -528,10 +585,11 @@ describe('RuleFilter', () => {
         dsl: 'lazy',
         version: '1.0.0',
         evaluate: () => true,
+        // A hostile plugin returns a lazy iterable, not the array the contract asks for.
         listVariables: function* () {
           yield 'first.missing';
           throw new Error('midway');
-        },
+        } as unknown as NonNullable<DSLEvaluator['listVariables']>,
       });
       const filter = new RuleFilter(registry, new PluginSandbox(500, 100));
       const rule = makeRule({ id: 'r1', model: 'M', condition: { dsl: 'lazy', value: {} } });
@@ -619,10 +677,11 @@ describe('RuleFilter', () => {
       registry.register({
         dsl: 'slow',
         version: '1.0.0',
-        evaluate: () =>
+        // An async evaluator, which the contract does not declare: only the timeout stops it.
+        evaluate: (() =>
           new Promise<boolean>((resolve) => {
             setTimeout(() => resolve(true), 200);
-          }),
+          })) as unknown as DSLEvaluator['evaluate'],
       });
       const filter = new RuleFilter(registry, new PluginSandbox(500, 20));
       const rule = makeRule({ id: 'r1', model: 'M', condition: { dsl: 'slow', value: {} } });

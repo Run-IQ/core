@@ -43,6 +43,14 @@ const NO_REFERENTIALS: ReadonlyMap<string, Referential> = new Map();
 const describeSpec = (spec: DimensionSpec): string =>
   typeof spec === 'string' ? spec : canonicalize(spec);
 
+/** The exclusion of a rule that spec refuses: its code and message, as spec words them. */
+function invalidRule(rule: Rule, error: SpecError, where = ''): Exclusion {
+  return {
+    reason: 'INVALID_RULE',
+    detail: `Invalid rule ${rule.id}@${rule.version}: ${where}${error.code}: ${error.message}`,
+  };
+}
+
 /** A bound as the detail names it: a civil date as written, an instant in ISO form. */
 function formatDate(date: string | Date): string {
   if (typeof date === 'string') return date;
@@ -85,7 +93,16 @@ export class RuleFilter {
     diagnostics: Diagnostic[],
   ): Promise<Exclusion | null> {
     // 1. Date filter: half-open window [effectiveFrom, effectiveUntil)
-    if (!isEffectiveAt(rule, now)) {
+    let active: boolean;
+    try {
+      active = isEffectiveAt(rule, now);
+    } catch (error) {
+      // The rule's own fault (a bound spec refuses, a civil bound with an IANA zone): it is
+      // skipped; the others go on.
+      if (!(error instanceof SpecError)) throw error;
+      return invalidRule(rule, error);
+    }
+    if (!active) {
       const until = rule.effectiveUntil === null ? 'infinity' : formatDate(rule.effectiveUntil);
       return {
         reason: 'INACTIVE_DATE',
@@ -120,14 +137,15 @@ export class RuleFilter {
         try {
           match = matchDimension(spec, actual, on, NO_REFERENTIALS);
         } catch (error) {
-          // A rule spec or a referential refuses (`unknown referential`): named, never a mismatch.
           if (!(error instanceof SpecError)) throw error;
-          return {
-            reason: 'INVALID_RULE',
-            detail: `Invalid rule ${rule.id}@${rule.version}: dimension ${key}: ${error.message}`,
-          };
+          // An input value spec cannot read is the input's fault: the evaluation is rejected
+          // with spec's error, unchanged. Anything else is the rule's (a spec or a referential
+          // it names): the rule is skipped, never counted as a mismatch.
+          if (error.code === 'INVALID_INPUT') throw error;
+          return invalidRule(rule, error, `dimension ${key}: `);
         }
         if (match.result !== true) {
+          // An `unknown` membership excludes the rule: core's choice, 9Q decides it.
           const unknown = match.result === 'unknown' ? ` (unknown: ${match.why})` : '';
           return {
             reason: 'DIMENSION_MISMATCH',
