@@ -73,4 +73,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+      # The scale limits against their written budgets (100 000 rules, 500 000 leaves), one file at
+      # a time, after the fast suite.
+      - run: npm run test:heavy
       - run: npm run build

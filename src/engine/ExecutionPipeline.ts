@@ -131,7 +131,9 @@ export class ExecutionPipeline {
       const name = outputOf(rule);
       const shortCircuit = shortCircuits.get(name);
       if (shortCircuit === undefined) {
-        feeding.set(name, [...(feeding.get(name) ?? []), rule]);
+        const feeders = feeding.get(name);
+        if (feeders === undefined) feeding.set(name, [rule]);
+        else feeders.push(rule);
       } else if (sameRule(rule, shortCircuit.rule)) {
         applied.push(rule);
       } else {
