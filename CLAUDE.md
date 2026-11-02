@@ -60,7 +60,8 @@ Decisions of 2 November 2026 that apply to core. Items marked "from <task>" are 
 - From 9M1: the default of `onChecksumMismatch` is `throw`. A rule whose `listVariables` fails is `provisional` instead of being evaluated with unknown reads.
 - From Task 10: a store failure fails the evaluation.
 - From 9M2: only rules in force have an effect, so the exceptions of a beaten carrier do not apply.
-- Tags absent means no tag filter (D-38). A given list is complete unless the caller declares otherwise.
+- Tags absent means no tag filter (D-38, tested in 9Q).
+- A list given in the input is complete unless the caller declares otherwise, and a fact given without an assertion counts as determined. Both are the caller's declarations, recorded in the proof.
 
 ## 5. Rule for future decisions
 
