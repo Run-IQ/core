@@ -24,17 +24,27 @@ jobs:
           registry-url: https://npm.pkg.github.com
           scope: '@run-iq'
           cache: npm
-      # Pull requests into refonte/*: core is checked against the spec of refonte/phase-2, not
+      # Pull requests into refonte/<name>: core is checked against the spec branch of the same name
+      # (a pull request into refonte/phase-2 uses refonte/phase-2 of spec; its moving head), not
       # against the published @run-iq/spec (the registry has no version matching core's range).
       # Spec is built, left out of core's install (on the runner's copy of package.json and
       # package-lock.json only), then linked in place. The install is per package: a workspace
       # crashes npm 10 on this tree.
-      - name: Check out spec (refonte/phase-2)
+      - name: Check that spec has the branch of the pull request
+        if: startsWith(github.base_ref, 'refonte/')
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if ! git ls-remote --exit-code --heads https://github.com/Run-IQ/spec.git "$BASE_REF" > /dev/null; then
+            echo "::error::Run-IQ/spec has no branch $BASE_REF. Core is checked against the spec branch named like the base of the pull request."
+            exit 1
+          fi
+      - name: Check out spec (the branch named like the base of the pull request)
         if: startsWith(github.base_ref, 'refonte/')
         uses: actions/checkout@v4
         with:
           repository: Run-IQ/spec
-          ref: refonte/phase-2
+          ref: ${{ github.base_ref }}
           path: spec-refonte
       - name: Build spec
         if: startsWith(github.base_ref, 'refonte/')
