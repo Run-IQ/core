@@ -1,3 +1,4 @@
+import type { Crossing } from '../src/engine/pluginBoundary.js';
 import { describe, expectTypeOf, it } from 'vitest';
 import { EVALUATE_OPTION_NAMES } from '../src/types/options.js';
 import { formatPointer as specFormatPointer, parsePointer as specParsePointer } from '@run-iq/spec';
@@ -308,7 +309,7 @@ describe('what 9L adds to the public surface', () => {
     DEFAULT_LIMITS.maxRules = 5;
     expectTypeOf<EngineLimitError['limit']>().toEqualTypeOf<keyof EngineLimits>();
     expectTypeOf(readsOf).parameters.toEqualTypeOf<
-      [Rule, DSLEvaluator | undefined, CalculationModel<OutputValue> | undefined]
+      [Rule, DSLEvaluator | undefined, CalculationModel<OutputValue> | undefined, Crossing?]
     >();
     expectTypeOf(readsOf).returns.toEqualTypeOf<Reads>();
     expectTypeOf(normalizeMeta).returns.toEqualTypeOf<NormalizedMeta>();

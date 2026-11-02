@@ -279,7 +279,11 @@ describe('readsOf', () => {
       const result = readsOf(withCondition, dslReading(list), modelReading([]));
       expect(result.pointers).toEqual([]);
       expect(result.problems).toEqual([
-        { kind: 'failed', message: 'listVariables of test for R1@1 failed: midway' },
+        {
+          kind: 'failed',
+          message:
+            'listVariables of test for R1@1 failed: listVariables of test/1 could not be read: midway',
+        },
       ]);
     });
 

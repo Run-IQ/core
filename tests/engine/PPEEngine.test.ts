@@ -519,7 +519,17 @@ describe('PPEEngine', () => {
     it('refuses at construction a plugin model with an invalid output declaration', () => {
       // Invalid on purpose: only JSON.parse builds it untyped.
       const bad = new ValueModel('BAD', JSON.parse('{"type":"string","combine":"sum"}'), {});
-      expect(() => engineWith([bad])).toThrow(InvalidModelError);
+      // The registry's refusal happens inside the plugin's `onInit`, so it reaches the caller as the
+      // engine's PluginHookError holding the refusal, never as an error a plugin could have built.
+      let error: unknown;
+      try {
+        engineWith([bad]);
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toBeInstanceOf(PluginHookError);
+      expect(error).toMatchObject({ hook: 'onInit' });
+      expect((error as PluginHookError).cause).toBeInstanceOf(InvalidModelError);
     });
 
     it('keeps value a number: a rule feeding it with a boolean declaration is excluded', async () => {

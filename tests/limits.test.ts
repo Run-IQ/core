@@ -32,7 +32,7 @@ describe('DEFAULT_LIMITS', () => {
       maxRuleSetNodes: 2_000_000,
       maxStringLength: 1_000_000,
       maxRecordLength: 256_000_000,
-      maxTraceNodes: 2_000_000,
+      maxTraceNodes: 10_000_000,
     });
     expect(Object.isFrozen(DEFAULT_LIMITS)).toBe(true);
   });

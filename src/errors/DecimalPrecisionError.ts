@@ -1,4 +1,5 @@
 import { PPEError } from './PPEError.js';
+import { markEngineError } from './engineError.js';
 
 /**
  * A decimal the engine handles (a contribution, a short-circuit value, a combined or rounded
@@ -19,3 +20,5 @@ export class DecimalPrecisionError extends PPEError {
     this.name = 'DecimalPrecisionError';
   }
 }
+
+markEngineError(DecimalPrecisionError);

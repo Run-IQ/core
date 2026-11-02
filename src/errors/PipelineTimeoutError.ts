@@ -1,4 +1,5 @@
 import { PPEError } from './PPEError.js';
+import { markEngineError } from './engineError.js';
 
 export class PipelineTimeoutError extends PPEError {
   constructor(public readonly timeoutMs: number) {
@@ -6,3 +7,5 @@ export class PipelineTimeoutError extends PPEError {
     this.name = 'PipelineTimeoutError';
   }
 }
+
+markEngineError(PipelineTimeoutError);

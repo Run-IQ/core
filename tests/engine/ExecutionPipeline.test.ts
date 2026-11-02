@@ -463,7 +463,8 @@ describe('ExecutionPipeline', () => {
         {
           rule,
           reason: 'OUTPUT_MISMATCH',
-          detail: 'output o: the value is not JSON at $.a.b[1] (undefined)',
+          detail:
+            'output o: the model returned a value that cannot be copied: output o/a/b/1 is not JSON: undefined',
         },
       ]);
     });

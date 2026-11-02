@@ -1,4 +1,5 @@
 import { PPEError } from './PPEError.js';
+import { markEngineError } from './engineError.js';
 
 export class DSLNotFoundError extends PPEError {
   constructor(public readonly dslName: string) {
@@ -6,3 +7,5 @@ export class DSLNotFoundError extends PPEError {
     this.name = 'DSLNotFoundError';
   }
 }
+
+markEngineError(DSLNotFoundError);

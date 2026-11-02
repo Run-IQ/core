@@ -1,4 +1,5 @@
 import { PPEError } from './PPEError.js';
+import { markEngineError } from './engineError.js';
 
 /**
  * Thrown by the view the engine hands to a model or a DSL when it writes into it. A model, a DSL
@@ -11,3 +12,5 @@ export class FrozenViewWriteError extends PPEError {
     this.name = 'FrozenViewWriteError';
   }
 }
+
+markEngineError(FrozenViewWriteError);

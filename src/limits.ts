@@ -42,9 +42,12 @@ export interface EngineLimits {
    */
   maxRuleLeaves: number;
   /**
-   * Nodes read, in total, from the returns of all the hooks of one evaluation (rules, skips, state
-   * and the input each hook returns, together). A hook cannot make the engine read more, however many rules it repeats or
-   * how big they are, and three hooks cannot read three times as much.
+   * Nodes read, in total, from everything plugin code hands the engine in one evaluation: the
+   * returns of all the hooks (rules, skips and their details, state, and the input each hook
+   * returns), the outputs of the models, and the text of the results of `validateParams`, of the
+   * verdicts of the DSLs and of the answers of `listVariables`. Plugin code cannot make the engine
+   * read more, however many times it repeats a value or how big it is, and three hooks cannot read
+   * three times as much.
    */
   maxHookLeaves: number;
   /**
@@ -71,7 +74,9 @@ export interface EngineLimits {
    * Nodes of the input times the number of steps of the trace. Each step records the input it
    * was computed on and the record writes it every time, so the cost of the trace is this product,
    * which neither `maxInputLeaves` nor `maxRules` holds. Past it, the evaluation is refused after
-   * the rules are computed and before the record is built.
+   * the rules are computed and before the record is built. An input of `maxInputLeaves` nodes is
+   * reachable with up to twenty applied rules (500 000 times 20 is 10 000 000); with more rules
+   * this bound decides before the input bound does.
    */
   maxTraceNodes: number;
 }
@@ -100,7 +105,7 @@ export const DEFAULT_LIMITS: Readonly<EngineLimits> = Object.freeze({
   maxRuleSetNodes: 2_000_000,
   maxStringLength: 1_000_000,
   maxRecordLength: 256_000_000,
-  maxTraceNodes: 2_000_000,
+  maxTraceNodes: 10_000_000,
 });
 
 /** The limits a caller may give: any of them, or `undefined` for the default. */

@@ -83,7 +83,7 @@ export function acceptAfterEvaluate(
     }
     bounds ??= resultLimits(before, limits);
     budget ??= new Budget('maxInputLeaves', bounds.maxInputLeaves);
-    keep(field, readBounded(value, bounds, field, { budget }));
+    keep(field, readBounded(value, bounds, field, { budget, allowUndefined: true }));
   }
 
   // A field the plugin left out was read as `undefined`: it differs, so it counts as changed.

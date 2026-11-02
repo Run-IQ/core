@@ -10,7 +10,9 @@ import { describeThrown, isPlainObject, ruleLabel } from '../utils/values.js';
 import type { ShortCircuit } from './ExceptionProcessor.js';
 import type { TraceBuilder } from './TraceBuilder.js';
 import { OutputCombiner } from './OutputCombiner.js';
-import { ReadFailure, readBounded } from './pluginBoundary.js';
+import { ReadFailure, defaultCrossing, readBounded } from './pluginBoundary.js';
+import type { Budget } from './pluginBoundary.js';
+import { clip } from '../utils/frozenCopy.js';
 import { EngineLimitError } from '../errors/EngineLimitError.js';
 import { ViewScope } from './frozenView.js';
 import { UnexpectedEngineError } from '../errors/UnexpectedEngineError.js';
@@ -100,6 +102,7 @@ export class ExecutionPipeline {
     private readonly modelRegistry: ModelRegistry,
     private readonly conflictMode: 'throw' | 'first',
     private readonly limits: Readonly<EngineLimits>,
+    private readonly budget: Budget = defaultCrossing().budget,
   ) {}
 
   execute(
@@ -210,8 +213,13 @@ export class ExecutionPipeline {
         // or a depth that would overflow the stack. A property of it that throws is the model's
         // own throw (a refused write into a view is that rule's `MODEL_ERROR`, as in `calculate`).
         try {
-          raw = readBounded(raw, this.limits, `output ${name}`, { leafLimit: 'maxRuleLeaves' });
+          raw = readBounded(raw, this.limits, `output ${name}`, {
+            leafLimit: 'maxRuleLeaves',
+            budget: this.budget,
+          });
         } catch (error) {
+          // The budget of the evaluation is the engine's bound, not that rule's fault.
+          if (error instanceof EngineLimitError && error.limit === 'maxHookLeaves') throw error;
           const causes = error instanceof ReadFailure ? error.causes : [];
           const written = causes.find((cause) => views.isWriteError(cause));
           if (written !== undefined) {
@@ -222,7 +230,7 @@ export class ExecutionPipeline {
           skipped.push({
             rule,
             reason: 'OUTPUT_MISMATCH',
-            detail: `output ${name}: the model returned a value that cannot be copied: ${describeThrown(error)}`,
+            detail: `output ${name}: the model returned a value that cannot be copied: ${clip(describeThrown(error))}`,
           });
           continue;
         }

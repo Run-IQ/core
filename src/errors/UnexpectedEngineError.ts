@@ -1,6 +1,7 @@
 import { PPEError } from './PPEError.js';
 import { describeThrown } from '../utils/values.js';
 import { frozenErrorCopy } from '../utils/frozenCopy.js';
+import { markEngineError } from './engineError.js';
 
 /**
  * A thrown value that is not a `PPEError` (a model's `RangeError`, a plugin's `TypeError`...),
@@ -34,3 +35,5 @@ export class UnexpectedEngineError extends PPEError {
     return new UnexpectedEngineError(error);
   }
 }
+
+markEngineError(UnexpectedEngineError);

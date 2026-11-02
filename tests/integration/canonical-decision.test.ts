@@ -3,6 +3,7 @@ import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import type { PPEPlugin, PluginContext } from '../../src/types/plugin.js';
 import type { CalculationModel } from '../../src/types/model.js';
 import type { EvaluationInput } from '../../src/types/input.js';
+import { ValidationError } from '../../src/errors/ValidationError.js';
 import { makeRule } from '../helpers.js';
 
 // Ruling 2 of round 6: two inputs with the same canonical form give the same decision.
@@ -61,7 +62,8 @@ function variant(value: Json, next: () => number): Json {
 
 /** Every number of the tree, in the order of the sorted keys: it does not depend on key order. */
 function sum(value: unknown): number {
-  if (typeof value === 'number') return value;
+  // A `-0` that reaches a model is seen: it weighs a million, so the engine must have written it 0.
+  if (typeof value === 'number') return Object.is(value, -0) ? 1_000_000 : value;
   if (Array.isArray(value)) return value.reduce((total: number, item) => total + sum(item), 0);
   if (value !== null && typeof value === 'object') {
     return Object.keys(value)
@@ -87,44 +89,130 @@ function engine(): PPEEngine {
   return new PPEEngine({ plugins: [host], dsls: [], strict: false });
 }
 
+const rules = [
+  makeRule({ id: 'plain', model: 'SUMS' }),
+  makeRule({ id: 'tagged', model: 'SUMS', tags: ['a'], priority: 90 }),
+  makeRule({ id: 'dim', model: 'SUMS', dimensions: { region: 'TG' }, priority: 80 }),
+];
+
+const summary = async (input: EvaluationInput): Promise<unknown> => {
+  const result = await engine().evaluate(rules, input);
+  return {
+    value: result.value,
+    outputs: result.outputs,
+    applied: result.appliedRules.map((rule) => rule.id),
+    skipped: result.skippedRules.map((skip) => [skip.rule.id, skip.reason]),
+  };
+};
+
+/** `base` with an `undefined` (or a hole) put in the place `where` names. */
+function poisoned(base: EvaluationInput, where: number): EvaluationInput {
+  const data = { ...(base.data as Record<string, unknown>) };
+  const meta = { ...(base.meta as Record<string, unknown>) };
+  switch (where) {
+    case 0:
+      data['hidden'] = undefined;
+      break;
+    case 1:
+      data['list'] = [1, undefined];
+      break;
+    case 2:
+      data['list'] = new Array<number>(2);
+      break;
+    case 3:
+      meta['dimensions'] = { region: [undefined] };
+      break;
+    case 4:
+      meta['dimensions'] = { region: ['TG', undefined] };
+      break;
+    case 5:
+      meta['dates'] = { effective: '2025-03-01', other: undefined };
+      break;
+    case 6:
+      meta['assertions'] = { '/x': undefined };
+      break;
+    case 7:
+      meta['assertions'] = { '/x': { deep: [undefined] } };
+      break;
+    default:
+      meta['tags'] = ['a', undefined];
+  }
+  return { ...base, data, meta } as EvaluationInput;
+}
+
 describe('one canonical input, one decision', () => {
   it('gives the same decision to inputs that differ only in what the canonical form erases', async () => {
     const next = generator(20260211);
-    const rules = [
-      makeRule({ id: 'plain', model: 'SUMS' }),
-      makeRule({ id: 'tagged', model: 'SUMS', tags: ['a'], priority: 90 }),
-      makeRule({ id: 'dim', model: 'SUMS', dimensions: { region: 'TG' }, priority: 80 }),
-    ];
-    for (let index = 0; index < 40; index += 1) {
+    for (let index = 0; index < 60; index += 1) {
       const data = randomJson(next, 3);
-      const base = {
-        data:
-          typeof data === 'object' && data !== null && !Array.isArray(data) ? data : { v: data },
-      };
+      const body = (
+        typeof data === 'object' && data !== null && !Array.isArray(data) ? data : { v: data }
+      ) as { [key: string]: Json };
+      // `-0` and `0` are the same number; so are the dates `2025-03-01T00:00:00.000Z` as a string
+      // in `dates.effective` and as a `Date` in `effectiveDate`.
       const tags = ['b', 'a', 'a'].slice(0, 1 + Math.floor(next() * 3));
       const regions = ['TG', 'BJ', 'TG'].slice(0, 1 + Math.floor(next() * 3));
-      const input = (flip: boolean): EvaluationInput => ({
-        requestId: `case-${index}-${flip ? 'b' : 'a'}`,
-        data: (flip ? variant(base.data, next) : base.data) as Record<string, unknown>,
+      const withDimension = next() < 0.7;
+      const left: EvaluationInput = {
+        requestId: `case-${index}-a`,
+        data: body,
         meta: {
           tenantId: 't',
-          tags: flip ? [...tags].reverse() : tags,
-          dimensions: { region: flip ? [...regions].reverse() : regions },
-          dates: {
-            effective: flip ? new Date('2025-03-01T00:00:00.000Z') : '2025-03-01T00:00:00.000Z',
-          },
-          ...(flip ? { context: {}, assertions: {} } : {}),
+          tags,
+          ...(withDimension ? { dimensions: { region: regions } } : {}),
+          dates: { effective: '2025-03-01T00:00:00.000Z' },
+        },
+      };
+      const right: EvaluationInput = {
+        requestId: `case-${index}-b`,
+        data: variant(body, next) as { [key: string]: Json },
+        meta: {
+          tenantId: 't',
+          tags: [...tags].reverse(),
+          ...(withDimension ? { dimensions: { region: [...regions].reverse() } } : {}),
+          effectiveDate: new Date('2025-03-01T00:00:00.000Z'),
+          context: {},
+          assertions: {},
         } as EvaluationInput['meta'],
-      });
-      const left = await engine().evaluate(rules, input(false));
-      const right = await engine().evaluate(rules, input(true));
-      expect(right.value).toBe(left.value);
-      expect(right.outputs).toEqual(left.outputs);
-      expect(right.appliedRules.map((rule) => rule.id)).toEqual(
-        left.appliedRules.map((rule) => rule.id),
-      );
-      expect(right.skippedRules.map((skip) => [skip.rule.id, skip.reason])).toEqual(
-        left.skippedRules.map((skip) => [skip.rule.id, skip.reason]),
+      };
+      expect(await summary(right), `case ${index}`).toEqual(await summary(left));
+    }
+  });
+
+  it('sees a minus zero as zero: the model that weighs it never does', async () => {
+    const left = await summary({
+      requestId: 'z-a',
+      data: { n: 0 },
+      meta: { tenantId: 't' },
+    });
+    const right = await summary({
+      requestId: 'z-b',
+      data: { n: -0 },
+      meta: { tenantId: 't' },
+    });
+    expect(right).toEqual(left);
+    expect((left as { value: number }).value).toBeLessThan(1000);
+  });
+
+  it('refuses, with a pointer, every input that hides an undefined or a hole, as the case without it decides', async () => {
+    const next = generator(7);
+    for (let index = 0; index < 54; index += 1) {
+      const base: EvaluationInput = {
+        requestId: `p-${index}`,
+        data: { n: Math.floor(next() * 10) },
+        meta: { tenantId: 't', tags: ['a'], dimensions: { region: 'TG' } },
+      };
+      await expect(summary(base)).resolves.toBeDefined(); // the clean input is decided
+      const where = index % 9;
+      const error = await engine()
+        .evaluate(rules, poisoned({ ...base, requestId: `q-${index}` }, where))
+        .then(
+          () => undefined,
+          (caught: unknown) => caught,
+        );
+      expect(error, `place ${where}`).toBeInstanceOf(ValidationError);
+      expect((error as ValidationError).reasons.join('; '), `place ${where}`).toMatch(
+        /\/(data|meta)\//,
       );
     }
   });

@@ -1,3 +1,4 @@
+import { EngineLimitError } from '../errors/EngineLimitError.js';
 import { validateProofInput } from '@run-iq/spec';
 import type { ProofInput } from '@run-iq/spec';
 import type { EvaluationInput } from '../types/input.js';
@@ -8,6 +9,32 @@ import { evaluationDate, normalizeMeta } from '../input/normalizeMeta.js';
 import type { NormalizedMeta } from '../input/normalizeMeta.js';
 import { DEFAULT_LIMITS } from '../limits.js';
 import type { EngineLimits } from '../limits.js';
+
+/**
+ * The pointers of every `undefined` held in `value` (an object member or a list item, at any
+ * depth), without recursion. `value` is the engine's own plain copy.
+ */
+function undefinedPointers(value: unknown, root: string): string[] {
+  const found: string[] = [];
+  const stack: { value: unknown; pointer: string }[] = [{ value, pointer: root }];
+  while (stack.length > 0) {
+    const { value: current, pointer } = stack.pop() as { value: unknown; pointer: string };
+    if (typeof current !== 'object' || current === null) continue;
+    // A list with holes (refused by the copier, with its own reason) is walked by its items.
+    const entries: [string, unknown][] = [];
+    if (Array.isArray(current)) {
+      for (let index = 0; index < current.length; index += 1) {
+        if (Object.hasOwn(current, index)) entries.push([String(index), current[index]]);
+      }
+    } else entries.push(...Object.entries(current));
+    for (const [key, item] of entries) {
+      const at = `${pointer}/${key.replace(/~/g, '~0').replace(/\//g, '~1')}`;
+      if (item === undefined) found.push(at);
+      else stack.push({ value: item, pointer: at });
+    }
+  }
+  return found.sort();
+}
 
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -28,6 +55,8 @@ export interface PreparedInput {
   readonly evaluationDate: Date | undefined;
   /** The leaves counted while the input was copied (data and every part of `meta`). */
   readonly leaves: number;
+  /** The exact serialized length of the strings and keys of the input: a lower bound of its text. */
+  readonly chars: number;
 }
 
 /** True for a non-null, non-array object. */
@@ -81,6 +110,14 @@ export class InputSanitizer {
 
     if (typeof requestId !== 'string' || requestId.length === 0) {
       reasons.push('requestId must be a non-empty string');
+    } else if (requestId.length > limits.maxStringLength) {
+      // The id is text the record holds: held to the same bound as any other text.
+      throw new EngineLimitError(
+        'maxStringLength',
+        limits.maxStringLength,
+        requestId.length,
+        '/requestId',
+      );
     }
     if (!isRecord(dataIn)) reasons.push('data must be a non-null object');
 
@@ -147,17 +184,14 @@ export class InputSanitizer {
     if (isRecord(declared) && Object.keys(declared).length === 0) {
       reasons.push('/meta/dimensions is empty: omit it to declare no dimensions');
     }
-    // `undefined` is not a JSON value. In `dimensions` and `dates` the canonical form would drop a
-    // key that holds it, and an input that declares a dimension would then decide like one that
-    // declares none: it is refused, with its pointer, like any other value that is not JSON.
-    for (const part of ['dimensions', 'dates'] as const) {
-      const members: unknown = metaCopy[part];
-      if (!isRecord(members)) continue;
-      for (const [name, value] of Object.entries(members)) {
-        if (value === undefined)
-          reasons.push(
-            `/meta/${part}/${name.replace(/~/g, '~0').replace(/\//g, '~1')} is not JSON: undefined`,
-          );
+    // `undefined` is not a JSON value. In `dimensions`, `dates` and `assertions` the canonical form
+    // would drop a key that holds it (or write `null` for a list item), and an input that declares
+    // a dimension would then decide like one that declares none: it is refused, anywhere in them,
+    // with its pointer, like any other value that is not JSON. (A member of `meta` that is itself
+    // `undefined` is absent, as for spec.)
+    for (const part of ['dimensions', 'dates', 'assertions'] as const) {
+      for (const pointer of undefinedPointers(metaCopy[part], `/meta/${part}`)) {
+        reasons.push(`${pointer} is not JSON: undefined`);
       }
     }
     if (copier.reasons.length > 0 || reasons.length > 0) {
@@ -192,6 +226,7 @@ export class InputSanitizer {
       meta: canonical,
       evaluationDate: evaluationDate(canonical),
       leaves: copier.leaves,
+      chars: copier.chars,
     };
   }
 

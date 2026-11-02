@@ -3,9 +3,7 @@ import type { EngineLimits } from '../limits.js';
 import { describeThrown } from '../utils/values.js';
 import { NotPlain, isDateObject, isPlainPrototype } from '../utils/plain.js';
 import { toReferenceDate } from '@run-iq/spec';
-
-/** Characters that weigh one node. */
-const CHARS_PER_NODE = 64;
+import { CHARS_PER_NODE, serializedLength } from '../utils/weight.js';
 
 /** The segment of a JSON pointer for `key`: `~` is `~0`, `/` is `~1`. */
 const escapeSegment = (key: string): string => key.replace(/~/g, '~0').replace(/\//g, '~1');
@@ -52,6 +50,10 @@ interface Frame {
 export class InputCopier {
   /** The leaves counted so far, over every part copied. */
   leaves = 0;
+  /** The nodes the characters of the text read add (a part of `leaves`), exactly weighed. */
+  textNodes = 0;
+  /** The exact serialized length of every string and key read: a lower bound of the record. */
+  chars = 0;
   /** The properties that could not be read, in the order met. */
   readonly reasons: string[] = [];
   /** What was thrown by the properties that could not be read, in the same order. */
@@ -78,6 +80,12 @@ export class InputCopier {
      * excluded for it and nothing but plain data reaches the record.
      */
     private readonly ruleMode = false,
+    /**
+     * Refuse an `undefined` held as an object member or a list item (not a JSON value) with its
+     * pointer, as the reason `<pointer> is not JSON: undefined`. A rule is read with `ruleMode`,
+     * which excludes the rule for it instead; the input is checked by spec, which says the same.
+     */
+    private readonly refuseUndefined = false,
   ) {}
 
   private leaf(extra = 0): void {
@@ -89,9 +97,10 @@ export class InputCopier {
 
   /**
    * Holds a string (a value or a key) to `maxStringLength` and returns the nodes its characters
-   * add: one per `CHARS_PER_NODE`, so that a long text costs what it weighs.
+   * add: one per `CHARS_PER_NODE` of its exact serialized length (escapes included), so that a
+   * text costs what the checksum and the record will write for it.
    */
-  private text(value: string, pointer: () => string): number {
+  text(value: string, pointer: () => string): number {
     if (value.length > this.limits.maxStringLength) {
       throw new EngineLimitError(
         'maxStringLength',
@@ -100,7 +109,11 @@ export class InputCopier {
         pointer(),
       );
     }
-    return Math.floor(value.length / CHARS_PER_NODE);
+    const written = serializedLength(value);
+    this.chars += written;
+    const extra = Math.floor(written / CHARS_PER_NODE);
+    this.textNodes += extra;
+    return extra;
   }
 
   /** `rootPointer` followed by the keys of `frame` and `key`: where a failure is named. */
@@ -160,11 +173,16 @@ export class InputCopier {
               )
             : 0;
         this.leaf(extra);
-        if (value === undefined && this.ruleMode && parent !== undefined && key !== undefined) {
+        if (value === undefined && parent !== undefined && key !== undefined) {
           // `undefined` is not a JSON value: a member that holds it makes the rule refused.
-          this.refusals.push(`${this.pointer(rootPointer, parent, key)} is not JSON: undefined`);
-          put(parent, key, '<undefined>');
-          return;
+          if (this.ruleMode) {
+            this.refusals.push(`${this.pointer(rootPointer, parent, key)} is not JSON: undefined`);
+            put(parent, key, '<undefined>');
+            return;
+          }
+          if (this.refuseUndefined) {
+            this.reasons.push(`${this.pointer(rootPointer, parent, key)} is not JSON: undefined`);
+          }
         }
         put(parent, key, typeof value === 'number' && Object.is(value, -0) ? 0 : value);
         return;

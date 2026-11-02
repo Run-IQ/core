@@ -40,7 +40,8 @@ import { frozenErrorCopy } from '../utils/frozenCopy.js';
 import { describeThrown, ruleLabel } from '../utils/values.js';
 import { acceptAfterEvaluate } from './afterEvaluateTransition.js';
 import { readBeforeEvaluate } from './beforeEvaluateResult.js';
-import { Budget, RuleLedger, readItems } from './pluginBoundary.js';
+import { Budget, RuleLedger, charsOfRule, readItems } from './pluginBoundary.js';
+import type { Crossing } from './pluginBoundary.js';
 import { ViewScope } from './frozenView.js';
 import type { LedgerOutcome } from './pluginBoundary.js';
 import type { BeforeEvaluateReading } from './beforeEvaluateResult.js';
@@ -157,7 +158,12 @@ export class PPEEngine {
 
     for (const plugin of this.plugins) {
       this.pluginRegistry.register(plugin);
-      plugin.onInit(context);
+      try {
+        plugin.onInit(context);
+      } catch (error) {
+        // A throw of plugin code reaches the caller as the engine's own error.
+        throw new PluginHookError(plugin.name, 'onInit', error);
+      }
     }
   }
 
@@ -251,6 +257,19 @@ export class PPEEngine {
   }
 
   /**
+   * Refuses, by name, an evaluation whose record cannot fit: the text of its rules (once) and of its
+   * input (once, and again in each step of the trace) is a lower bound of the record, known before
+   * anything is cloned or serialized.
+   */
+  private assertRecordRoom(rules: ReadonlyArray<Rule>, inputChars: number, steps: number): void {
+    let chars = inputChars * (1 + steps);
+    for (const rule of rules) chars += charsOfRule(rule);
+    if (chars > this.limits.maxRecordLength) {
+      throw new EngineLimitError('maxRecordLength', this.limits.maxRecordLength, chars);
+    }
+  }
+
+  /**
    * Checks an input and makes its plain copy (`InputSanitizer.prepare`), then holds it to strict
    * mode: the evaluation date, as `meta.effectiveDate` or `meta.dates.effective`, must be given.
    * The caller's input and each input a `beforeEvaluate` hook returns go through here.
@@ -299,10 +318,15 @@ export class PPEEngine {
     // it runs is not seen, so that what the rules are validated against is what runs.
     const models = this.modelRegistry.snapshot();
     const dsls = this.dslRegistry.snapshot();
-    const ruleValidator = new RuleValidator(models, this.onChecksumMismatch);
-    const ruleFilter = new RuleFilter(dsls, this.sandbox);
-    const exceptionProcessor = new ExceptionProcessor(models);
-    const executionPipeline = new ExecutionPipeline(models, this.conflictMode, this.limits);
+    // Everything plugin code hands the engine in this evaluation (what the hooks return, what the
+    // models and the DSLs answer, the text of their errors) is read through the one reader and
+    // counted against this one budget: three hooks cannot read three times as much.
+    const budget = new Budget('maxHookLeaves', this.limits.maxHookLeaves);
+    const crossing: Crossing = { limits: this.limits, budget };
+    const ruleValidator = new RuleValidator(models, this.onChecksumMismatch, crossing);
+    const ruleFilter = new RuleFilter(dsls, this.sandbox, crossing);
+    const exceptionProcessor = new ExceptionProcessor(models, crossing);
+    const executionPipeline = new ExecutionPipeline(models, this.conflictMode, this.limits, budget);
 
     // Step 3: Rule validation (checksum of the source rules). The engine works on its own frozen
     // copies of the rules: the caller's objects are never handed to a hook, so a hook cannot
@@ -311,6 +335,9 @@ export class PPEEngine {
     // or another engine (an object from elsewhere is untrusted data, copied and counted).
     const owned: WeakSet<object> = new WeakSet();
     const sourceCopies = this.copySourceRules(rules, owned);
+    // The text of the rules alone may already be more than the record can hold: refused before any
+    // checksum is computed.
+    this.assertRecordRoom(sourceCopies, prepared.chars, 0);
     const initialValidation = ruleValidator.validate(sourceCopies);
     allSkipped.push(...initialValidation.invalid);
 
@@ -324,11 +351,9 @@ export class PPEEngine {
     const pluginState: Record<string, JsonValue> = {};
     let currentInput = prepared.input;
     let currentInputNodes = prepared.leaves;
+    let currentInputChars = prepared.chars;
     let currentMeta = prepared.meta;
     let currentDate = prepared.evaluationDate;
-    // All the nodes the returns of the hooks of this evaluation make the engine read count against
-    // one bound: three hooks cannot read three times as much.
-    const budget = new Budget('maxHookLeaves', this.limits.maxHookLeaves);
     for (const plugin of this.plugins) {
       const hook = plugin.beforeEvaluate;
       if (!hook) continue;
@@ -385,6 +410,7 @@ export class PPEEngine {
       signal.throwIfAborted();
       currentInput = accepted.input;
       currentInputNodes = accepted.leaves;
+      currentInputChars = accepted.chars;
       currentMeta = accepted.meta;
       currentDate = accepted.evaluationDate;
       currentRules = outcome.rules;
@@ -488,6 +514,8 @@ export class PPEEngine {
         throw new PluginHookError(plugin.name, 'afterEvaluate', error);
       }
     }
+
+    this.assertRecordRoom(currentRules, currentInputChars, trace.steps.length);
 
     // Step 10: Snapshot — use the rules that actually executed (post-plugin)
     const snapshot = SnapshotSerializer.serialize(

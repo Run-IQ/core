@@ -1,4 +1,5 @@
-import { ViewScope } from './frozenView.js';
+import { askValidateParams, defaultCrossing } from './pluginBoundary.js';
+import type { Crossing } from './pluginBoundary.js';
 import {
   DEFAULT_OUTPUT,
   DEFAULT_OUTPUT_DECLARATION,
@@ -133,7 +134,10 @@ function paramsConflict(a: Record<string, unknown>, b: Record<string, unknown>):
  * `INVALID_PARAMS`.
  */
 export class ExceptionProcessor {
-  constructor(private readonly models: ModelRegistry) {}
+  constructor(
+    private readonly models: ModelRegistry,
+    private readonly crossing: Crossing = defaultCrossing(),
+  ) {}
 
   apply(rules: ReadonlyArray<Rule>, mode: 'throw' | 'first'): ExceptionResult {
     const ordered = [...rules].sort(compareByPriorityThenIdentity);
@@ -427,21 +431,13 @@ export class ExceptionProcessor {
   ): { reason: 'INVALID_PARAMS' | 'MODEL_ERROR'; detail: string } | undefined {
     if (!this.models.has(rule.model)) return undefined;
     const model = this.models.get(rule.model);
-    let validation: ReturnType<typeof model.validateParams>;
-    const scope = new ViewScope();
-    try {
-      validation = model.validateParams(scope.trapped(params));
-    } catch (error) {
-      // A write into the params: the model's own fault, named. The target is refused for it.
-      if (!scope.isWriteError(error)) throw UnexpectedEngineError.foreign(error);
-      return { reason: 'MODEL_ERROR', detail: error.message };
-    }
-    if (validation.valid) return undefined;
+    // The result crosses the boundary once, through the one reader (see `askValidateParams`).
+    const verdict = askValidateParams(model, params, this.crossing, UnexpectedEngineError.foreign);
+    if (verdict.kind === 'valid') return undefined;
+    if (verdict.kind === 'error') return { reason: 'MODEL_ERROR', detail: verdict.detail };
     return {
       reason: 'INVALID_PARAMS',
-      detail: validation.errors?.length
-        ? validation.errors.join('; ')
-        : `params refused by model ${model.name}`,
+      detail: verdict.errors === '' ? `params refused by model ${model.name}` : verdict.errors,
     };
   }
 }

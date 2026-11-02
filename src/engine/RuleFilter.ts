@@ -16,6 +16,11 @@ import {
 import type { DimensionSpec, Referential } from '@run-iq/spec';
 import { DSLEvaluationError } from '../errors/DSLEvaluationError.js';
 import { DSLTimeoutError } from '../errors/DSLTimeoutError.js';
+import { EngineLimitError } from '../errors/EngineLimitError.js';
+import { defaultCrossing, readVerdict } from './pluginBoundary.js';
+import type { Crossing } from './pluginBoundary.js';
+import { clip } from '../utils/frozenCopy.js';
+import { ruleLabel } from '../utils/values.js';
 import { buildContext } from '../context/buildContext.js';
 import { readsOf } from '../context/reads.js';
 import { normalizeMeta } from '../input/normalizeMeta.js';
@@ -109,6 +114,7 @@ export class RuleFilter {
   constructor(
     private readonly dslRegistry: DSLRegistry,
     private readonly sandbox: PluginSandbox,
+    private readonly crossing: Crossing = defaultCrossing(),
   ) {}
 
   /**
@@ -230,7 +236,7 @@ export class RuleFilter {
       // rule's outcome. Until 9M1 adds the `provisional` status, a rule whose `listVariables`
       // failed (`reads.declared` false) is evaluated, its reads unknown: only the diagnostic
       // says so, and its absent facts are not in `missingFacts`.
-      const reads = readsOf(rule, evaluator, undefined);
+      const reads = readsOf(rule, evaluator, undefined, this.crossing);
       for (const problem of reads.problems) {
         diagnostics.push({ source: 'engine', message: problem.message });
       }
@@ -245,17 +251,19 @@ export class RuleFilter {
           views.trapped(rule.condition.value),
           views.trapped(scope.context),
         );
-        if (!result) {
+        // The verdict crosses once, through the one reader; it is still read by truthiness (N21).
+        if (!readVerdict(result, this.crossing, `condition of ${ruleLabel(rule)}`)) {
           return { reason: 'CONDITION_FALSE', detail: 'condition evaluated to false' };
         }
       } catch (error) {
+        if (error instanceof EngineLimitError) throw error;
         if (error instanceof DSLTimeoutError) {
           return { reason: 'CONDITION_TIMEOUT', detail: error.message };
         }
         const cause = error instanceof DSLEvaluationError ? error.originalError : error;
         return {
           reason: 'DSL_ERROR',
-          detail: cause instanceof Error ? cause.message : String(cause),
+          detail: clip(cause instanceof Error ? cause.message : String(cause)),
         };
       }
     }

@@ -7,6 +7,10 @@ import type { OutputValue } from '../types/output.js';
 import type { Rule } from '../types/rule.js';
 import { describeValue } from '../utils/json.js';
 import { describeThrown } from '../utils/values.js';
+import { EngineLimitError } from '../errors/EngineLimitError.js';
+import { clip } from '../utils/frozenCopy.js';
+import { defaultCrossing, readBounded } from '../engine/pluginBoundary.js';
+import type { Crossing } from '../engine/pluginBoundary.js';
 
 /** Why a `listVariables` is not taken as it is (D-39, D-1). */
 export interface ReadsProblem {
@@ -61,6 +65,7 @@ export function readsOf(
   rule: Rule,
   dsl: DSLEvaluator | undefined,
   model: CalculationModel<OutputValue> | undefined,
+  crossing: Crossing = defaultCrossing(),
 ): Reads {
   const label = `${rule.id}@${rule.version}`;
   const pointers = new Set<JsonPointer>();
@@ -69,17 +74,30 @@ export function readsOf(
   let declared = true;
 
   const problem = (kind: ReadsProblem['kind'], source: string, what: string): void => {
-    problems.push({ kind, message: `listVariables of ${source} for ${label} ${what}` });
+    problems.push({ kind, message: clip(`listVariables of ${source} for ${label} ${what}`) });
     declared = false;
   };
 
   const collect = (source: string, ask: () => unknown): void => {
     let items: unknown[];
     try {
-      const answer = ask();
+      // The answer crosses once, through the one reader: copied, bounded, its text weighed.
+      const raw = ask();
+      // The length is read once and capped before one item is read.
+      if (Array.isArray(raw)) {
+        const length = raw.length;
+        if (length > MAX_LISTED_POINTERS) {
+          throw new RangeError(`${length} pointers, more than the ${MAX_LISTED_POINTERS} allowed`);
+        }
+      }
+      const answer = readBounded(raw, crossing.limits, `listVariables of ${source}`, {
+        leafLimit: 'maxInputLeaves',
+        budget: crossing.budget,
+        budgetMode: 'text',
+      });
       // The contract is an array: an iterable, an array-like or a Set is not a list, and a lazy
       // one is never run. The length is read once and capped before any item is read.
-      if (!Array.isArray(answer)) throw new TypeError(`${describeValue(answer)} is not a list`);
+      if (!Array.isArray(answer)) throw new TypeError(`${describeValue(raw)} is not a list`);
       const length = answer.length;
       if (length > MAX_LISTED_POINTERS) {
         throw new RangeError(`${length} pointers, more than the ${MAX_LISTED_POINTERS} allowed`);
@@ -87,6 +105,8 @@ export function readsOf(
       items = [];
       for (let index = 0; index < length; index += 1) items.push(answer[index]);
     } catch (error) {
+      // A bound of the engine is not a plugin that failed: it is named, and it ends the evaluation.
+      if (error instanceof EngineLimitError) throw error;
       problem('failed', source, `failed: ${describeThrown(error)}`);
       return;
     }

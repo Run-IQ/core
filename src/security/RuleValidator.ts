@@ -1,5 +1,6 @@
 import { refusalsOf } from '../engine/pluginBoundary.js';
-import { ViewScope } from '../engine/frozenView.js';
+import { askValidateParams, defaultCrossing } from '../engine/pluginBoundary.js';
+import type { Crossing } from '../engine/pluginBoundary.js';
 import { EXCEPTION_MODEL, SpecError, verifyRuleChecksum } from '@run-iq/spec';
 import type { Rule } from '../types/rule.js';
 import type { SkippedRule } from '../types/result.js';
@@ -32,6 +33,7 @@ export class RuleValidator {
   constructor(
     private readonly modelRegistry: ModelRegistry,
     private readonly onChecksumMismatch: 'throw' | 'skip' = 'skip',
+    private readonly crossing: Crossing = defaultCrossing(),
   ) {}
 
   /**
@@ -99,19 +101,16 @@ export class RuleValidator {
     // in beforeEvaluate (e.g., meta-rules). ExecutionPipeline will skip them.
     if (rule.model !== EXCEPTION_MODEL && this.modelRegistry.has(rule.model)) {
       const model = this.modelRegistry.get(rule.model);
-      let validation: ReturnType<typeof model.validateParams>;
-      const scope = new ViewScope();
-      try {
-        validation = model.validateParams(scope.trapped(rule.params));
-      } catch (error) {
-        // A write into the params is that rule's error, named; any other throw is the model's.
-        if (!scope.isWriteError(error)) throw UnexpectedEngineError.foreign(error);
-        return { rule, reason: 'MODEL_ERROR', detail: error.message };
-      }
-      if (!validation.valid) {
-        const errors = validation.errors?.length
-          ? validation.errors.join('; ')
-          : 'the model gave no error';
+      // The result crosses the boundary once, through the one reader (see `askValidateParams`).
+      const verdict = askValidateParams(
+        model,
+        rule.params,
+        this.crossing,
+        UnexpectedEngineError.foreign,
+      );
+      if (verdict.kind === 'error') return { rule, reason: 'MODEL_ERROR', detail: verdict.detail };
+      if (verdict.kind === 'invalid') {
+        const errors = verdict.errors === '' ? 'the model gave no error' : verdict.errors;
         const detail = `Invalid params for rule ${ruleLabel(rule)} (model ${rule.model}): ${errors}`;
         return { rule, reason: 'INVALID_PARAMS', detail };
       }

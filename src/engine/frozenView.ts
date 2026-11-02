@@ -1,4 +1,5 @@
 import { isDateObject } from '../utils/plain.js';
+import { clip } from '../utils/frozenCopy.js';
 import { FrozenViewWriteError } from '../errors/FrozenViewWriteError.js';
 
 // The views the engine hands to models and DSLs. The engine's data is deep-frozen, so a write
@@ -33,7 +34,7 @@ export class ViewScope {
   }
 
   private refuse(key: string | symbol): never {
-    const error = new FrozenViewWriteError(typeof key === 'symbol' ? key.toString() : key);
+    const error = new FrozenViewWriteError(clip(typeof key === 'symbol' ? key.toString() : key));
     this.errors.add(error);
     throw error;
   }
