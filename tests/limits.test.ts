@@ -27,6 +27,7 @@ describe('DEFAULT_LIMITS', () => {
       maxRecursionDepth: 256,
       maxReferentialNodes: 100_000,
       maxGroupDepth: 64,
+      maxRuleLeaves: 100_000,
     });
     expect(Object.isFrozen(DEFAULT_LIMITS)).toBe(true);
   });

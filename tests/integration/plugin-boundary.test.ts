@@ -758,3 +758,67 @@ describe('survivors of the third review (R16) and the views', () => {
     expect(prepared.input.meta.tenantId).toBe('x');
   });
 });
+
+describe('maxRuleLeaves: the leaves of one rule', () => {
+  /** The leaves of a rule as the engine counts them. */
+  const leavesOfRule = (rule: Rule): number => {
+    const copier = new InputCopier({ ...resolveLimits(), maxInputLeaves: Number.MAX_SAFE_INTEGER });
+    copier.copy(rule, 'rule');
+    return copier.leaves;
+  };
+
+  it('a source rule of exactly the limit passes, one leaf more is refused with the limit', async () => {
+    const rule = tax();
+    const leaves = leavesOfRule(rule);
+    const ok = build([], { limits: { maxRuleLeaves: leaves } });
+    expect((await ok.engine.evaluate([rule], makeInput())).value).toBe(100);
+    const refused = build([], { limits: { maxRuleLeaves: leaves - 1 } });
+    const error = await failure(refused, [rule]);
+    expect(error).toBeInstanceOf(EngineLimitError);
+    expect(error).toMatchObject({ limit: 'maxRuleLeaves', max: leaves - 1, actual: leaves });
+  });
+
+  it('a rule a hook returns is held to the same limit', async () => {
+    const rule = tax();
+    const leaves = leavesOfRule(rule);
+    const built = build(
+      [pluginWith('h', { beforeEvaluate: (input) => ({ input, rules: [rule] }) })],
+      { limits: { maxRuleLeaves: leaves } },
+    );
+    expect(await failure(built, [rule])).toBeUndefined();
+    const bigger = { ...rule, params: { rate: 100, pad: [1] } } as Rule;
+    const built2 = build(
+      [pluginWith('h', { beforeEvaluate: (input) => ({ input, rules: [bigger] }) })],
+      { limits: { maxRuleLeaves: leaves } },
+    );
+    const error = (await failure(built2, [rule])) as PluginHookError;
+    expect(error).toBeInstanceOf(PluginHookError);
+    expect(error.cause).toMatchObject({ limit: 'maxRuleLeaves', max: leaves });
+  });
+
+  it('a skip a hook returns is held to it too', async () => {
+    const rule = tax();
+    const leaves = leavesOfRule(rule);
+    const built = build(
+      [
+        pluginWith('h', {
+          beforeEvaluate: (input, rules) => ({
+            input,
+            rules: [],
+            skipped: [{ rule: rules[0]!, reason: 'PLUGIN' as never }],
+          }),
+        }),
+      ],
+      { limits: { maxRuleLeaves: leaves } },
+    );
+    // The rule alone fits (it is a source rule); the skip holds it and its own `reason`.
+    const error = (await failure(built, [rule])) as PluginHookError;
+    expect(error.cause).toMatchObject({ limit: 'maxRuleLeaves' });
+  });
+
+  it('is refused at construction when it is not a positive integer', () => {
+    expect(
+      () => new PPEEngine({ plugins: [host], dsls: [], limits: { maxRuleLeaves: 0 } }),
+    ).toThrow(ValidationError);
+  });
+});

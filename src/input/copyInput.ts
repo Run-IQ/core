@@ -50,12 +50,20 @@ export class InputCopier {
   /** The properties that could not be read, in the order met. */
   readonly reasons: string[] = [];
 
-  constructor(private readonly limits: Readonly<EngineLimits>) {}
+  /**
+   * @param limits - the bounds.
+   * @param leafLimit - which limit holds the leaves: `maxInputLeaves` for the input,
+   * `maxRuleLeaves` for a rule.
+   */
+  constructor(
+    private readonly limits: Readonly<EngineLimits>,
+    private readonly leafLimit: 'maxInputLeaves' | 'maxRuleLeaves' = 'maxInputLeaves',
+  ) {}
 
   private leaf(): void {
     this.leaves += 1;
-    if (this.leaves > this.limits.maxInputLeaves) {
-      throw new EngineLimitError('maxInputLeaves', this.limits.maxInputLeaves, this.leaves);
+    if (this.leaves > this.limits[this.leafLimit]) {
+      throw new EngineLimitError(this.leafLimit, this.limits[this.leafLimit], this.leaves);
     }
   }
 

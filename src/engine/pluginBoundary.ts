@@ -33,25 +33,17 @@ export const PLUGIN_SKIP_REASONS: ReadonlySet<string> = new Set([
  * naming it (`<what>/a could not be read: ...`). Objects that are not plain are kept by
  * reference and never frozen: the caller of this function checks what may remain.
  */
-export function readBounded(value: unknown, limits: Readonly<EngineLimits>, what: string): unknown {
-  const copier = new InputCopier(limits);
+export function readBounded(
+  value: unknown,
+  limits: Readonly<EngineLimits>,
+  what: string,
+  leafLimit: 'maxInputLeaves' | 'maxRuleLeaves' = 'maxInputLeaves',
+): unknown {
+  const copier = new InputCopier(limits, leafLimit);
   const copy = copier.copy(value, what);
   if (copier.reasons.length > 0) throw new Error(copier.reasons.join('; '));
   return copy;
 }
-
-/**
- * The most leaves one rule (or one skip, which holds a rule) may have. A stated limit of the
- * engine, apart from the ten of `EngineLimits` (D-26 does not list one for rules): a rule is a
- * few dozen leaves, and the cost of reading all of them is bounded by `maxRules` times this.
- */
-export const MAX_RULE_LEAVES = 100_000;
-
-/** The limits a single rule is read with: its own leaf bound, the depth of `limits`. */
-const ruleLimits = (limits: Readonly<EngineLimits>): Readonly<EngineLimits> => ({
-  ...limits,
-  maxInputLeaves: MAX_RULE_LEAVES,
-});
 
 /**
  * The limits for reading the result an `afterEvaluate` returned: the size of the result it was
@@ -81,11 +73,10 @@ const RESULT_DEPTH = 16;
 
 /**
  * Reads a list a plugin returned (`rules`, `skipped`): its `length` once, at most `maxRules`
- * items, each item read once and bounded on its own (a list of 100 000 rules is not one tree).
+ * items, each item read once and bounded on its own by `maxRuleLeaves` and `maxInputDepth` (a list of 100 000 rules is not one tree).
  * Throws `Error` for a value that is not a list or has a hole, `EngineLimitError` past a bound.
  */
 export function readItems(value: unknown, limits: Readonly<EngineLimits>, what: string): unknown[] {
-  const bounds = ruleLimits(limits);
   if (!Array.isArray(value)) throw new TypeError(`${what} is not a list`);
   const length = value.length;
   if (!Number.isSafeInteger(length) || length < 0)
@@ -96,7 +87,7 @@ export function readItems(value: unknown, limits: Readonly<EngineLimits>, what: 
     if (!Object.hasOwn(value, index)) {
       throw new TypeError(`${what} has a hole at index ${index}: lists must be dense`);
     }
-    items.push(readBounded(value[index], bounds, `${what}/${index}`));
+    items.push(readBounded(value[index], limits, `${what}/${index}`, 'maxRuleLeaves'));
   }
   return items;
 }

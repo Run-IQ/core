@@ -45,7 +45,7 @@ Two cloud sessions work in parallel, **lane A** and **lane B**, with the machine
 - **Owner questions.** For a product, licence or irreversible choice, any publish, tag or release, any push to `master` or `main`, deleting a repository or another branch, a change to a repo the job does not name, or a budget choice: post `Cloud session (lane A): BLOCKED (owner decision) <why>` and wait.
 - **Waiting.** Never end the session while waiting: poll issue #1 and the PR every 2 minutes for a new comment whose body starts with `Machine session`, then keep only those tagged for your lane, `(all lanes)` or `DECISION`. Do not match on `Machine session:` alone, which misses tagged comments. Re-arm the watch when it expires.
 - **No footers.** No "Generated with", no `Co-Authored-By`, no signature line in commits, pull requests or comments. Tools that append one (`gh api`, some MCP create calls) must be followed by an edit that removes it, then checked.
-- **The owner is the sole author** of every commit: check `git config user.name` and `user.email` before the first commit of a session.
+- **The owner is the sole author** of every commit: check `git config user.name` and `user.email` before the first commit of a session. A commit with another author is never pushed. If one is made by mistake, stop and report it before pushing.
 - **Never:** push to `master` or `main`, publish a package, create or move a tag, create a repository, force-push, print or store a token.
 
 ## 4. Owner decisions

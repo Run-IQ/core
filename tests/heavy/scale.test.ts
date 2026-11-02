@@ -3,6 +3,8 @@ import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import { InputSanitizer } from '../../src/security/InputSanitizer.js';
 import { EngineLimitError } from '../../src/errors/EngineLimitError.js';
 import { DEFAULT_LIMITS } from '../../src/limits.js';
+import { InputCopier } from '../../src/input/copyInput.js';
+import type { Rule } from '../../src/types/rule.js';
 import { makeRule, makeInput, StubModel, StubPlugin } from '../helpers.js';
 
 // The scale tests of D-26: each default limit is held at its value, with a written budget. They
@@ -97,4 +99,40 @@ describe('maxInputDepth (128): the levels of the input', () => {
     expect(() => check(deep(DEFAULT_LIMITS.maxInputDepth))).not.toThrow();
     expect(() => check(deep(DEFAULT_LIMITS.maxInputDepth + 1))).toThrow(EngineLimitError);
   });
+});
+
+describe('maxRuleLeaves (100 000): the leaves of one rule', () => {
+  const padded = (extra: number): Rule => {
+    const rule = makeRule({ id: 'big', model: 'M' });
+    const copier = new InputCopier({
+      ...DEFAULT_LIMITS,
+      maxInputLeaves: Number.MAX_SAFE_INTEGER,
+      maxRuleLeaves: Number.MAX_SAFE_INTEGER,
+    });
+    copier.copy(rule, 'rule');
+    // `pad` is a list (one leaf) of scalars, replacing the empty `params` (one leaf): the rule then
+    // has base + items leaves.
+    const items = DEFAULT_LIMITS.maxRuleLeaves - copier.leaves + extra;
+    return makeRule({ id: 'big', model: 'M', params: { pad: new Array<number>(items).fill(1) } });
+  };
+  const engine = (): PPEEngine =>
+    new PPEEngine({
+      plugins: [new StubPlugin('p', [new StubModel('M', 1)])],
+      dsls: [],
+      strict: false,
+    });
+
+  it('reads and evaluates a rule of maxRuleLeaves leaves in under 3 s', async () => {
+    const rule = padded(0);
+    const start = performance.now();
+    const result = await engine().evaluate([rule], makeInput());
+    expect(performance.now() - start).toBeLessThan(3_000);
+    expect(result.appliedRules).toHaveLength(1);
+  }, 60_000);
+
+  it('refuses one leaf more, as soon as it is counted', async () => {
+    const error = await failureOf(() => engine().evaluate([padded(1)], makeInput()));
+    expect(error).toBeInstanceOf(EngineLimitError);
+    expect(error).toMatchObject({ limit: 'maxRuleLeaves', max: 100_000, actual: 100_001 });
+  }, 60_000);
 });
