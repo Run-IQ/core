@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { DEFAULT_OUTPUT_DECLARATION, EXCEPTION_MODEL } from '@run-iq/spec';
-import type { JsonValue, OutputDeclaration, ProofException, RuleException } from '@run-iq/spec';
+import type { JsonValue, OutputDeclaration, RuleException } from '@run-iq/spec';
 import { ExceptionProcessor } from '../../src/engine/ExceptionProcessor.js';
 import { ModelRegistry } from '../../src/registry/ModelRegistry.js';
 import { RuleConflictError } from '../../src/errors/RuleConflictError.js';
 import { ExceptionPrecedenceError } from '../../src/errors/ExceptionPrecedenceError.js';
-import type { ExceptionResult } from '../../src/engine/ExceptionProcessor.js';
+import type { ExceptionResult, UnsettledException } from '../../src/engine/ExceptionProcessor.js';
 import type { CalculationModel, ValidationResult } from '../../src/types/model.js';
 import type { Rule } from '../../src/types/rule.js';
 import { makeRule, StubModel, ValueModel } from '../helpers.js';
@@ -120,7 +120,7 @@ describe('ExceptionProcessor', () => {
       expect(result.skipped).toEqual([
         { rule: b, reason: 'INHIBITED', detail: 'inhibited by X@1' },
       ]);
-      const expected: ProofException[] = [
+      const expected: UnsettledException[] = [
         { ruleId: 'X', version: 1, kind: 'inhibit', affected: [{ ruleId: 'B' }] },
       ];
       expect(result.applied).toEqual(expected);
@@ -263,7 +263,13 @@ describe('ExceptionProcessor', () => {
           { rule: v, reason: 'SHORT_CIRCUITED', detail: 'output value short-circuited by SC@1' },
         ]);
         expect(expected.applied).toEqual([
-          { ruleId: 'SC', version: 1, kind: 'shortCircuit', affected: [{ ruleId: 'V' }] },
+          {
+            ruleId: 'SC',
+            version: 1,
+            kind: 'shortCircuit',
+            output: 'value',
+            affected: [{ ruleId: 'V' }],
+          },
         ]);
         for (const order of permutations([sc, i, v])) {
           const result = processor.apply(order, 'first');
@@ -360,7 +366,13 @@ describe('ExceptionProcessor', () => {
         ],
       ]);
       expect(result.applied).toEqual([
-        { ruleId: 'SC', version: 1, kind: 'shortCircuit', affected: [{ ruleId: 'K' }] },
+        {
+          ruleId: 'SC',
+          version: 1,
+          kind: 'shortCircuit',
+          output: 'value',
+          affected: [{ ruleId: 'K' }],
+        },
         { ruleId: 'S', version: 1, kind: 'substitute', affected: [{ ruleId: 'T' }] },
         { ruleId: 'K', version: 1, kind: 'inhibit', affected: [{ ruleId: 'W' }] },
         { ruleId: 'T', version: 1, kind: 'inhibit', affected: [{ ruleId: 'W2' }] },
@@ -571,7 +583,13 @@ describe('ExceptionProcessor', () => {
         ['riskLevel', { rule: sc, value: 'high', reason: 'blacklisted', declaration: RISK }],
       ]);
       expect(result.applied).toEqual([
-        { ruleId: 'SC', version: 1, kind: 'shortCircuit', affected: [{ ruleId: 'R1' }] },
+        {
+          ruleId: 'SC',
+          version: 1,
+          kind: 'shortCircuit',
+          output: 'riskLevel',
+          affected: [{ ruleId: 'R1' }],
+        },
       ]);
     });
 
@@ -585,7 +603,7 @@ describe('ExceptionProcessor', () => {
       });
       expect(Object.hasOwn(result.shortCircuits.get('value')!, 'reason')).toBe(false);
       expect(result.applied).toEqual([
-        { ruleId: 'SC', version: 1, kind: 'shortCircuit', affected: [] },
+        { ruleId: 'SC', version: 1, kind: 'shortCircuit', output: 'value', affected: [] },
       ]);
     });
 
@@ -626,8 +644,14 @@ describe('ExceptionProcessor', () => {
         },
       ]);
       expect(result.applied).toEqual([
-        { ruleId: 'SC-high', version: 1, kind: 'shortCircuit', affected: [{ ruleId: 'R1' }] },
-        { ruleId: 'SC-low', version: 1, kind: 'shortCircuit', affected: [] },
+        {
+          ruleId: 'SC-high',
+          version: 1,
+          kind: 'shortCircuit',
+          output: 'riskLevel',
+          affected: [{ ruleId: 'R1' }],
+        },
+        { ruleId: 'SC-low', version: 1, kind: 'shortCircuit', output: 'riskLevel', affected: [] },
       ]);
       expectInvariants([low, r1, high], result);
     });
@@ -661,7 +685,13 @@ describe('ExceptionProcessor', () => {
         },
       ]);
       expect(result.applied).toEqual([
-        { ruleId: 'SC', version: 1, kind: 'shortCircuit', affected: [{ ruleId: 'R1' }] },
+        {
+          ruleId: 'SC',
+          version: 1,
+          kind: 'shortCircuit',
+          output: 'riskLevel',
+          affected: [{ ruleId: 'R1' }],
+        },
         { ruleId: 'I', version: 1, kind: 'inhibit', affected: [{ ruleId: 'R1' }] },
       ]);
     });
@@ -715,7 +745,13 @@ describe('ExceptionProcessor', () => {
         },
       ]);
       expect(expected.applied).toEqual([
-        { ruleId: 'sc-a', version: 1, kind: 'shortCircuit', affected: [{ ruleId: 'R1' }] },
+        {
+          ruleId: 'sc-a',
+          version: 1,
+          kind: 'shortCircuit',
+          output: 'riskLevel',
+          affected: [{ ruleId: 'R1' }],
+        },
       ]);
       for (const order of permutations([a, b, r1, v])) {
         expect(processor.apply(order, 'first')).toEqual(expected);
@@ -820,6 +856,7 @@ describe('ExceptionProcessor', () => {
           ruleId: 'SC',
           version: 1,
           kind: 'shortCircuit',
+          output: 'riskLevel',
           affected: [{ ruleId: 'R1' }, { ruleId: 'R2' }],
         },
       ]);

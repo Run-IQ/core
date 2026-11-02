@@ -300,6 +300,8 @@ export class ExceptionProcessor {
           ruleId: rule.id,
           version: rule.version,
           kind: exception.kind,
+          // The output a short circuit targets, which spec's validateProof requires.
+          ...(exception.kind === 'shortCircuit' ? { output: exception.output } : {}),
           affected: sortedIds(affected).map((ruleId) => ({ ruleId })),
         });
       });
