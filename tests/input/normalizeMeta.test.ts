@@ -105,13 +105,14 @@ describe('normalizeMeta', () => {
 
   it('keeps the context and the assertions it was given', () => {
     const context = { note: 'x' };
-    const assertions = {
+    const assertions: NonNullable<Meta['assertions']> = {
       '/revenue/total': {
+        by: 'agent-1',
         method: 'declared',
+        at: '2026-01-01',
         status: 'validated',
-        source: { method: 'human', subject: 'agent-1' },
       },
-    } as unknown as NonNullable<Meta['assertions']>;
+    };
     const meta = normalizeMeta({ tenantId: 't', context, assertions });
     expect(meta.context).toEqual({ note: 'x' });
     expect(meta.assertions).toBe(assertions);
@@ -120,7 +121,7 @@ describe('normalizeMeta', () => {
   it('does not modify the meta of the caller, frozen or not', () => {
     const meta: Meta = {
       tenantId: 't',
-      tags: Object.freeze(['b', 'a', 'b']) as unknown as string[],
+      tags: Object.freeze(['b', 'a', 'b']),
       effectiveDate: new Date('2026-01-01T00:00:00Z'),
       dates: Object.freeze({ facture: '2025-01-01T01:00:00+01:00' }),
       dimensions: Object.freeze({ pays: Object.freeze(['US', 'FR', 'US']) }),
