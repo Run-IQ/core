@@ -1,4 +1,4 @@
-import type { OutputDeclaration } from '@run-iq/spec';
+import type { JsonPointer, OutputDeclaration } from '@run-iq/spec';
 import type { Rule } from './rule.js';
 import type { OutputValue } from './output.js';
 
@@ -46,4 +46,12 @@ export interface CalculationModel<V extends OutputValue = number> {
   ): V | CalculationOutput<V>;
 
   describeParams?(): Record<string, ParamDescriptor>;
+
+  /**
+   * The JSON pointers, into the evaluation context, of the facts the model reads for these
+   * `params` (`/revenue/total`; D-1), joined with those of the rule's condition by `readsOf`. A
+   * model that returns anything else, or throws, has its rule's reads treated as unknown (D-39);
+   * a model without it declares nothing.
+   */
+  listVariables?(params: unknown): JsonPointer[];
 }
