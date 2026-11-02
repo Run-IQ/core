@@ -305,21 +305,22 @@ describe('InputSanitizer', () => {
     });
 
     it('counts leaves as the input tree does: scalars, lists and empty objects, on every path', () => {
-      // 2 scalars + a list (1) holding 2 scalars + an empty object = 6 leaves, and meta.tenantId.
+      // Nodes: 4 keys (a, b, c, d); 2 scalars + a list (1) holding 2 scalars + an empty object =
+      // 6 leaves; and meta.tenantId, a key and a scalar: 12.
       const data = { a: 1, b: 'x', c: [true, null], d: {} };
-      expect(failure(data, { maxInputLeaves: 7 })).toBeUndefined();
-      const error = failure(data, { maxInputLeaves: 6 });
+      expect(failure(data, { maxInputLeaves: 12 })).toBeUndefined();
+      const error = failure(data, { maxInputLeaves: 11 });
       expect(error).toBeInstanceOf(EngineLimitError);
-      expect(error).toMatchObject({ limit: 'maxInputLeaves', max: 6, actual: 7 });
+      expect(error).toMatchObject({ limit: 'maxInputLeaves', max: 11, actual: 12 });
     });
 
     it('counts a shared object once per path, as the JSON text holds it', () => {
       const shared = { x: 1, y: 2 };
-      // 4 leaves, and meta.tenantId.
-      expect(failure({ p: shared, q: shared }, { maxInputLeaves: 5 })).toBeUndefined();
-      expect(failure({ p: shared, q: shared }, { maxInputLeaves: 4 })).toMatchObject({
+      // 2 + 4 keys and 4 leaves, and meta.tenantId (2): 12 nodes.
+      expect(failure({ p: shared, q: shared }, { maxInputLeaves: 12 })).toBeUndefined();
+      expect(failure({ p: shared, q: shared }, { maxInputLeaves: 11 })).toMatchObject({
         limit: 'maxInputLeaves',
-        actual: 5,
+        actual: 12,
       });
     });
 
@@ -335,28 +336,28 @@ describe('InputSanitizer', () => {
         }
         return undefined;
       };
-      // data holds 2 leaves, meta.context 2, tenantId 1: each part alone is under 4, the sum is 5.
+      // data holds 4 nodes, meta.context 5, tenantId 2: each part alone is under 10, the sum is 11.
       const meta = { context: { c: 1, d: 2 } };
-      expect(prepareWith(meta, 5)).toBeUndefined();
-      expect(prepareWith(meta, 4)).toMatchObject({
+      expect(prepareWith(meta, 11)).toBeUndefined();
+      expect(prepareWith(meta, 10)).toMatchObject({
         limit: 'maxInputLeaves',
-        max: 4,
-        actual: 5,
+        max: 10,
+        actual: 11,
       });
     });
 
     describe.each([
-      ['tags', { tags: ['a', 'b'] }, 3, { tags: [['a']] }, 2],
-      ['dates', { dates: { facture: '2025-01-01' } }, 1, { dates: { a: { b: 1 } } }, 2],
-      ['dimensions', { dimensions: { country: 'TG' } }, 1, { dimensions: { a: { b: 'x' } } }, 2],
+      ['tags', { tags: ['a', 'b'] }, 4, { tags: [['a']] }, 2],
+      ['dates', { dates: { facture: '2025-01-01' } }, 3, { dates: { a: { b: 1 } } }, 2],
+      ['dimensions', { dimensions: { country: 'TG' } }, 3, { dimensions: { a: { b: 'x' } } }, 2],
       [
         'assertions',
         { assertions: { '/a': { by: 'x' } } },
-        1,
+        4,
         { assertions: { a: { b: { c: 1 } } } },
         3,
       ],
-      ['context', { context: { k: 1 } }, 1, { context: { a: { b: 1 } } }, 2],
+      ['context', { context: { k: 1 } }, 3, { context: { a: { b: 1 } } }, 2],
     ] as const)('the part meta.%s is bounded', (_part, withLeaves, leaves, deep, levels) => {
       const prepareWith = (
         meta: Record<string, unknown>,
@@ -374,16 +375,16 @@ describe('InputSanitizer', () => {
       };
 
       it('counts its leaves', () => {
-        // The empty data object and tenantId are 2 leaves: the part's leaves bring the count to
-        // 2 + leaves.
-        const error = prepareWith(withLeaves, { maxInputLeaves: leaves + 1 });
+        // The empty data object and tenantId (key and scalar) are 3 nodes: the part's nodes bring
+        // the count to 3 + leaves.
+        const error = prepareWith(withLeaves, { maxInputLeaves: leaves + 2 });
         expect(error).toMatchObject({
           limit: 'maxInputLeaves',
-          max: leaves + 1,
-          actual: leaves + 2,
+          max: leaves + 2,
+          actual: leaves + 3,
         });
         // At the limit the walk accepts it: any other refusal is spec's, not the bound's.
-        expect(prepareWith(withLeaves, { maxInputLeaves: leaves + 2 })).not.toBeInstanceOf(
+        expect(prepareWith(withLeaves, { maxInputLeaves: leaves + 3 })).not.toBeInstanceOf(
           EngineLimitError,
         );
       });
@@ -545,8 +546,9 @@ describe('InputSanitizer', () => {
       });
 
       it('counts as a leaf: the bound is reached at exactly that leaf', () => {
-        // meta.tenantId is a leaf too: the bound of 2 holds g and tenantId, not a and g and it.
-        const limits = resolveLimits({ maxInputLeaves: 2 });
+        // meta.tenantId is two nodes too (key and scalar): the bound of 4 holds g (key and the
+        // unreadable leaf) and tenantId, not a and g and it.
+        const limits = resolveLimits({ maxInputLeaves: 4 });
         const unreadable = (data: Record<string, unknown>): unknown => {
           try {
             InputSanitizer.prepare({ requestId: 'r', data, meta: { tenantId: 't' } }, limits);
@@ -564,11 +566,12 @@ describe('InputSanitizer', () => {
           },
         });
         expect(unreadable(only)).toMatchObject({ reasons: ['/data/g could not be read: boom'] });
-        // a is the first leaf, g the second, tenantId the third: past the bound of 2.
+        // a (key and leaf) and g (key and leaf) are four nodes, tenantId's key the fifth: past the
+        // bound of 4.
         expect(unreadable(throwing())).toMatchObject({
           limit: 'maxInputLeaves',
-          max: 2,
-          actual: 3,
+          max: 4,
+          actual: 5,
         });
       });
 
@@ -600,15 +603,16 @@ describe('InputSanitizer', () => {
       };
 
       it('adds the leaves of data, of the context and of the tags: each under the limit, the sum over', () => {
-        const limits = { maxInputLeaves: 7 };
-        // data: 3 leaves; context: 3 leaves; tags: a list (1) and 2 items = 3 leaves.
+        const limits = { maxInputLeaves: 15 };
+        // data: 3 keys + 3 leaves = 6; context: its key + 3 keys + 3 leaves = 7; tags: its key + a
+        // list (1) and 2 items = 4; tenantId 2.
         const data = { a: 1, b: 2, c: 3 };
         const context = { x: 1, y: 2, z: 3 };
         expect(bounded(limits, data, { context })).toBeUndefined();
         expect(bounded(limits, data, { tags: ['p', 'q'] })).toBeUndefined();
         const error = bounded(limits, data, { context, tags: ['p', 'q'] });
         expect(error).toBeInstanceOf(EngineLimitError);
-        expect(error).toMatchObject({ limit: 'maxInputLeaves', max: 7, actual: 8 });
+        expect(error).toMatchObject({ limit: 'maxInputLeaves', max: 15, actual: 16 });
       });
 
       it.each([

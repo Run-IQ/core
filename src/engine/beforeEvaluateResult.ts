@@ -6,7 +6,7 @@ import type { SkippedRule } from '../types/result.js';
 import { describeValue, findNonJson } from '../utils/json.js';
 import { isObject } from '../utils/values.js';
 import { PLUGIN_SKIP_REASONS, readBounded, readItems, readSkips } from './pluginBoundary.js';
-import type { Budget } from './pluginBoundary.js';
+import type { Budget, OwnedRules } from './pluginBoundary.js';
 
 /** What the engine takes from a `beforeEvaluate` result, read once and checked. */
 export interface BeforeEvaluateReading {
@@ -43,6 +43,7 @@ export function readBeforeEvaluate(
   returned: BeforeEvaluateResult,
   limits: Readonly<EngineLimits>,
   budget: Budget,
+  owned: OwnedRules,
 ): BeforeEvaluateReading {
   const refuse = (what: string): TypeError =>
     new TypeError(`plugin ${pluginName} beforeEvaluate returned ${what}`);
@@ -57,13 +58,13 @@ export function readBeforeEvaluate(
   if (!isObject(input)) throw refuse('a malformed input');
 
   if (!Array.isArray(rulesIn)) throw refuse('a malformed rules');
-  const rules = readItems(rulesIn, limits, 'rules', budget);
+  const rules = readItems(rulesIn, limits, 'rules', budget, owned);
   if (!rules.every(isObject)) throw refuse('a malformed rules');
 
   if (skippedIn !== undefined && !Array.isArray(skippedIn)) throw refuse('a malformed skipped');
   let records: ReturnType<typeof readSkips>;
   try {
-    records = readSkips(skippedIn ?? [], limits, budget);
+    records = readSkips(skippedIn ?? [], limits, budget, owned);
   } catch (error) {
     if (error instanceof TypeError) throw refuse('a malformed skipped');
     throw error;

@@ -97,13 +97,13 @@ describe('the bounds of an evaluation (EngineLimits)', () => {
   });
 
   it('holds the input to maxInputLeaves', async () => {
-    // The leaves of data (3) and meta.tenantId.
-    const engine = engineWith(spyingPlugin(), { limits: { maxInputLeaves: 4 } });
+    // The nodes of data (3 keys and 3 scalars) and meta.tenantId (a key and a scalar): 8.
+    const engine = engineWith(spyingPlugin(), { limits: { maxInputLeaves: 8 } });
     await engine.evaluate(rules(1), makeInput({ data: { a: 1, b: 2, c: 3 } }));
     const error = await failureOf(() =>
       engine.evaluate(rules(1), makeInput({ data: { a: 1, b: 2, c: 3, d: 4 }, requestId: 'r2' })),
     );
-    expect(error).toMatchObject({ limit: 'maxInputLeaves', max: 4, actual: 5 });
+    expect(error).toMatchObject({ limit: 'maxInputLeaves', max: 8, actual: 9 });
   });
 
   describe('at construction', () => {

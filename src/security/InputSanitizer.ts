@@ -120,6 +120,8 @@ export class InputSanitizer {
     // prototype. The keys are the ones listed above, once.
     const metaCopy: Record<string, unknown> = {};
     for (const key of metaKeys) {
+      // Each key of `meta` is a node, as the keys of any object are.
+      copier.node();
       let member: unknown;
       try {
         member = meta[key];
@@ -138,6 +140,12 @@ export class InputSanitizer {
     const tenantId: unknown = metaCopy['tenantId'];
     if (typeof tenantId !== 'string' || tenantId.length === 0) {
       reasons.push('meta.tenantId must be a non-empty string');
+    }
+    // An empty `dimensions` declares nothing, like no `dimensions`, and the canonical form cannot
+    // tell them apart: the engine never guesses, so the caller omits it.
+    const declared: unknown = metaCopy['dimensions'];
+    if (isRecord(declared) && Object.keys(declared).length === 0) {
+      reasons.push('/meta/dimensions is empty: omit it to declare no dimensions');
     }
     if (copier.reasons.length > 0 || reasons.length > 0) {
       throw new ValidationError('Invalid evaluation input', [...reasons, ...copier.reasons]);

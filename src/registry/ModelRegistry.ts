@@ -1,4 +1,5 @@
 import type { CalculationModel } from '../types/model.js';
+import type { Rule } from '../types/rule.js';
 import type { OutputValue } from '../types/output.js';
 import { validateOutputDeclaration } from '@run-iq/spec';
 import { ModelNotFoundError } from '../errors/ModelNotFoundError.js';
@@ -46,12 +47,39 @@ export class ModelRegistry {
   }
 
   /**
-   * A registry fixed at this moment: a model registered or replaced later is not seen by it. An
-   * evaluation works on one, so that what its rules were validated against is what runs.
+   * A registry fixed at this moment: a model registered or replaced later is not seen by it, and
+   * neither is a change to a model object: the functions are taken now and called on the model
+   * as it is now. An evaluation works on one, so that what its rules were validated against is
+   * what runs.
    */
   snapshot(): ModelRegistry {
     const fixed = new ModelRegistry();
-    for (const [name, model] of this.models) fixed.models.set(name, model);
+    for (const [name, model] of this.models) fixed.models.set(name, fixModel(model));
     return fixed;
   }
+}
+
+/**
+ * A frozen record of `model` as it is now: its descriptors, and its functions taken once and
+ * bound, so that a later assignment to `model.calculate` (by any plugin holding the model) is not
+ * seen by the evaluation.
+ */
+function fixModel(model: CalculationModel<OutputValue>): CalculationModel<OutputValue> {
+  const { validateParams, calculate, listVariables, describeParams } = model;
+  return Object.freeze({
+    name: model.name,
+    version: model.version,
+    ...(model.output === undefined ? {} : { output: model.output }),
+    validateParams: (params: unknown) => validateParams.call(model, params),
+    calculate: (
+      input: Record<string, unknown>,
+      rule: Readonly<Rule>,
+      params: unknown,
+    ): ReturnType<CalculationModel<OutputValue>['calculate']> =>
+      calculate.call(model, input, rule, params),
+    ...(listVariables === undefined
+      ? {}
+      : { listVariables: (params: unknown) => listVariables.call(model, params) }),
+    ...(describeParams === undefined ? {} : { describeParams: () => describeParams.call(model) }),
+  });
 }

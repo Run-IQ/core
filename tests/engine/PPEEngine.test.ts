@@ -20,6 +20,7 @@ import {
   InMemorySnapshotAdapter,
   ValueModel,
   permutations,
+  expectSameFailure,
 } from '../helpers.js';
 import type { CalculationModel } from '../../src/types/model.js';
 import type { DSLEvaluator } from '../../src/types/dsl.js';
@@ -147,7 +148,8 @@ describe('PPEEngine', () => {
       hook: 'beforeEvaluate',
       message: 'plugin erroring beforeEvaluate failed: hook crash',
     });
-    expect(errorPlugin.errors).toEqual([error]);
+    expect(errorPlugin.errors).toHaveLength(1);
+    expectSameFailure(errorPlugin.errors[0], error);
   });
 
   it('applies native exceptions before evaluation and never evaluates an exception-only rule', async () => {

@@ -12,6 +12,7 @@ import { DuplicateRequestError } from '../errors/DuplicateRequestError.js';
 import { PipelineTimeoutError } from '../errors/PipelineTimeoutError.js';
 import { UnexpectedEngineError } from '../errors/UnexpectedEngineError.js';
 import { PluginHookError } from '../errors/PluginHookError.js';
+import type { PPEError } from '../errors/PPEError.js';
 import { ModelRegistry } from '../registry/ModelRegistry.js';
 import { PluginRegistry } from '../registry/PluginRegistry.js';
 import { DSLRegistry } from '../registry/DSLRegistry.js';
@@ -82,13 +83,21 @@ const ENGINE_VERSION = VERSION;
  */
 function checkEvaluateOptions(options: unknown): void {
   if (options === undefined) return;
-  if (options === null || typeof options !== 'object' || Array.isArray(options)) {
-    throw new ValidationError('Invalid evaluate options', ['evaluate options must be an object']);
-  }
   const reasons: string[] = [];
-  for (const name of Object.keys(options)) {
-    if (!(EVALUATE_OPTION_NAMES as readonly string[]).includes(name))
-      reasons.push(`unknown evaluate option: ${name}`);
+  try {
+    if (options === null || typeof options !== 'object' || Array.isArray(options)) {
+      throw new ValidationError('Invalid evaluate options', ['evaluate options must be an object']);
+    }
+    for (const name of Object.keys(options)) {
+      if (!(EVALUATE_OPTION_NAMES as readonly string[]).includes(name))
+        reasons.push(`unknown evaluate option: ${name}`);
+    }
+  } catch (error) {
+    if (error instanceof ValidationError) throw error;
+    // A revoked Proxy, a trap that throws: named, not raw.
+    throw new ValidationError('Invalid evaluate options', [
+      `options could not be read: ${describeThrown(error)}`,
+    ]);
   }
   if (reasons.length > 0) throw new ValidationError('Invalid evaluate options', reasons);
 }
@@ -205,7 +214,7 @@ export class PPEEngine {
       if (signal.aborted) throw error;
       // What the plugins are told is not writable: one plugin cannot rewrite the attribution (the
       // `plugin`, the `message`) of a failure that the caller then receives.
-      const told = Object.freeze(UnexpectedEngineError.wrap(error));
+      const told = frozenErrorCopy(UnexpectedEngineError.wrap(error)) as PPEError;
       for (const plugin of this.plugins) {
         if (!plugin.onError) continue;
         try {
@@ -224,14 +233,15 @@ export class PPEEngine {
    * `Date`s. A rule that cannot be read is a `ValidationError`; the caller's objects are never
    * frozen, read again, or handed to a plugin.
    */
-  private copySourceRules(rules: ReadonlyArray<Rule>): Rule[] {
+  private copySourceRules(rules: ReadonlyArray<Rule>, owned: WeakSet<object>): Rule[] {
     try {
       // justification: each item is a copy of a rule; the validator checks it as one.
       return readItems(
         rules,
         this.limits,
         'rules',
-        new Budget('maxHookLeaves', this.limits.maxHookLeaves),
+        new Budget('maxRuleSetNodes', this.limits.maxRuleSetNodes),
+        owned,
       ) as Rule[];
     } catch (error) {
       if (error instanceof EngineLimitError) throw error;
@@ -291,18 +301,21 @@ export class PPEEngine {
     const ruleValidator = new RuleValidator(models, this.onChecksumMismatch);
     const ruleFilter = new RuleFilter(dsls, this.sandbox);
     const exceptionProcessor = new ExceptionProcessor(models);
-    const executionPipeline = new ExecutionPipeline(models, this.conflictMode);
+    const executionPipeline = new ExecutionPipeline(models, this.conflictMode, this.limits);
 
     // Step 3: Rule validation (checksum of the source rules). The engine works on its own frozen
     // copies of the rules: the caller's objects are never handed to a hook, so a hook cannot
     // rewrite a rule in place, and a caller cannot change one while hooks are awaited.
-    const sourceCopies = this.copySourceRules(rules);
+    // The rules this evaluation owns: a set per evaluation, never shared with another evaluation
+    // or another engine (an object from elsewhere is untrusted data, copied and counted).
+    const owned: WeakSet<object> = new WeakSet();
+    const sourceCopies = this.copySourceRules(rules, owned);
     const initialValidation = ruleValidator.validate(sourceCopies);
     allSkipped.push(...initialValidation.invalid);
 
     // The ledger of the given rules: held by the engine alone, from here on. Hooks get views of
     // it and what they return is checked against it; a label refused here cannot come back.
-    const ledger = new RuleLedger(initialValidation.valid, sourceCopies.map(ruleLabel));
+    const ledger = new RuleLedger(initialValidation.valid, sourceCopies.map(ruleLabel), owned);
     let currentRules: ReadonlyArray<Rule> = ledger.current();
 
     // Step 4: Plugin beforeEvaluate hooks. Their diagnostics follow the engine's own ones.
@@ -311,6 +324,9 @@ export class PPEEngine {
     let currentInput = prepared.input;
     let currentMeta = prepared.meta;
     let currentDate = prepared.evaluationDate;
+    // All the nodes the returns of the hooks of this evaluation make the engine read count against
+    // one bound: three hooks cannot read three times as much.
+    const budget = new Budget('maxHookLeaves', this.limits.maxHookLeaves);
     for (const plugin of this.plugins) {
       const hook = plugin.beforeEvaluate;
       if (!hook) continue;
@@ -318,8 +334,6 @@ export class PPEEngine {
       let reading: BeforeEvaluateReading;
       let accepted: PreparedInput;
       let outcome: LedgerOutcome;
-      // All the leaves one return makes the engine read count against one bound.
-      const budget = new Budget('maxHookLeaves', this.limits.maxHookLeaves);
       try {
         // Read once and checked as a whole: nothing is committed unless every check passes.
         reading = readBeforeEvaluate(
@@ -332,6 +346,7 @@ export class PPEEngine {
           ),
           this.limits,
           budget,
+          owned,
         );
         // The input a hook returns is checked as the caller's was (bounds, spec, strict mode),
         // and it is the same request: the idempotence check and the record rest on these two.
@@ -351,7 +366,12 @@ export class PPEEngine {
         // doubled, dropped or invented.
         // The meta is the caller's declaration (the date, the named dates, the dimensions, the
         // tags): a hook may change the data, not what the caller declared.
-        if (!sameCanonical(currentMeta, accepted.meta)) {
+        // The exact shape: which keys are present, and their values (an absent `tags` and an empty
+        // one are different declarations), then the canonical form that the rules read.
+        if (
+          !sameCanonical(currentInput.meta, accepted.input.meta) ||
+          !sameCanonical(currentMeta, accepted.meta)
+        ) {
           throw new Error(`plugin ${plugin.name} changed meta, which only the caller declares`);
         }
         outcome = ledger.apply(plugin.name, reading, ruleValidator);
@@ -522,6 +542,35 @@ function countRules(rules: unknown): number {
   }
   // Not a list: `readItems` says so, as a `ValidationError`.
   return 0;
+}
+
+/**
+ * A deep, frozen copy of an error for a plugin that is told of it: its own properties, its `cause`
+ * chain and any list in it, copied, so that nothing a plugin writes reaches the error the caller
+ * receives. Bounded in depth, and safe on cycles.
+ */
+function frozenErrorCopy(value: unknown, depth = 0, seen = new Map<object, unknown>()): unknown {
+  if (typeof value !== 'object' || value === null) return value;
+  const known = seen.get(value);
+  if (known !== undefined) return known;
+  if (depth > 16) return '[too deep]';
+  try {
+    const copy: object = Array.isArray(value) ? [] : Object.create(Object.getPrototypeOf(value));
+    seen.set(value, copy);
+    for (const key of Reflect.ownKeys(value)) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(value, key);
+      if (descriptor === undefined || !('value' in descriptor)) continue;
+      Object.defineProperty(copy, key, {
+        value: frozenErrorCopy(descriptor.value, depth + 1, seen),
+        enumerable: descriptor.enumerable === true,
+        writable: false,
+        configurable: false,
+      });
+    }
+    return Object.freeze(copy);
+  } catch {
+    return '[unreadable]';
+  }
 }
 
 /** True when two canonical metas have the same canonical form (a value without one differs). */

@@ -12,6 +12,7 @@ import {
   StubDSL,
   ValueModel,
   InMemorySnapshotAdapter,
+  expectSameFailure,
 } from '../helpers.js';
 // Imported from the package entry: both errors are public.
 import {
@@ -226,7 +227,9 @@ describe('Hook errors', () => {
         (caught: unknown) => caught,
       );
     expect(onError).toHaveBeenCalledTimes(1);
-    expect(onError).toHaveBeenCalledWith(error, input);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expectSameFailure(onError.mock.calls[0]?.[0], error);
+    expect(onError.mock.calls[0]?.[1]).toBe(input);
     expect(error).toBeInstanceOf(PluginHookError);
     expect((error as PluginHookError).cause).toBe(thrown);
   });
@@ -624,7 +627,8 @@ describe('Hook timeouts and onError typing', () => {
       hook: 'beforeEvaluate',
       timeoutMs: 20,
     });
-    expect(onError).toHaveBeenCalledWith(error, expect.anything());
+    expect(onError).toHaveBeenCalledTimes(1);
+    expectSameFailure(onError.mock.calls[0]?.[0], error);
   });
 
   it('fails the evaluation for a non-PPEError hook error, keeping the original as cause', async () => {
@@ -640,7 +644,7 @@ describe('Hook timeouts and onError typing', () => {
     expect(error).toBeInstanceOf(PluginHookError);
     expect((error as PluginHookError).cause).toBe(thrown);
     // The PluginHookError is a PPEError: onError gets it as it is, not wrapped.
-    expect(onError.mock.calls[0]?.[0]).toBe(error);
+    expectSameFailure(onError.mock.calls[0]?.[0], error);
   });
 
   it('keeps a PPEError a hook throws as the cause of the PluginHookError', async () => {
@@ -655,7 +659,8 @@ describe('Hook timeouts and onError typing', () => {
     const error = await failure(engineWith([broken]), [makeRule({ id: 'r1', model: 'M' })]);
     expect(error).toBeInstanceOf(PluginHookError);
     expect((error as PluginHookError).cause).toBe(thrown);
-    expect(onError).toHaveBeenCalledWith(error, expect.anything());
+    expect(onError).toHaveBeenCalledTimes(1);
+    expectSameFailure(onError.mock.calls[0]?.[0], error);
   });
 
   it('gives onError a wrapped engine error while the caller gets the original', async () => {
@@ -681,6 +686,9 @@ describe('Hook timeouts and onError typing', () => {
     expect(onError).toHaveBeenCalledTimes(1);
     const error: unknown = onError.mock.calls[0]?.[0];
     expect(error).toBeInstanceOf(UnexpectedEngineError);
-    expect(error).toMatchObject({ code: 'UNEXPECTED', message: 'model crash', cause: thrown });
+    // A frozen copy: the cause is a copy of what was thrown, never the object the caller gets.
+    expect(error).toMatchObject({ code: 'UNEXPECTED', message: 'model crash' });
+    expect((error as { cause: unknown }).cause).not.toBe(thrown);
+    expect((error as { cause: Error }).cause.message).toBe('model crash');
   });
 });

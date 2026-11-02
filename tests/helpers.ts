@@ -1,3 +1,4 @@
+import { expect } from 'vitest';
 import { computeRuleChecksum } from '../src/utils/crypto.js';
 import type { Rule } from '../src/types/rule.js';
 import type { EvaluationInput } from '../src/types/input.js';
@@ -164,3 +165,24 @@ export const permutations = <T>(items: readonly T[]): T[][] =>
     : items.flatMap((item, i) =>
         permutations([...items.slice(0, i), ...items.slice(i + 1)]).map((rest) => [item, ...rest]),
       );
+
+/**
+ * What a plugin's `onError` is told is a deep-frozen copy of the failure the caller receives, never
+ * the same object: the same class, name, message, code, plugin and hook, and the same `cause` as
+ * far as it can be read.
+ */
+export function expectSameFailure(told: unknown, received: unknown): void {
+  expect(told).not.toBe(received);
+  expect(Object.isFrozen(told)).toBe(true);
+  const a = told as Record<string, unknown>;
+  const b = received as Record<string, unknown>;
+  expect(Object.getPrototypeOf(a)).toBe(Object.getPrototypeOf(b));
+  for (const key of ['name', 'message', 'code', 'plugin', 'hook']) expect(a[key]).toEqual(b[key]);
+  const ca = a['cause'] as { message?: unknown; name?: unknown } | undefined;
+  const cb = b['cause'] as { message?: unknown; name?: unknown } | undefined;
+  if (typeof cb === 'object' && cb !== null && typeof ca !== 'string') {
+    expect(typeof ca).toBe('object');
+    expect(ca?.message).toEqual(cb.message);
+    expect(ca?.name).toEqual(cb.name);
+  }
+}

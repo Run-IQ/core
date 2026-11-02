@@ -5,7 +5,14 @@ import type { UnsealedResult } from '../../src/types/result.js';
 import type { DSLEvaluator } from '../../src/types/dsl.js';
 import type { PPEEngineConfig } from '../../src/engine/PPEEngine.js';
 import { PipelineTimeoutError, PluginHookError } from '../../src/index.js';
-import { makeRule, makeInput, StubModel, StubDSL, InMemorySnapshotAdapter } from '../helpers.js';
+import {
+  makeRule,
+  makeInput,
+  StubModel,
+  StubDSL,
+  InMemorySnapshotAdapter,
+  expectSameFailure,
+} from '../helpers.js';
 
 // These plugins break the hook contract on purpose, the way untyped JavaScript plugins can.
 
@@ -93,7 +100,7 @@ describe('hostile thrown values', () => {
         // Compared by identity: printing or deep-comparing a hostile proxy would throw.
         expect(error instanceof PluginHookError && error.cause === value).toBe(true);
         expect(onError).toHaveBeenCalledTimes(1);
-        expect(onError.mock.calls[0]?.[0]).toBe(error);
+        expectSameFailure(onError.mock.calls[0]?.[0], error);
       });
     }
   }
@@ -159,7 +166,7 @@ describe('hostile beforeEvaluate results', () => {
         message === 'state getter' ? message : `plugin bad beforeEvaluate ${message}`;
       expect((error as PluginHookError).cause).toMatchObject({ message: expected });
       expect(onError).toHaveBeenCalledTimes(1);
-      expect(onError.mock.calls[0]?.[0]).toBe(error);
+      expectSameFailure(onError.mock.calls[0]?.[0], error);
     });
   }
 

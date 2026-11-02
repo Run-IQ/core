@@ -1,3 +1,4 @@
+import { DEFAULT_LIMITS } from '../../src/limits.js';
 import { describe, it, expect } from 'vitest';
 import { EXCEPTION_MODEL } from '@run-iq/spec';
 import type { JsonValue, OutputDeclaration } from '@run-iq/spec';
@@ -22,7 +23,7 @@ const NONE: ReadonlyMap<string, ShortCircuit> = new Map();
 function pipelineWith(...models: CalculationModel<OutputValue>[]): ExecutionPipeline {
   const registry = new ModelRegistry();
   for (const model of models) registry.register(model);
-  return new ExecutionPipeline(registry, 'throw');
+  return new ExecutionPipeline(registry, 'throw', DEFAULT_LIMITS);
 }
 
 describe('ExecutionPipeline', () => {

@@ -8,7 +8,13 @@ import { ValidationError } from '../../src/errors/ValidationError.js';
 import type { PPEPlugin, PluginContext } from '../../src/types/plugin.js';
 import type { PPEError } from '../../src/errors/PPEError.js';
 import type { Rule } from '../../src/types/rule.js';
-import { makeRule, makeInput, StubModel, InMemorySnapshotAdapter } from '../helpers.js';
+import {
+  makeRule,
+  makeInput,
+  StubModel,
+  InMemorySnapshotAdapter,
+  expectSameFailure,
+} from '../helpers.js';
 
 // Fail closed: a decision is never returned when it was computed without the preparation a
 // plugin was supposed to do. Every failure of a hook is a PluginHookError; onError is called on
@@ -83,8 +89,10 @@ async function expectHookFailure(
   const hookError = error as PluginHookError;
   expect(hookError).toMatchObject({ code: 'PLUGIN_HOOK', plugin: 'bad', hook });
   check(hookError.cause);
-  expect(setupResult.told['bad']).toEqual([hookError]);
-  expect(setupResult.told['witness']).toEqual([hookError]);
+  for (const name of ['bad', 'witness']) {
+    expect(setupResult.told[name]).toHaveLength(1);
+    expectSameFailure(setupResult.told[name]?.[0], hookError);
+  }
   expect(await setupResult.adapter.exists(input.requestId)).toBe(false);
   return hookError;
 }

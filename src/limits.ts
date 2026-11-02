@@ -2,9 +2,13 @@ import { ValidationError } from './errors/ValidationError.js';
 
 /**
  * The bounds of one evaluation (D-26). Passing one throws `EngineLimitError`. In 9L, `maxRules`,
- * `maxInputLeaves`, `maxInputDepth` and `maxRuleLeaves` are enforced; the others are held here for the tasks that
- * need them (collections, strata, segments, recursion, referentials, groups), and nothing reads
- * them yet.
+ * `maxInputLeaves`, `maxInputDepth`, `maxRuleLeaves`, `maxHookLeaves` and `maxRuleSetNodes` are
+ * enforced; the others are held here for the tasks that need them (collections, strata,
+ * segments, recursion, referentials, groups), and nothing reads them yet.
+ *
+ * The size limits count **nodes**: each key of an object, each element of a list and each scalar
+ * (a list and an empty object count one too). An object of 1 000 keys with a scalar each is 2 000
+ * nodes. Their names say "leaves" for historical reasons (D-15).
  */
 export interface EngineLimits {
   /** Rules given to one `evaluate`. */
@@ -13,7 +17,7 @@ export interface EngineLimits {
   maxInstances: number;
   /** Elements of one collection. */
   maxCollectionLength: number;
-  /** Leaves of the input tree (D-15): scalars, lists and empty objects, on every path. */
+  /** Nodes of the input tree (D-15), on every path: keys, elements, scalars, lists, empty objects. */
   maxInputLeaves: number;
   /**
    * Levels of containers with members, in `data` and in each member of `meta` (`context`, `tags`,
@@ -37,16 +41,22 @@ export interface EngineLimits {
    */
   maxRuleLeaves: number;
   /**
-   * Leaves read, in total, from one list of rules or from one return of a hook (its rules, skips,
-   * state and data together). A hook cannot make the engine read more, however many rules it
-   * repeats or how big they are.
+   * Nodes read, in total, from the returns of all the hooks of one evaluation (rules, skips, state
+   * and data together). A hook cannot make the engine read more, however many rules it repeats or
+   * how big they are, and three hooks cannot read three times as much.
    */
   maxHookLeaves: number;
+  /**
+   * Nodes of all the rules of one evaluation given by the caller, together: so that
+   * `maxRules` rules of `maxRuleLeaves` nodes each cannot break the budget of the evaluation.
+   */
+  maxRuleSetNodes: number;
 }
 
 /**
  * The defaults, lowered and completed by the pre-flight (I20, I30). In 9L, `maxRules`,
- * `maxInputLeaves` and `maxRuleLeaves` are held by a scale test at their value, with a written budget (D-26);
+ * `maxInputLeaves`, `maxRuleLeaves`, `maxHookLeaves` and `maxRuleSetNodes` are held by a scale
+ * test at their value, with a written budget, on the costliest shape (wide objects) (D-26);
  * `maxInputDepth` is enforced and tested at its value, without a budget. The seven others are
  * inert: the tasks that enforce them add their scale test (9H1, 9K1 and 9R1 per D-26).
  */
@@ -62,7 +72,8 @@ export const DEFAULT_LIMITS: Readonly<EngineLimits> = Object.freeze({
   maxReferentialNodes: 100_000,
   maxGroupDepth: 64,
   maxRuleLeaves: 100_000,
-  maxHookLeaves: 8_000_000,
+  maxHookLeaves: 3_000_000,
+  maxRuleSetNodes: 3_500_000,
 });
 
 /** The limits a caller may give: any of them, or `undefined` for the default. */

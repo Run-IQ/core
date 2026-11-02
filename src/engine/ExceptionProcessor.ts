@@ -1,4 +1,4 @@
-import { trapped } from './frozenView.js';
+import { isViewWriteError, trapped } from './frozenView.js';
 import {
   DEFAULT_OUTPUT,
   DEFAULT_OUTPUT_DECLARATION,
@@ -274,8 +274,8 @@ export class ExceptionProcessor {
         const by = [...new Set(patches.map((p) => ruleLabel(p.carrier)))].join(', ');
         final.set(target, {
           rule: target,
-          reason: 'INVALID_PARAMS',
-          detail: `after substitution by ${by}: ${refusal}`,
+          reason: refusal.reason,
+          detail: `after substitution by ${by}: ${refusal.detail}`,
         });
         continue;
       }
@@ -420,14 +420,27 @@ export class ExceptionProcessor {
   }
 
   /** Why the rule's model refuses `params`, or `undefined` if it accepts them or is unknown. */
-  private refuseParams(rule: Rule, params: unknown): string | undefined {
+  private refuseParams(
+    rule: Rule,
+    params: unknown,
+  ): { reason: 'INVALID_PARAMS' | 'MODEL_ERROR'; detail: string } | undefined {
     if (!this.models.has(rule.model)) return undefined;
     const model = this.models.get(rule.model);
-    const validation = model.validateParams(trapped(params));
+    let validation: ReturnType<typeof model.validateParams>;
+    try {
+      validation = model.validateParams(trapped(params));
+    } catch (error) {
+      // A write into the params: the model's own fault, named. The target is refused for it.
+      if (!isViewWriteError(error)) throw error;
+      return { reason: 'MODEL_ERROR', detail: error.message };
+    }
     if (validation.valid) return undefined;
-    return validation.errors?.length
-      ? validation.errors.join('; ')
-      : `params refused by model ${model.name}`;
+    return {
+      reason: 'INVALID_PARAMS',
+      detail: validation.errors?.length
+        ? validation.errors.join('; ')
+        : `params refused by model ${model.name}`,
+    };
   }
 }
 

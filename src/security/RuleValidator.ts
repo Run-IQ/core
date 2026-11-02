@@ -1,5 +1,5 @@
-import { trapped } from '../engine/frozenView.js';
-import { FrozenViewWriteError } from '../errors/FrozenViewWriteError.js';
+import { refusalsOf } from '../engine/pluginBoundary.js';
+import { isViewWriteError, trapped } from '../engine/frozenView.js';
 import { EXCEPTION_MODEL, SpecError, verifyRuleChecksum } from '@run-iq/spec';
 import type { Rule } from '../types/rule.js';
 import type { SkippedRule } from '../types/result.js';
@@ -58,6 +58,17 @@ export class RuleValidator {
   }
 
   private checkRule(rule: Rule): SkippedRule | null {
+    // 0. An object inside the rule was not plain when it was read: the rule is excluded for it,
+    // naming where. What stands in the copy is a string, never an object the caller made up.
+    const refusals = refusalsOf(rule);
+    if (refusals !== undefined) {
+      return {
+        rule,
+        reason: 'INVALID_RULE',
+        detail: `Invalid rule ${ruleLabel(rule)}: ${refusals.join('; ')}`,
+      };
+    }
+
     // 1. Verify checksum (full rule integrity)
     let intact: boolean;
     try {
@@ -92,7 +103,7 @@ export class RuleValidator {
         validation = model.validateParams(trapped(rule.params));
       } catch (error) {
         // A write into the params is that rule's error, named; any other throw is the model's.
-        if (!(error instanceof FrozenViewWriteError)) throw error;
+        if (!isViewWriteError(error)) throw error;
         return { rule, reason: 'MODEL_ERROR', detail: error.message };
       }
       if (!validation.valid) {

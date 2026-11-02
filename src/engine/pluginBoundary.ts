@@ -7,7 +7,7 @@ import { InputCopier } from '../input/copyInput.js';
 import type { RuleValidator } from '../security/RuleValidator.js';
 import { compareRuleIdentity } from './resolveTie.js';
 import { ruleLabel } from '../utils/values.js';
-import { NotPlain, isDateObject, isPlainPrototype } from '../utils/plain.js';
+import { isPlainPrototype } from '../utils/plain.js';
 
 // The plugin trust boundary, in one place. The engine owns its state; a plugin is handed views of
 // it and never the objects the engine holds; what a plugin returns is read once, bounded, copied
@@ -27,18 +27,30 @@ export const PLUGIN_SKIP_REASONS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The rule objects the engine holds. They are deep-frozen, hold no `Date` and no object that is
+ * The rule objects one evaluation of one engine holds (a set per evaluation, never shared: an
+ * object from another engine or another evaluation is untrusted data, copied and counted). They are deep-frozen, hold no `Date` and no object that is
  * not plain, so nobody can change them: they are handed to hooks as they are, and a hook that
  * returns one of them returns the engine's own object (nothing to copy or to check again).
  */
-const ENGINE_RULES = new WeakSet<object>();
+export type OwnedRules = WeakSet<object>;
+
+/**
+ * The refusals a rule was read with (an object inside it that is not plain), by rule: the rule is
+ * excluded for them (`INVALID_RULE`), and what stands in the copy is a string, never an object.
+ */
+const REFUSALS = new WeakMap<object, readonly string[]>();
+
+/** What the rule was refused for when it was read, if anything (`/params/b is not a plain object: Box`). */
+export function refusalsOf(rule: object): readonly string[] | undefined {
+  return REFUSALS.get(rule);
+}
 
 /** The leaves read from one list or one return, against one declared limit. */
 export class Budget {
   leaves = 0;
 
   constructor(
-    private readonly name: 'maxHookLeaves' | 'maxInputLeaves',
+    private readonly name: 'maxHookLeaves' | 'maxInputLeaves' | 'maxRuleSetNodes',
     private readonly max: number,
   ) {}
 
@@ -57,6 +69,8 @@ export interface ReadOptions {
   readonly budget?: Budget;
   /** Write every `Date` as its canonical string (a rule holds none). */
   readonly datesAsStrings?: boolean;
+  /** A rule is read: an object that is not plain is refused for that rule, not placed as a marker. */
+  readonly ruleMode?: boolean;
 }
 
 /**
@@ -78,10 +92,21 @@ export function readBounded(
     limits,
     options.leafLimit ?? 'maxInputLeaves',
     options.datesAsStrings ?? false,
+    options.ruleMode ?? false,
   );
   try {
     const copy = copier.copy(value, what);
     if (copier.reasons.length > 0) throw new Error(copier.reasons.join('; '));
+    if (copier.refusals.length > 0) {
+      // A rule that is itself not plain is a hard refusal; a member of it excludes the rule.
+      if (typeof copy !== 'object' || copy === null) throw new TypeError(copier.refusals[0]);
+      REFUSALS.set(
+        copy,
+        copier.refusals.map((refusal) =>
+          refusal.startsWith(what) ? refusal.slice(what.length) : refusal,
+        ),
+      );
+    }
     return copy;
   } finally {
     options.budget?.add(copier.leaves);
@@ -126,6 +151,7 @@ export function readItems(
   limits: Readonly<EngineLimits>,
   what: string,
   budget: Budget,
+  owned: OwnedRules,
 ): unknown[] {
   if (!Array.isArray(value)) throw new TypeError(`${what} is not a list`);
   const length = value.length;
@@ -138,7 +164,7 @@ export function readItems(
       throw new TypeError(`${what} has a hole at index ${index}: lists must be dense`);
     }
     const item: unknown = value[index];
-    if (typeof item === 'object' && item !== null && ENGINE_RULES.has(item)) {
+    if (typeof item === 'object' && item !== null && owned.has(item)) {
       items.push(item);
       continue;
     }
@@ -147,6 +173,7 @@ export function readItems(
         leafLimit: 'maxRuleLeaves',
         budget,
         datesAsStrings: true,
+        ruleMode: true,
       }),
     );
   }
@@ -163,6 +190,7 @@ export function readSkips(
   value: unknown,
   limits: Readonly<EngineLimits>,
   budget: Budget,
+  owned: OwnedRules,
 ): { rule: unknown; reason: unknown; detail: unknown }[] {
   if (!Array.isArray(value)) throw new TypeError('skipped is not a list');
   const length = value.length;
@@ -191,46 +219,19 @@ export function readSkips(
     const rule = record['rule'];
     skips.push({
       rule:
-        typeof rule === 'object' && rule !== null && ENGINE_RULES.has(rule)
+        typeof rule === 'object' && rule !== null && owned.has(rule)
           ? rule
           : readBounded(rule, limits, `skipped/${index}/rule`, {
               leafLimit: 'maxRuleLeaves',
               budget,
               datesAsStrings: true,
+              ruleMode: true,
             }),
       reason: record['reason'],
       detail: record['detail'],
     });
   }
   return skips;
-}
-
-/**
- * A fresh, frozen copy of `value` for a view: containers are new and frozen, a `Date` is a new
- * `Date`, and anything the engine owns (a rule) is returned as it is. Nothing that is not plain is
- * kept: it is replaced by a marker. Recursion is bounded by the depth the data was read with.
- */
-// justification: every `as T` below returns a copy of the same shape as the argument.
-export function frozenCopyOf<T>(value: T): T {
-  if (typeof value !== 'object' || value === null) return value;
-  if (ENGINE_RULES.has(value)) return value;
-  // justification: `isDateObject` passed, so `getTime` returns a number.
-  if (isDateObject(value)) return new Date(Date.prototype.getTime.call(value) as number) as T;
-  if (Array.isArray(value)) {
-    return Object.freeze(value.map((item: unknown) => frozenCopyOf(item))) as T;
-  }
-  const proto: unknown = Object.getPrototypeOf(value);
-  if (!isPlainPrototype(proto)) return new NotPlain('an object') as T;
-  const copy: Record<string, unknown> = proto === null ? Object.create(null) : {};
-  for (const [key, item] of Object.entries(value)) {
-    Object.defineProperty(copy, key, {
-      value: frozenCopyOf(item),
-      enumerable: true,
-      writable: true,
-      configurable: true,
-    });
-  }
-  return Object.freeze(copy) as T;
 }
 
 /** True when the checksum of `rule` is the checksum of its content; false when spec cannot tell. */
@@ -278,14 +279,16 @@ export interface ReturnedRules {
 export class RuleLedger {
   private live: Entry[];
   private readonly everSeen: Set<string>;
+  private readonly owned: OwnedRules;
 
   /**
    * @param rules - the source rules that passed validation (the engine's copies).
    * @param seen - the labels of every source rule, valid or not.
    */
-  constructor(rules: ReadonlyArray<Rule>, seen: Iterable<string>) {
+  constructor(rules: ReadonlyArray<Rule>, seen: Iterable<string>, owned: OwnedRules) {
+    this.owned = owned;
     this.live = rules.map((rule) => {
-      ENGINE_RULES.add(rule);
+      owned.add(rule);
       return { rule, label: ruleLabel(rule), checksum: String(rule.checksum) };
     });
     this.everSeen = new Set(seen);
@@ -380,7 +383,7 @@ export class RuleLedger {
       const entry = take(rule);
       if (entry !== undefined) {
         // The engine's own object is frozen and cannot have changed; a copy is checked.
-        if (!ENGINE_RULES.has(rule) && !intact(rule)) {
+        if (!this.owned.has(rule) && !intact(rule)) {
           fail(`rewrote rule ${label}: its content is not the one it was given`);
         }
         used.add(entry);
@@ -410,7 +413,7 @@ export class RuleLedger {
       const label = ruleLabel(skip.rule);
       if (!byLabel.has(label)) fail(`skipped rule ${label}, which it was not given`);
       const entry = take(skip.rule);
-      if (entry === undefined || (!ENGINE_RULES.has(skip.rule) && !intact(skip.rule))) {
+      if (entry === undefined || (!this.owned.has(skip.rule) && !intact(skip.rule))) {
         fail(`skipped rule ${label} with a content other than the one it was given`);
       }
       // justification: the `if` above throws when `entry` is `undefined`.
@@ -434,7 +437,7 @@ export class RuleLedger {
     // Committed only now: every check passed.
     for (const label of added.keys()) this.everSeen.add(label);
     const addedRules = [...added.values()];
-    for (const rule of addedRules) ENGINE_RULES.add(rule);
+    for (const rule of addedRules) this.owned.add(rule);
     this.live = [
       ...this.live.filter((entry) => kept.has(entry)),
       ...addedRules.map((rule) => ({

@@ -47,7 +47,7 @@ export interface CalculationModel<V extends OutputValue = number> {
    * evaluation: the rule is excluded with the reason `MODEL_ERROR` and the detail `wrote to its
    * input: <key>`. The same holds for `validateParams`. Any other throw, a `TypeError` of the
    * model's own included, is the model's and fails the evaluation. What the model returns is
-   * copied. A view cannot be passed to `structuredClone`: copy the part you need first.
+   * copied. A view cannot be passed to `structuredClone`: copy the part you need first. `Object.freeze` and `Object.preventExtensions` on a view are not writes. Only an error a view threw counts as a refused write: a model that throws a `FrozenViewWriteError` of its own fails the evaluation.
    */
   calculate(
     input: Record<string, unknown>,

@@ -51,6 +51,8 @@ export class InputCopier {
   leaves = 0;
   /** The properties that could not be read, in the order met. */
   readonly reasons: string[] = [];
+  /** In rule mode, the objects that are not plain: `<pointer> is not a plain object: Kind`. */
+  readonly refusals: string[] = [];
 
   /**
    * @param limits - the bounds.
@@ -65,6 +67,12 @@ export class InputCopier {
      * engine then holds no `Date` object that anybody could move.
      */
     private readonly datesAsStrings = false,
+    /**
+     * A rule is read: an object that is not plain is not placed as a marker but written as the
+     * string `<not plain: Kind>`, and named in `refusals` with its pointer, so that the rule is
+     * excluded for it and nothing but plain data reaches the record.
+     */
+    private readonly ruleMode = false,
   ) {}
 
   private leaf(): void {
@@ -81,6 +89,11 @@ export class InputCopier {
       if (f.key !== undefined) segments.unshift(escapeSegment(String(f.key)));
     }
     return `${rootPointer}/${segments.join('/')}`;
+  }
+
+  /** Counts one node: a key of an object the caller walks itself (the members of `meta`). */
+  node(): void {
+    this.leaf();
   }
 
   /** Names a property that cannot be read, and counts it as a leaf. */
@@ -155,6 +168,10 @@ export class InputCopier {
                 }
               }
               put(parent, key, copy);
+            } else if (this.ruleMode) {
+              const kind = describeKind(prototype);
+              this.refusals.push(`${at()} is not a plain object: ${kind}`);
+              put(parent, key, `<not plain: ${kind}>`);
             } else {
               put(parent, key, new NotPlain(describeKind(prototype)));
             }
@@ -221,6 +238,9 @@ export class InputCopier {
         this.unreadable(this.pointer(rootPointer, frame, memberKey), error);
         continue;
       }
+      // An object key is a node of its own, as a scalar and a list element are: a wide object
+      // costs what it holds, not only its values.
+      if (frame.keys !== undefined) this.leaf();
       place(member, frame.depth + 1, frame, memberKey);
     }
     return top.value;

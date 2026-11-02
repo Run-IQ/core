@@ -338,15 +338,15 @@ describe('S3: the total a hook can make the engine read is bounded', () => {
     expect(Date.now() - started).toBeLessThan(3000);
   });
 
-  it('D3: source rules sharing one big params are held to the same aggregate', async () => {
+  it('D3: source rules sharing one big params are held to maxRuleSetNodes', async () => {
     const pad = new Array<number>(50_000).fill(1);
     const rules = Array.from({ length: 20 }, (_, i) =>
       makeRule({ id: `r${i}`, model: 'M', params: { pad } }),
     );
-    const built = build([], { limits: { maxHookLeaves: 200_000 } });
+    const built = build([], { limits: { maxRuleSetNodes: 200_000 } });
     const started = Date.now();
     const error = await failure(built, rules);
-    expect(error).toMatchObject({ limit: 'maxHookLeaves', max: 200_000 });
+    expect(error).toMatchObject({ limit: 'maxRuleSetNodes', max: 200_000 });
     expect(Date.now() - started).toBeLessThan(3000);
   });
 
@@ -921,14 +921,14 @@ describe('the rest of the survivors of the fourth review', () => {
 });
 
 describe('the view handed to afterEvaluate is stable', () => {
-  it('reading the same member twice gives the same object, a Date included', async () => {
+  it('reading the same member twice gives the same object; a Date is a fresh copy at each read', async () => {
     const seen: boolean[] = [];
     const built = build([
       pluginWith('h', {
         afterEvaluate: (_input, result) => {
           seen.push(result.appliedRules === result.appliedRules);
           seen.push(result.appliedRules[0] === result.appliedRules[0]);
-          seen.push(result.timestamp === result.timestamp);
+          seen.push(result.timestamp !== result.timestamp);
           return result;
         },
       }),

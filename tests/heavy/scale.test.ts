@@ -51,31 +51,26 @@ describe('maxRules (100 000): the rules of one evaluation', () => {
   });
 });
 
-describe('maxInputLeaves (500 000): the leaves of the input tree', () => {
-  /** `count` scalar leaves under groups of 1000 (the last group holds the rest). */
-  const leavesOf = (count: number): Record<string, unknown> => {
+describe('maxInputLeaves (500 000): the nodes of the input tree', () => {
+  /** `entries` keys with a scalar each under one object: 2 nodes each, the costliest shape. */
+  const entriesOf = (entries: number): Record<string, unknown> => {
     const data: Record<string, unknown> = {};
-    for (let group = 0; group * 1000 < count; group++) {
-      const row: Record<string, unknown> = {};
-      for (let key = 0; key < Math.min(1000, count - group * 1000); key++) row[`k${key}`] = key;
-      data[`g${group}`] = row;
-    }
+    for (let i = 0; i < entries; i += 1) data[`k${i}`] = i;
     return data;
   };
   const sanitize = (data: Record<string, unknown>): void =>
     InputSanitizer.validate({ requestId: 'r', data, meta: { tenantId: 't' } });
 
-  // meta.tenantId is a leaf of the input too: data holds one less.
-  it('normalizes and checks an input of maxInputLeaves leaves in under 3 s', () => {
-    const data = leavesOf(DEFAULT_LIMITS.maxInputLeaves - 1);
+  // meta.tenantId is a key and a scalar too: data holds two nodes less.
+  it('normalizes and checks an input of maxInputLeaves nodes in under 3 s', () => {
+    const data = entriesOf((DEFAULT_LIMITS.maxInputLeaves - 2) / 2);
     const start = performance.now();
     sanitize(data);
     expect(performance.now() - start).toBeLessThan(3_000);
   });
 
-  it('refuses one leaf more, as soon as it is counted', () => {
-    const data = leavesOf(DEFAULT_LIMITS.maxInputLeaves - 1);
-    data['one more'] = 1;
+  it('refuses one entry more, as soon as it is counted', () => {
+    const data = entriesOf((DEFAULT_LIMITS.maxInputLeaves - 2) / 2 + 1);
     let error: unknown;
     try {
       sanitize(data);
@@ -102,20 +97,22 @@ describe('maxInputDepth (128): the levels of the input', () => {
   });
 });
 
-describe('maxRuleLeaves (100 000): the leaves of one rule', () => {
-  const padded = (extra: number): Rule => {
-    const rule = makeRule({ id: 'big', model: 'M' });
-    const copier = new InputCopier({
-      ...DEFAULT_LIMITS,
-      maxInputLeaves: Number.MAX_SAFE_INTEGER,
-      maxRuleLeaves: Number.MAX_SAFE_INTEGER,
-    });
+describe('maxRuleLeaves (100 000): the nodes of one rule', () => {
+  /** The nodes of a rule as the engine counts them when it reads a rule. */
+  const nodesOf = (rule: Rule): number => {
+    const copier = new InputCopier(
+      { ...DEFAULT_LIMITS, maxRuleLeaves: Number.MAX_SAFE_INTEGER },
+      'maxRuleLeaves',
+      true,
+      true,
+    );
     copier.copy(rule, 'rule');
-    // `pad` is a list (one leaf) of scalars, replacing the empty `params` (one leaf): the rule then
-    // has base + items leaves.
-    const items = DEFAULT_LIMITS.maxRuleLeaves - copier.leaves + extra;
-    return makeRule({ id: 'big', model: 'M', params: { pad: new Array<number>(items).fill(1) } });
+    return copier.leaves;
   };
+  const padded = (items: number): Rule =>
+    makeRule({ id: 'big', model: 'M', params: { pad: new Array<number>(items).fill(1) } });
+  /** The rule with exactly `nodes` nodes (a list of scalars: 1 node each). */
+  const withNodes = (nodes: number): Rule => padded(nodes - nodesOf(padded(0)));
   const engine = (): PPEEngine =>
     new PPEEngine({
       plugins: [new StubPlugin('p', [new StubModel('M', 1)])],
@@ -123,16 +120,18 @@ describe('maxRuleLeaves (100 000): the leaves of one rule', () => {
       strict: false,
     });
 
-  it('reads and evaluates a rule of maxRuleLeaves leaves in under 3 s', async () => {
-    const rule = padded(0);
+  it('reads and evaluates a rule of maxRuleLeaves nodes in under 3 s', async () => {
+    const rule = withNodes(DEFAULT_LIMITS.maxRuleLeaves);
     const start = performance.now();
     const result = await engine().evaluate([rule], makeInput());
     expect(performance.now() - start).toBeLessThan(3_000);
     expect(result.appliedRules).toHaveLength(1);
   }, 60_000);
 
-  it('refuses one leaf more, as soon as it is counted', async () => {
-    const error = await failureOf(() => engine().evaluate([padded(1)], makeInput()));
+  it('refuses one node more, as soon as it is counted', async () => {
+    const error = await failureOf(() =>
+      engine().evaluate([withNodes(DEFAULT_LIMITS.maxRuleLeaves + 1)], makeInput()),
+    );
     expect(error).toBeInstanceOf(EngineLimitError);
     expect(error).toMatchObject({ limit: 'maxRuleLeaves', max: 100_000, actual: 100_001 });
   }, 60_000);
@@ -176,49 +175,70 @@ describe('maxRules (100 000) with plugins: three beforeEvaluate hooks and one af
   }, 120_000);
 });
 
-describe('maxHookLeaves (8 000 000): the leaves one return of a hook makes the engine read', () => {
-  /** Rules of about 90 000 leaves each, `count` of them. */
-  const bigRules = (count: number): Rule[] =>
-    Array.from({ length: count }, (_, i) =>
-      makeRule({ id: `big${i}`, model: 'M', params: { pad: new Array<number>(90_000).fill(i) } }),
+describe('the costliest shape: wide objects (about 48 000 keys per rule)', () => {
+  /** A rule whose params are one object of `keys` keys: 2 nodes each. */
+  const wide = (id: string, keys: number): Rule => {
+    const params: Record<string, number> = {};
+    for (let i = 0; i < keys; i += 1) params[`k${i}`] = i;
+    return makeRule({ id, model: 'M', params });
+  };
+  const nodesOf = (rule: Rule): number => {
+    const copier = new InputCopier(
+      { ...DEFAULT_LIMITS, maxRuleLeaves: Number.MAX_SAFE_INTEGER },
+      'maxRuleLeaves',
+      true,
+      true,
     );
-  const engineAdding = (added: Rule[]): PPEEngine =>
+    copier.copy(rule, 'rule');
+    return copier.leaves;
+  };
+  const engineWith = (adder?: PPEPlugin): PPEEngine =>
     new PPEEngine({
       plugins: [
         new StubPlugin('p', [new StubModel('M', 1)]),
-        {
-          name: 'adder',
-          version: '1.0.0',
-          onInit: () => undefined,
-          beforeEvaluate: (input, rules) => ({ input, rules: [...rules, ...added] }),
-        },
+        ...(adder === undefined ? [] : [adder]),
       ],
       dsls: [],
       strict: false,
     });
 
-  it('reads, validates and evaluates a return of maxHookLeaves leaves in under 8 s', async () => {
-    // 88 rules of 90 003 leaves are 7 920 264 leaves: the most that fits.
-    const added = bigRules(88);
+  it('evaluates caller rules of maxRuleSetNodes nodes in under 10 s, with no plugin', async () => {
+    const one = wide('w0', 48_000);
+    const per = nodesOf(one);
+    const count = Math.floor(DEFAULT_LIMITS.maxRuleSetNodes / per);
+    const rules = [one, ...Array.from({ length: count - 1 }, (_, i) => wide(`w${i + 1}`, 48_000))];
     const start = performance.now();
-    const result = await engineAdding(added).evaluate(
+    const result = await engineWith().evaluate(rules, makeInput());
+    expect(performance.now() - start).toBeLessThan(10_000);
+    expect(result.appliedRules).toHaveLength(count);
+  }, 120_000);
+
+  it('refuses one rule more, as soon as the bound is passed', async () => {
+    const per = nodesOf(wide('w', 48_000));
+    const count = Math.floor(DEFAULT_LIMITS.maxRuleSetNodes / per) + 1;
+    const rules = Array.from({ length: count }, (_, i) => wide(`w${i}`, 48_000));
+    const start = performance.now();
+    const error = await failureOf(() => engineWith().evaluate(rules, makeInput()));
+    expect(performance.now() - start).toBeLessThan(10_000);
+    expect(error).toMatchObject({ limit: 'maxRuleSetNodes', max: DEFAULT_LIMITS.maxRuleSetNodes });
+  }, 120_000);
+
+  it('reads, validates and evaluates a hook return of maxHookLeaves wide nodes in under 8 s (costliest shape)', async () => {
+    const per = nodesOf(wide('h', 48_000));
+    const count = Math.floor(DEFAULT_LIMITS.maxHookLeaves / per);
+    const added = Array.from({ length: count }, (_, i) => wide(`h${i}`, 48_000));
+    const adder: PPEPlugin = {
+      name: 'adder',
+      version: '1.0.0',
+      onInit: () => undefined,
+      beforeEvaluate: (input, rules) => ({ input, rules: [...rules, ...added] }),
+    };
+    const start = performance.now();
+    const result = await engineWith(adder).evaluate(
       [makeRule({ id: 'one', model: 'M' })],
       makeInput(),
     );
     expect(performance.now() - start).toBeLessThan(8_000);
-    expect(result.appliedRules).toHaveLength(89);
-  }, 120_000);
-
-  it('refuses a return of more, as soon as the bound is passed', async () => {
-    const added = bigRules(90);
-    const start = performance.now();
-    const error = await failureOf(() =>
-      engineAdding(added).evaluate([makeRule({ id: 'one', model: 'M' })], makeInput()),
-    );
-    expect(performance.now() - start).toBeLessThan(8_000);
-    expect((error as { cause: unknown }).cause).toMatchObject({
-      limit: 'maxHookLeaves',
-      max: 8_000_000,
-    });
+    expect(result.appliedRules).toHaveLength(count + 1);
   }, 120_000);
 });

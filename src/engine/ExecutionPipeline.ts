@@ -6,13 +6,13 @@ import type { BreakdownItem, SkippedRule } from '../types/result.js';
 import type { DecisionOutput } from '../types/output.js';
 import type { ModelRegistry } from '../registry/ModelRegistry.js';
 import { findNonJson, isJsonValue } from '../utils/json.js';
-import { isPlainObject, ruleLabel } from '../utils/values.js';
+import { describeThrown, isPlainObject, ruleLabel } from '../utils/values.js';
 import type { ShortCircuit } from './ExceptionProcessor.js';
 import type { TraceBuilder } from './TraceBuilder.js';
 import { OutputCombiner } from './OutputCombiner.js';
-import { frozenCopyOf } from './pluginBoundary.js';
-import { trapped } from './frozenView.js';
-import { FrozenViewWriteError } from '../errors/FrozenViewWriteError.js';
+import { readBounded } from './pluginBoundary.js';
+import { isViewWriteError, trapped } from './frozenView.js';
+import type { EngineLimits } from '../limits.js';
 import type { Contribution } from './OutputCombiner.js';
 import { compareByPriorityThenIdentity, compareRuleIdentity } from './resolveTie.js';
 import {
@@ -97,6 +97,7 @@ export class ExecutionPipeline {
   constructor(
     private readonly modelRegistry: ModelRegistry,
     private readonly conflictMode: 'throw' | 'first',
+    private readonly limits: Readonly<EngineLimits>,
   ) {}
 
   execute(
@@ -192,12 +193,22 @@ export class ExecutionPipeline {
         try {
           raw = model.calculate(trapped(input.data), trapped(rule), trapped(rule.params));
         } catch (error) {
-          if (!(error instanceof FrozenViewWriteError)) throw error;
+          if (!isViewWriteError(error)) throw error;
           skipped.push({ rule, reason: 'MODEL_ERROR', detail: error.message });
           continue;
         }
-        // What the model returns is data the engine copies: never a view it was handed.
-        raw = frozenCopyOf(raw);
+        // What the model returns is data the engine copies, bounded and without recursion: never a
+        // view it was handed, never a cycle or a depth that would overflow the stack.
+        try {
+          raw = readBounded(raw, this.limits, `output ${name}`);
+        } catch (error) {
+          skipped.push({
+            rule,
+            reason: 'OUTPUT_MISMATCH',
+            detail: `output ${name}: the model returned a value that cannot be copied: ${describeThrown(error)}`,
+          });
+          continue;
+        }
         const durationMs = Math.round((performance.now() - start) * 100) / 100;
         const { value, detail } = readCalculation(raw, declaration);
         if (!isJsonValue(value)) {
