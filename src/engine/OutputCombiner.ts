@@ -1,4 +1,4 @@
-import { canonicalize } from '@run-iq/spec';
+import { canonicalize, compareOutputValues } from '@run-iq/spec';
 import type { JsonValue, OutputDeclaration, OutputRounding } from '@run-iq/spec';
 import type { Rule } from '../types/rule.js';
 import type { SkippedRule } from '../types/result.js';
@@ -103,9 +103,21 @@ function enter(
   return value === read ? { value } : { value, unrounded: read };
 }
 
-/** The value `keepRight` prefers among numbers or decimals, compared exactly; the first on a tie. */
-function extreme(values: readonly Numeric[], keepRight: (cmp: number) => boolean): Numeric {
-  return values.reduce((best, value) => (keepRight(compareNumeric(value, best)) ? value : best));
+/**
+ * The value `keepRight` prefers among the contributions, the first on a tie: compared exactly
+ * for numbers and decimals, by spec's `compareOutputValues` for the other ordered types (an enum
+ * by rank, a date or an instant in time).
+ */
+function extreme(
+  values: readonly JsonValue[],
+  declaration: OutputDeclaration,
+  keepRight: (cmp: number) => boolean,
+): JsonValue {
+  const compare =
+    declaration.type === 'number' || declaration.type === 'decimal'
+      ? (a: JsonValue, b: JsonValue): number => compareNumeric(a as Numeric, b as Numeric)
+      : (a: JsonValue, b: JsonValue): number => compareOutputValues(a, b, declaration);
+  return values.reduce((best, value) => (keepRight(compare(value, best)) ? value : best));
 }
 
 /**
@@ -151,10 +163,14 @@ export const OutputCombiner = {
    * canonical form (`"0012.50"` is `"12.5"`); a float, an exponent or text is excluded. Under
    * `rounding.at: 'contribution'`, each remaining contribution is rounded before combining.
    * With the remaining ones, in order of priority descending then id@version:
-   * - `sum`, `max`, `min` compare and add in `Decimal`. A `decimal` sum is exact. A
+   * - `sum`, `max`, `min` compare and add in `Decimal` for a `number` or a `decimal`; `max` and
+   *   `min` compare an `enum` by rank, a `date` or a `dateTime` in time (`compareOutputValues`
+   *   of `@run-iq/spec`), keeping the first of equal values. A `decimal` sum is exact. A
    *   `number` sum keeps 20 significant digits (`0.1 + 0.2` is `0.3`), and one that is not a
    *   finite number (overflow) throws `OutputNotFiniteError`: no decision is returned with a
    *   partial amount;
+   * - `count` is the number of contributions that are `true` (each one is a boolean, a
+   *   `number` output; a rounding is refused on it);
    * - `all` and `any` are the logical AND and OR;
    * - `union` concatenates the lists and keeps the first of the items with the same canonical
    *   form;
@@ -228,10 +244,10 @@ export const OutputCombiner = {
         break;
       }
       case 'max':
-        value = extreme(numeric, (cmp) => cmp > 0);
+        value = extreme(values, declaration, (cmp) => cmp > 0);
         break;
       case 'min':
-        value = extreme(numeric, (cmp) => cmp < 0);
+        value = extreme(values, declaration, (cmp) => cmp < 0);
         break;
       case 'all':
         value = values.every((v) => v === true);

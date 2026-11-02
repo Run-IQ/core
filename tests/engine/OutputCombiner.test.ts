@@ -75,6 +75,71 @@ describe('OutputCombiner', () => {
     });
   });
 
+  describe('max and min on enum, date and dateTime', () => {
+    const [a, b, c] = [rule('a'), rule('b'), rule('c')] as [Rule, Rule, Rule];
+    const RANKED: OutputDeclaration = {
+      type: 'enum',
+      combine: 'max',
+      values: ['low', 'medium', 'high'],
+    };
+    const outputOf = (
+      declaration: OutputDeclaration,
+      values: readonly [JsonValue, JsonValue, JsonValue],
+    ) =>
+      OutputCombiner.combine(
+        'o',
+        declaration,
+        [of(a, values[0]), of(b, values[1]), of(c, values[2])],
+        'throw',
+      );
+
+    it('an enum is compared by rank in values, not by text', () => {
+      // By text, 'low' < 'medium' < 'high' would be 'high' < 'low' < 'medium'.
+      const values = ['low', 'high', 'medium'] as const;
+      expect(outputOf(RANKED, values).output).toEqual({
+        name: 'o',
+        type: 'enum',
+        combine: 'max',
+        value: 'high',
+        contributors: ['a', 'b', 'c'],
+      });
+      expect(outputOf({ ...RANKED, combine: 'min' }, values).output?.value).toBe('low');
+      expect(
+        outputOf({ ...RANKED, combine: 'min' }, ['high', 'medium', 'medium']).output?.value,
+      ).toBe('medium');
+    });
+
+    it('a date is compared in time', () => {
+      const dates = ['2025-12-31', '2026-01-01', '2025-02-28'] as const;
+      const date: OutputDeclaration = { type: 'date', combine: 'max' };
+      expect(outputOf(date, dates).output?.value).toBe('2026-01-01');
+      expect(outputOf({ ...date, combine: 'min' }, dates).output?.value).toBe('2025-02-28');
+    });
+
+    it('a dateTime is compared in time', () => {
+      const instants = [
+        '2026-01-01T00:00:00.000Z',
+        '2025-12-31T23:59:59.999Z',
+        '2026-01-01T00:00:00.001Z',
+      ] as const;
+      const instant: OutputDeclaration = { type: 'dateTime', combine: 'max' };
+      expect(outputOf(instant, instants).output?.value).toBe('2026-01-01T00:00:00.001Z');
+      expect(outputOf({ ...instant, combine: 'min' }, instants).output?.value).toBe(
+        '2025-12-31T23:59:59.999Z',
+      );
+    });
+
+    it('keeps the first of equal extremes, in contribution order', () => {
+      const result = outputOf({ type: 'date', combine: 'max' }, [
+        '2025-01-01',
+        '2025-01-01',
+        '2024-01-01',
+      ]);
+      expect(result.output?.value).toBe('2025-01-01');
+      expect(result.skipped).toEqual([]);
+    });
+  });
+
   describe('sum, max, min', () => {
     const a = rule('a');
     const b = rule('b');
