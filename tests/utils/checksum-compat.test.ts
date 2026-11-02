@@ -33,7 +33,12 @@ describe('checksum compatibility with @run-iq/spec', () => {
   it('seals with the spec checksum, dates normalized', () => {
     const rule = sealedRule();
     expect(rule.checksum).toBe(specChecksum(rule));
-    expect(computeRuleChecksum({ ...rule, effectiveFrom: '2025-01-01' })).toBe(rule.checksum);
+    // A Date is an instant, written in its ISO form; a civil date is another bound, so another
+    // checksum (spec, tasks 9C and 9D).
+    expect(computeRuleChecksum({ ...rule, effectiveFrom: '2025-01-01T00:00:00.000Z' })).toBe(
+      rule.checksum,
+    );
+    expect(computeRuleChecksum({ ...rule, effectiveFrom: '2025-01-01' })).not.toBe(rule.checksum);
   });
 
   it('a rule sealed by core passes engine.evaluate', async () => {

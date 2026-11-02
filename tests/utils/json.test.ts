@@ -54,9 +54,8 @@ describe('canonicalStringify', () => {
     expect(result).toBe('{"a":1,"c":3}');
   });
 
-  it('converts undefined array elements to null', () => {
-    const result = canonicalStringify([1, undefined, 3]);
-    expect(result).toBe('[1,null,3]');
+  it('refuses an undefined array element, as spec does (it was written as null)', () => {
+    expect(() => canonicalStringify([1, undefined, 3])).toThrow('[1] is not JSON: undefined');
   });
 
   it('returns "{}" for empty object', () => {
