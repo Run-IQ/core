@@ -37,6 +37,13 @@ export interface Reads {
   readonly problems: ReadsProblem[];
 }
 
+/**
+ * The most pointers one `listVariables` may return. A rule reads a handful of facts; the cap
+ * keeps a hostile plugin from making the engine walk a list of any length (the list is refused
+ * before one item is read).
+ */
+export const MAX_LISTED_POINTERS = 100_000;
+
 /** The engine variables whose second segment names an output. */
 const OUTPUT_VARIABLES: ReadonlySet<string> = new Set(['$outputs', '$bounds', '$selected']);
 
@@ -69,11 +76,15 @@ export function readsOf(
     let items: unknown[];
     try {
       const answer = ask();
-      if (typeof answer === 'string' || typeof answer !== 'object' || answer === null) {
-        throw new TypeError(`${describeValue(answer)} is not a list`);
+      // The contract is an array: an iterable, an array-like or a Set is not a list, and a lazy
+      // one is never run. The length is read once and capped before any item is read.
+      if (!Array.isArray(answer)) throw new TypeError(`${describeValue(answer)} is not a list`);
+      const length = answer.length;
+      if (length > MAX_LISTED_POINTERS) {
+        throw new RangeError(`${length} pointers, more than the ${MAX_LISTED_POINTERS} allowed`);
       }
-      // Read out first: a lazy list that throws midway contributes nothing.
-      items = Array.from(answer as Iterable<unknown>);
+      items = [];
+      for (let index = 0; index < length; index += 1) items.push(answer[index]);
     } catch (error) {
       problem('failed', source, `failed: ${describeThrown(error)}`);
       return;
@@ -88,6 +99,23 @@ export function readsOf(
         problem('non-pointer', source, `returned a non-pointer: ${shown}`);
         continue;
       }
+      const [variable, name] = segments;
+      // Nothing reads "all outputs" or the whole context in wave 1: such a rule would be ordered
+      // as reading no output. It is an invalid path, so the rule's reads are unknown (D-39).
+      const whole =
+        variable === undefined
+          ? 'the whole context'
+          : OUTPUT_VARIABLES.has(variable) && name === undefined
+            ? `all of ${variable}`
+            : undefined;
+      if (whole !== undefined) {
+        problem(
+          'invalid-path',
+          source,
+          `returned an invalid path: ${item === '' ? "''" : String(item)} (${whole} is not a fact to read)`,
+        );
+        continue;
+      }
       if (segments.includes('-')) {
         problem(
           'invalid-path',
@@ -97,7 +125,6 @@ export function readsOf(
         continue;
       }
       pointers.add(item as JsonPointer);
-      const [variable, name] = segments;
       if (variable !== undefined && OUTPUT_VARIABLES.has(variable) && name !== undefined) {
         outputs.add(name);
       }

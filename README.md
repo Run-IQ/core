@@ -26,7 +26,9 @@ const percentage = {
 };
 
 const engine = new PPEEngine({
-  plugins: [{ name: 'demo', version: '1.0.0', onInit: (ctx) => ctx.modelRegistry.register(percentage) }],
+  plugins: [
+    { name: 'demo', version: '1.0.0', onInit: (ctx) => ctx.modelRegistry.register(percentage) },
+  ],
   dsls: [],
 });
 
@@ -48,7 +50,7 @@ const result = await engine.evaluate([rule], {
   meta: { tenantId: 'acme', effectiveDate: new Date('2025-06-01') },
 });
 
-result.value;     // 10
+result.value; // 10
 result.breakdown; // [{ ruleId: 'shipping-fee', contribution: 10, modelUsed: 'PERCENTAGE' }]
 ```
 
@@ -60,32 +62,39 @@ result.breakdown; // [{ ruleId: 'shipping-fee', contribution: 10, modelUsed: 'PE
 - **DSL evaluator**: decides whether a rule's `condition` applies to the input.
 - **Snapshot**: an optional record of every evaluation, saved through an adapter you provide. A `requestId` whose snapshot already exists is refused with `DUPLICATE_REQUEST`; until Task 10 core returns no stored decision.
 
+## Plugins fail closed
+
+A decision is never returned without the work a plugin was to do. Every hook failure is a `PluginHookError` (`plugin`, `hook`, `cause`); `onError` is called on every plugin and nothing is saved.
+
+- `beforeEvaluate` fails the evaluation when it throws or times out, returns a malformed result or a state that is not JSON, returns an input that fails the checks of the caller's input (bounds, `validateProofInput`, strict mode), drops a rule without a skip, returns a rule under the `id@version` of a given rule with another content, or adds a rule whose checksum does not hold. Changing the data of a valid input is allowed.
+- `afterEvaluate` cannot change the decision: a change to `value`, `outputs`, the applied or skipped rules, `breakdown`, `trace` or any other field fails the evaluation. It may set `meta` and its own `pluginState` entry.
+
 ## How `evaluate()` works
 
 1. Check the options and the number of rules (`maxRules`), then validate the input: its bounds (`maxInputDepth`, `maxInputLeaves`) and its canonical form (`validateProofInput` of `@run-iq/spec`)
 2. Refuse a `requestId` whose snapshot already exists (`DuplicateRequestError`, code `DUPLICATE_REQUEST`)
 3. Verify rule checksums and params
-4. Run plugin `beforeEvaluate` hooks
+4. Run plugin `beforeEvaluate` hooks (fail closed: see below)
 5. Filter rules by validity period, tags and condition
 6. Resolve conflicts between rules by priority
 7. Run the models and sum their contributions
-8. Run plugin `afterEvaluate` hooks
+8. Run plugin `afterEvaluate` hooks (they cannot change the decision)
 9. Save the snapshot
 
 Rules that are not applied appear in `result.skippedRules` with a reason (`CONDITION_FALSE`, `CHECKSUM_MISMATCH`, `INVALID_RULE`, `INACTIVE_DATE`, ...). `INVALID_RULE` marks a malformed rule whose checksum cannot be verified: an invalid date, `effectiveUntil` not after `effectiveFrom`, an absent or non-string `checksum`, a non-integer `version`. Its `detail` field names the rule (`id@version`) and the reason.
 
 ## Options
 
-| Option | Default | |
-|---|---|---|
-| `strict` | `true` | Requires the evaluation date (`meta.effectiveDate` or `meta.dates.effective`), throws on rule conflicts and on snapshot failures |
-| `onConflict` | `'throw'` in strict mode, otherwise `'first'` | What to do when two rules have the same priority |
-| `onChecksumMismatch` | `'skip'` | `'throw'` to fail instead of skipping the rule. Covers checksum mismatches (throws `Error`) and malformed rules (throws `ValidationError`) |
-| `snapshot` | none | Adapter used to persist evaluations |
-| `dryRun` | `false` | Evaluate without saving a snapshot |
-| `timeout` | `{ dsl: 100, hook: 500 }` ms | Time limits for conditions, hooks and the whole pipeline |
-| `limits` | `DEFAULT_LIMITS` | The bounds of an evaluation, see below. A value that is not a positive integer, an unknown key, or a `maxInputDepth` above 1000 throws `ValidationError` at construction |
-| `inputSeed` | none | `{ secret }` (at least 32 bytes) or `{ derive(requestId) }` (exactly 32 bytes): where the salt of the input digest will come from. Only checked for now: the secret at construction, `derive` at each evaluation |
+| Option               | Default                                       |                                                                                                                                                                                                                  |
+| -------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `strict`             | `true`                                        | Requires the evaluation date (`meta.effectiveDate` or `meta.dates.effective`), throws on rule conflicts and on snapshot failures                                                                                 |
+| `onConflict`         | `'throw'` in strict mode, otherwise `'first'` | What to do when two rules have the same priority                                                                                                                                                                 |
+| `onChecksumMismatch` | `'skip'`                                      | `'throw'` to fail instead of skipping the rule. Covers checksum mismatches (throws `Error`) and malformed rules (throws `ValidationError`)                                                                       |
+| `snapshot`           | none                                          | Adapter used to persist evaluations                                                                                                                                                                              |
+| `dryRun`             | `false`                                       | Evaluate without saving a snapshot                                                                                                                                                                               |
+| `timeout`            | `{ dsl: 100, hook: 500 }` ms                  | Time limits for conditions, hooks and the whole pipeline                                                                                                                                                         |
+| `limits`             | `DEFAULT_LIMITS`                              | The bounds of an evaluation, see below. A value that is not a positive integer, an unknown key, or a `maxInputDepth` above 1000 throws `ValidationError` at construction                                         |
+| `inputSeed`          | none                                          | `{ secret }` (at least 32 bytes) or `{ derive(requestId) }` (exactly 32 bytes): where the salt of the input digest will come from. Only checked for now: the secret at construction, `derive` at each evaluation |
 
 `evaluate(rules, input, options?)` takes `referentials`, `ruleSets`, `requested` and `supersedes`. They are accepted and checked by name (`unknown evaluate option: foo` throws `ValidationError`), and change nothing yet: each is wired by its own task.
 
@@ -95,9 +104,9 @@ Rules that are not applied appear in `result.skippedRules` with a reason (`CONDI
 
 ## Reading facts by JSON pointer
 
-A rule reads facts of its evaluation context by RFC 6901 pointer: `/revenue/total` in `data`, `/$dates/effective`, `/$dimensions/country`, `/$outputs/risk`. A DSL declares them with `listVariables(expression)`, a model with `listVariables(params)`; `readsOf(rule, dsl, model)` joins them. Pointers are compared as they are: `/children/01/age` names no element (a list index has no leading zero), `-` is refused, and two spellings of "é" are two facts. A `listVariables` that throws, or returns anything but pointers (a dotted path `revenue.total`), leaves the reads of its rule undeclared, with a diagnostic; `result.missingFacts` lists, sorted, the pointers absent from the context. The pointer functions of the spec are re-exported: `parsePointer`, `formatPointer`, `JsonPointer`.
+A rule reads facts of its evaluation context by RFC 6901 pointer: `/revenue/total` in `data`, `/$dates/effective`, `/$dimensions/country`, `/$outputs/risk`. A DSL declares them with `listVariables(expression)`, a model with `listVariables(params)`; `readsOf(rule, dsl, model)` joins them. Pointers are compared as they are: `/children/01/age` names no element (a list index has no leading zero), `-` is refused, and two spellings of "é" are two facts. A `listVariables` that throws, or returns anything but pointers (a dotted path `revenue.total`), leaves the reads of its rule undeclared, with a diagnostic; `result.missingFacts` lists, sorted, the pointers read by the conditions and absent from the context (facts of `data`, `/$dates/...`, `/$dimensions/...`; not yet the reads of a model). A rule whose `listVariables` failed is still evaluated, its reads unknown, and only the diagnostic says so until 9M1 adds the `provisional` status. A `listVariables` must return an array of at most `MAX_LISTED_POINTERS` (100000) pointers; the root `''`, `/$outputs`, `/$bounds` and `/$selected` without a name are invalid paths. The pointer functions of the spec are re-exported: `parsePointer`, `formatPointer`, `JsonPointer`.
 
-The input `meta` also takes `dates` (named dates, `Date` or string), `assertions` (the provenance of facts) and `dimensions` with several values (`{ country: ['FR', 'US'] }`). `normalizeMeta` writes them canonically: dates as a civil date or `YYYY-MM-DDTHH:MM:SS.sssZ`, dimension values sorted without duplicates (one value as a string), tags sorted.
+Any other `meta` key (a misspelled `effectivedate`, `userId`) is refused: `/meta has an unknown key "effectivedate"`. The input `meta` also takes `dates` (named dates, `Date` or string), `assertions` (the provenance of facts) and `dimensions` with several values (`{ country: ['FR', 'US'] }`). `normalizeMeta` writes them canonically: dates as a civil date or `YYYY-MM-DDTHH:MM:SS.sssZ`, dimension values sorted without duplicates (one value as a string), tags sorted.
 
 ## Evaluating at a past date
 

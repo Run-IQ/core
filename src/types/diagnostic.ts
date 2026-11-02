@@ -1,6 +1,8 @@
 /**
- * Something that went wrong without stopping the evaluation, reported in
- * `EvaluationResult.diagnostics` instead of being swallowed (e.g. a hook that threw).
+ * Something the engine accepted and says so, reported in `EvaluationResult.diagnostics`: a
+ * `listVariables` that does not conform (its rule's reads are unknown), rules a
+ * `beforeEvaluate` hook added and that passed their checks. A fault that would change the
+ * decision is never a diagnostic: it fails the evaluation (`PluginHookError`).
  */
 export interface Diagnostic {
   readonly source: 'hook' | 'engine';

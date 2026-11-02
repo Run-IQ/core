@@ -3,6 +3,7 @@ import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import type { PPEEngineConfig } from '../../src/engine/PPEEngine.js';
 import { ValidationError } from '../../src/errors/ValidationError.js';
 import type { PPEPlugin, PluginContext } from '../../src/types/plugin.js';
+import { readInputSeedConfig } from '../../src/input/inputSeed.js';
 import { makeRule, makeInput, StubModel } from '../helpers.js';
 
 function plugin(calls: string[] = []): PPEPlugin {
@@ -79,7 +80,37 @@ describe('inputSeed', () => {
     });
   });
 
+  it('calls derive on the object the caller gave, so a method keeps its this', async () => {
+    class Seeder {
+      constructor(private readonly key: Uint8Array) {}
+      derive(requestId: string): Uint8Array {
+        return this.key.slice(0, requestId.length > 0 ? 32 : 0);
+      }
+    }
+    const engine = build(new Seeder(new Uint8Array(64)));
+    await engine.evaluate(rules, makeInput());
+    const broken = build(new Seeder(new Uint8Array(16)));
+    const [, reasons] = await reasonsOf(() => broken.evaluate(rules, makeInput()));
+    expect(reasons).toEqual(['inputSeed.derive must return 32 bytes']);
+  });
+
   describe('secret: at least 32 bytes, checked at construction', () => {
+    it('keeps its own copy: a later change by the caller has no effect', () => {
+      const secret = new Uint8Array(32).fill(7);
+      const config = readInputSeedConfig({ secret });
+      secret.fill(0);
+      expect(config?.secret).toEqual(new Uint8Array(32).fill(7));
+      expect(config?.secret).not.toBe(secret);
+    });
+
+    it('keeps its bytes when the caller detaches its buffer', () => {
+      const secret = new Uint8Array(32).fill(9);
+      const config = readInputSeedConfig({ secret });
+      structuredClone(secret.buffer, { transfer: [secret.buffer] });
+      expect(config?.secret?.length).toBe(32);
+      expect(config?.secret?.[0]).toBe(9);
+    });
+
     it('refuses a short secret and a secret that is not bytes', async () => {
       expect(await reasonsOf(() => build({ secret: new Uint8Array(31) }))).toEqual([
         'Invalid inputSeed',

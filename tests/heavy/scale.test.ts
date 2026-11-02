@@ -49,12 +49,12 @@ describe('maxRules (100 000): the rules of one evaluation', () => {
 });
 
 describe('maxInputLeaves (500 000): the leaves of the input tree', () => {
-  /** `count` scalar leaves under `count / 1000` groups. */
+  /** `count` scalar leaves under groups of 1000 (the last group holds the rest). */
   const leavesOf = (count: number): Record<string, unknown> => {
     const data: Record<string, unknown> = {};
-    for (let group = 0; group < count / 1000; group++) {
+    for (let group = 0; group * 1000 < count; group++) {
       const row: Record<string, unknown> = {};
-      for (let key = 0; key < 1000; key++) row[`k${key}`] = key;
+      for (let key = 0; key < Math.min(1000, count - group * 1000); key++) row[`k${key}`] = key;
       data[`g${group}`] = row;
     }
     return data;
@@ -62,15 +62,16 @@ describe('maxInputLeaves (500 000): the leaves of the input tree', () => {
   const sanitize = (data: Record<string, unknown>): void =>
     InputSanitizer.validate({ requestId: 'r', data, meta: { tenantId: 't' } });
 
+  // meta.tenantId is a leaf of the input too: data holds one less.
   it('normalizes and checks an input of maxInputLeaves leaves in under 3 s', () => {
-    const data = leavesOf(DEFAULT_LIMITS.maxInputLeaves);
+    const data = leavesOf(DEFAULT_LIMITS.maxInputLeaves - 1);
     const start = performance.now();
     sanitize(data);
     expect(performance.now() - start).toBeLessThan(3_000);
   });
 
   it('refuses one leaf more, as soon as it is counted', () => {
-    const data = leavesOf(DEFAULT_LIMITS.maxInputLeaves);
+    const data = leavesOf(DEFAULT_LIMITS.maxInputLeaves - 1);
     data['one more'] = 1;
     let error: unknown;
     try {

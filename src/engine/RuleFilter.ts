@@ -110,21 +110,26 @@ export class RuleFilter {
     private readonly sandbox: PluginSandbox,
   ) {}
 
+  /**
+   * Filters `rules` for `input` at `now`. `meta` is the canonical meta of `input` when the caller
+   * already has it (the engine does); otherwise it is written here (`normalizeMeta`).
+   */
   async filter(
     rules: ReadonlyArray<Rule>,
     input: EvaluationInput,
     now: Date,
+    meta?: NormalizedMeta,
   ): Promise<FilterResult> {
     // The evaluation date is an input: an invalid one rejects the evaluation with spec's own
     // error (INVALID_DATE), before any rule. A fault after this point is a rule's bound.
     isEffectiveAt(ALWAYS_OPEN, now);
-    const meta = normalizeMeta(input.meta);
+    const canonical = meta ?? normalizeMeta(input.meta);
     // No output exists while rules are filtered: the context is the same for every rule.
     const context = buildContext(
-      { data: input.data, dates: meta.dates, dimensions: meta.dimensions },
+      { data: input.data, dates: canonical.dates, dimensions: canonical.dimensions },
       { outputs: [] },
     );
-    const scope: Scope = { input, meta, context };
+    const scope: Scope = { input, meta: canonical, context };
     const passed: Rule[] = [];
     const skipped: SkippedRule[] = [];
     const missing = new Set<string>();
@@ -220,7 +225,9 @@ export class RuleFilter {
       }
 
       // The reads only feed missingFacts: a listVariables that does not conform never changes the
-      // rule's outcome (D-39: the effect on its status is 9M1's).
+      // rule's outcome. Until 9M1 adds the `provisional` status, a rule whose `listVariables`
+      // failed (`reads.declared` false) is evaluated, its reads unknown: only the diagnostic
+      // says so, and its absent facts are not in `missingFacts`.
       const reads = readsOf(rule, evaluator, undefined);
       for (const problem of reads.problems) {
         diagnostics.push({ source: 'engine', message: problem.message });

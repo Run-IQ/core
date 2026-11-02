@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import type { PPEPlugin, PluginContext } from '../../src/types/plugin.js';
 import { ValidationError } from '../../src/errors/ValidationError.js';
+import { PluginHookError } from '../../src/errors/PluginHookError.js';
 import { makeRule, makeInput, StubModel } from '../helpers.js';
 
 const host: PPEPlugin = {
@@ -35,7 +36,7 @@ describe('the evaluation date is an input, a rule bound is a rule', () => {
     });
   });
 
-  it('a bound a hook corrupts skips that rule only, the others are applied', async () => {
+  it('a bound a hook corrupts is a rule rewritten under its name: the evaluation fails', async () => {
     const corrupt: PPEPlugin = {
       name: 'corrupt',
       version: '1.0.0',
@@ -45,19 +46,19 @@ describe('the evaluation date is an input, a rule bound is a rule', () => {
         rules: rules.map((r) => (r.id === 'bad' ? { ...r, effectiveUntil: new Date('x') } : r)),
       }),
     };
-    const result = await engine([corrupt]).evaluate(
-      [makeRule({ id: 'bad', model: 'M' }), makeRule({ id: 'good', model: 'M' })],
-      makeInput({ meta: { tenantId: 't', effectiveDate: new Date('2025-06-01T00:00:00.000Z') } }),
-    );
-    expect(result.appliedRules.map((r) => r.id)).toEqual(['good']);
-    expect(result.value).toBe(100);
-    expect(result.skippedRules.map((s) => [s.rule.id, s.reason, s.detail])).toEqual([
-      [
-        'bad',
-        'INVALID_RULE',
-        'Invalid rule bad@1: INVALID_DATE: effectiveUntil must be a Date, a civil date YYYY-MM-DD or an instant YYYY-MM-DDTHH:MM:SS[.sss] with Z or ±HH:MM, in the years 0000 to 9999; got an invalid Date',
-      ],
-    ]);
+    const error = await engine([corrupt])
+      .evaluate(
+        [makeRule({ id: 'bad', model: 'M' }), makeRule({ id: 'good', model: 'M' })],
+        makeInput({ meta: { tenantId: 't', effectiveDate: new Date('2025-06-01T00:00:00.000Z') } }),
+      )
+      .then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+    expect(error).toBeInstanceOf(PluginHookError);
+    expect((error as PluginHookError).cause).toMatchObject({
+      message: expect.stringMatching(/^plugin corrupt rewrote rule bad@1: /),
+    });
   });
 
   describe('the evaluation date: meta.effectiveDate, or meta.dates.effective', () => {

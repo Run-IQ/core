@@ -14,8 +14,6 @@ export interface BeforeEvaluateReading {
   readonly skipped: readonly SkippedRule[];
   /** The JSON state to keep, when the plugin returned one. */
   readonly state?: JsonValue | undefined;
-  /** Where the returned state stops being JSON (`$.a[1] (Date)`), when it does; it is dropped. */
-  readonly stateNotJson?: string | undefined;
 }
 
 /**
@@ -23,19 +21,19 @@ export interface BeforeEvaluateReading {
  * are read by name, once each (an own, non-enumerable or inherited getter runs a single time),
  * and copied (`copyData`) before any check; the engine uses only that copy.
  *
- * Throws `TypeError` (`plugin <name> beforeEvaluate returned ...; ignored`), and the engine then
- * commits nothing of the result, when it is not an object, when `input` is not an object with
- * object `data` and `meta`, when `rules` is not an array of objects, or when `skipped` is
- * neither absent nor an array of `{ rule: object, reason: string, detail?: string }`. A getter
- * that throws while the result is read throws too. A state that is not JSON is not an error: it
- * is reported in `stateNotJson`.
+ * Throws `TypeError` (`plugin <name> beforeEvaluate returned ...`) when the result is not an
+ * object, when `input` is not an object with object `data` and `meta`, when `rules` is not an
+ * array of objects, when `skipped` is neither absent nor an array of
+ * `{ rule: object, reason: string, detail?: string }`, or when `state` is not JSON (`a state that
+ * is not JSON at $.a[1] (Date)`); a getter that throws while the result is read throws too. The
+ * engine then fails the evaluation (`PluginHookError`): nothing of the result is used.
  */
 export function readBeforeEvaluate(
   pluginName: string,
   returned: BeforeEvaluateResult,
 ): BeforeEvaluateReading {
   const refuse = (what: string): TypeError =>
-    new TypeError(`plugin ${pluginName} beforeEvaluate returned ${what}; ignored`);
+    new TypeError(`plugin ${pluginName} beforeEvaluate returned ${what}`);
   const raw: unknown = returned;
   if (!isObject(raw)) throw refuse(`${describeValue(raw)}, not a result`);
   // Read by name, once each (own, non-enumerable or inherited getters alike), then copied.
@@ -60,12 +58,12 @@ export function readBeforeEvaluate(
 
   const state = snapshot.state;
   const stateNotJson = state === undefined ? undefined : findNonJson(state);
+  if (stateNotJson !== undefined) throw refuse(`a state that is not JSON at ${stateNotJson}`);
   return {
     input,
     rules: [...rules],
     skipped: skipped.map((skip) => withDetail(skip, pluginName)),
-    state: stateNotJson === undefined ? state : undefined,
-    stateNotJson,
+    state,
   };
 }
 

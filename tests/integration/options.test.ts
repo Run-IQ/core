@@ -37,6 +37,13 @@ describe('evaluate(rules, input, options)', () => {
     ]);
   });
 
+  it('refuses an unknown option whatever its value, undefined included', async () => {
+    // A misspelled name whose value comes from an unset variable is still a misspelling.
+    expect((await refusal({ requestd: undefined })).reasons).toEqual([
+      'unknown evaluate option: requestd',
+    ]);
+  });
+
   it('refuses options that are not an object', async () => {
     for (const bad of [null, 3, 'x', []]) {
       expect((await refusal(bad)).reasons).toEqual(['evaluate options must be an object']);
@@ -48,8 +55,8 @@ describe('evaluate(rules, input, options)', () => {
     await e.evaluate(rules, makeInput({ requestId: 'a' }));
     await e.evaluate(rules, makeInput({ requestId: 'b' }), {});
     await e.evaluate(rules, makeInput({ requestId: 'c' }), { requested: undefined });
-    // A member that is undefined is absent, known or not.
-    await e.evaluate(rules, makeInput({ requestId: 'd' }), { foo: undefined } as never);
+    // A known name whose value is undefined is absent.
+    await e.evaluate(rules, makeInput({ requestId: 'd' }), { supersedes: undefined });
   });
 
   describe('the options of the plan are accepted and, in 9L, inert', () => {

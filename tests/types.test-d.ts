@@ -1,4 +1,5 @@
 import { describe, expectTypeOf, it } from 'vitest';
+import { EVALUATE_OPTION_NAMES } from '../src/types/options.js';
 import { formatPointer as specFormatPointer, parsePointer as specParsePointer } from '@run-iq/spec';
 import {
   DEFAULT_LIMITS,
@@ -296,7 +297,9 @@ describe('what 9L adds to the public surface', () => {
       | 'maxReferentialNodes'
       | 'maxGroupDepth'
     >();
-    expectTypeOf(DEFAULT_LIMITS).toEqualTypeOf<EngineLimits>();
+    expectTypeOf(DEFAULT_LIMITS).toEqualTypeOf<Readonly<EngineLimits>>();
+    // @ts-expect-error DEFAULT_LIMITS is frozen: it is read-only for the compiler too
+    DEFAULT_LIMITS.maxRules = 5;
     expectTypeOf<EngineLimitError['limit']>().toEqualTypeOf<keyof EngineLimits>();
     expectTypeOf(readsOf).parameters.toEqualTypeOf<
       [Rule, DSLEvaluator | undefined, CalculationModel<OutputValue> | undefined]
@@ -305,6 +308,9 @@ describe('what 9L adds to the public surface', () => {
     expectTypeOf(normalizeMeta).returns.toEqualTypeOf<NormalizedMeta>();
     expectTypeOf(buildContext).returns.toEqualTypeOf<Readonly<Record<string, unknown>>>();
     expectTypeOf<EvaluateOptions>().toHaveProperty('requested');
+    // The list of names covers every option: a field added to EvaluateOptions and forgotten in
+    // the list fails here, not at run time.
+    expectTypeOf<(typeof EVALUATE_OPTION_NAMES)[number]>().toEqualTypeOf<keyof EvaluateOptions>();
     expectTypeOf<RuleSetRef>().toMatchTypeOf<{ kind: 'pack' | 'local' }>();
   });
 

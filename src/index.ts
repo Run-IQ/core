@@ -48,6 +48,7 @@ export {
   ValidationError,
   DuplicateRequestError,
   EngineLimitError,
+  PluginHookError,
 } from './errors/index.js';
 export { ModelRegistry } from './registry/ModelRegistry.js';
 export { DSLRegistry } from './registry/DSLRegistry.js';
@@ -60,7 +61,7 @@ export type { EngineLimits, EngineLimitsInput } from './limits.js';
 export { normalizeMeta, evaluationDate } from './input/normalizeMeta.js';
 export type { NormalizedMeta } from './input/normalizeMeta.js';
 export type { InputSeedConfig } from './input/inputSeed.js';
-export { readsOf } from './context/reads.js';
+export { readsOf, MAX_LISTED_POINTERS } from './context/reads.js';
 export type { Reads, ReadsProblem } from './context/reads.js';
 export { buildContext } from './context/buildContext.js';
 export type { ContextBase, ContextInstance } from './context/buildContext.js';

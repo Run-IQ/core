@@ -35,7 +35,9 @@ export interface DSLEvaluator {
   /**
    * The JSON pointers, into the evaluation context, of the facts the expression reads
    * (`/revenue/total`, `/$outputs/risk`, `/$dates/effective`, `/$dimensions/country`; D-1). The
-   * engine reports those absent from `input.data` in `EvaluationResult.missingFacts`. A DSL that
+   * engine reports in `EvaluationResult.missingFacts` the pointers of the conditions that are
+   * absent from the context: facts of `data`, `/$dates/...` and `/$dimensions/...` (the other
+   * engine variables are not built yet), and not yet what a model's `listVariables` names. A DSL that
    * returns anything else (a dotted path, a throw) has its rule's reads treated as unknown
    * (`readsOf`, D-39); a DSL without it declares nothing.
    */
