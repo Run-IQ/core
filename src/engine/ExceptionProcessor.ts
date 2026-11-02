@@ -1,4 +1,4 @@
-import { isViewWriteError, trapped } from './frozenView.js';
+import { ViewScope } from './frozenView.js';
 import {
   DEFAULT_OUTPUT,
   DEFAULT_OUTPUT_DECLARATION,
@@ -16,6 +16,7 @@ import type {
 import type { Rule } from '../types/rule.js';
 import type { SkippedRule } from '../types/result.js';
 import type { ModelRegistry } from '../registry/ModelRegistry.js';
+import { UnexpectedEngineError } from '../errors/UnexpectedEngineError.js';
 import { ExceptionPrecedenceError } from '../errors/ExceptionPrecedenceError.js';
 import { deepMerge } from '../utils/deepMerge.js';
 import { compareByPriorityThenIdentity, resolveTie } from './resolveTie.js';
@@ -427,11 +428,12 @@ export class ExceptionProcessor {
     if (!this.models.has(rule.model)) return undefined;
     const model = this.models.get(rule.model);
     let validation: ReturnType<typeof model.validateParams>;
+    const scope = new ViewScope();
     try {
-      validation = model.validateParams(trapped(params));
+      validation = model.validateParams(scope.trapped(params));
     } catch (error) {
       // A write into the params: the model's own fault, named. The target is refused for it.
-      if (!isViewWriteError(error)) throw error;
+      if (!scope.isWriteError(error)) throw UnexpectedEngineError.foreign(error);
       return { reason: 'MODEL_ERROR', detail: error.message };
     }
     if (validation.valid) return undefined;

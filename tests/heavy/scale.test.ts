@@ -242,3 +242,114 @@ describe('the costliest shape: wide objects (about 48 000 keys per rule)', () =>
     expect(result.appliedRules).toHaveLength(count + 1);
   }, 120_000);
 });
+
+describe('the worst case: every limit at its default, on the costliest shape, at once (V4)', () => {
+  const text = 'x'.repeat(DEFAULT_LIMITS.maxStringLength);
+  const nodesOf = (rule: Rule): number => {
+    const copier = new InputCopier(
+      { ...DEFAULT_LIMITS, maxRuleLeaves: Number.MAX_SAFE_INTEGER },
+      'maxRuleLeaves',
+      true,
+      true,
+    );
+    copier.copy(rule, 'rule');
+    return copier.leaves;
+  };
+  const wide = (id: string, keys: number): Rule => {
+    const params: Record<string, number> = {};
+    for (let i = 0; i < keys; i += 1) params[`k${i}`] = i;
+    return makeRule({ id, model: 'M', params });
+  };
+  /** A rule carrying one string of `maxStringLength` characters (the same string in all of them). */
+  const texty = (id: string): Rule => makeRule({ id, model: 'M', params: { text } });
+  it('caller rules at maxRuleSetNodes, a hook at maxHookLeaves, an input at the size maxTraceNodes allows, strings at maxStringLength: under 10 s', async () => {
+    const wideNodes = nodesOf(wide('w', 48_000));
+    const textyNodes = nodesOf(texty('t'));
+    // Caller rules: 6 rules with the long string, then wide rules up to the bound.
+    const callerTexty = 6;
+    const callerWide = Math.floor(
+      (DEFAULT_LIMITS.maxRuleSetNodes - callerTexty * textyNodes) / wideNodes,
+    );
+    const rules = [
+      ...Array.from({ length: callerTexty }, (_, i) => texty(`ct${i}`)),
+      ...Array.from({ length: callerWide }, (_, i) => wide(`cw${i}`, 48_000)),
+    ];
+    // The input: wide data and one long string, small enough that its nodes times the steps of the
+    // trace stay under maxTraceNodes (it is read again by the hook, and counts against its bound).
+    const inputTarget = 30_000;
+    const textInput = Math.floor(text.length / 64) + 2;
+    const entries = Math.floor((inputTarget - 2 - textInput) / 2);
+    const data: Record<string, unknown> = { text };
+    for (let i = 0; i < entries; i += 1) data[`k${i}`] = i;
+    // One hook adds rules up to its own bound: the input it returns counts first, then 4 rules
+    // with the long string, then wide rules.
+    const hookTexty = 4;
+    const hookWide = Math.floor(
+      (DEFAULT_LIMITS.maxHookLeaves - inputTarget - hookTexty * textyNodes) / wideNodes,
+    );
+    const added = [
+      ...Array.from({ length: hookTexty }, (_, i) => texty(`ht${i}`)),
+      ...Array.from({ length: hookWide }, (_, i) => wide(`hw${i}`, 48_000)),
+    ];
+    expect(inputTarget * (rules.length + added.length)).toBeLessThan(DEFAULT_LIMITS.maxTraceNodes);
+    const adder: PPEPlugin = {
+      name: 'adder',
+      version: '1.0.0',
+      onInit: () => undefined,
+      beforeEvaluate: (input, current) => ({ input, rules: [...current, ...added] }),
+    };
+    const after: PPEPlugin = {
+      name: 'after',
+      version: '1.0.0',
+      onInit: () => undefined,
+      afterEvaluate: (_input, result) => result,
+    };
+    const engine = new PPEEngine({
+      plugins: [new StubPlugin('p', [new StubModel('M', 1)]), adder, after],
+      dsls: [],
+      strict: false,
+    });
+    const start = performance.now();
+    const result = await engine.evaluate(rules, makeInput({ data }));
+    const elapsed = performance.now() - start;
+    expect(result.appliedRules).toHaveLength(rules.length + added.length);
+    expect(elapsed).toBeLessThan(10_000);
+  }, 180_000);
+
+  it('an input of maxInputLeaves nodes with a hundred rules is refused by maxTraceNodes, quickly', async () => {
+    const data: Record<string, unknown> = {};
+    for (let i = 0; i < (DEFAULT_LIMITS.maxInputLeaves - 2) / 2; i += 1) data[`k${i}`] = i;
+    const rules = Array.from({ length: 100 }, (_, i) => makeRule({ id: `r${i}`, model: 'M' }));
+    const engine = new PPEEngine({
+      plugins: [new StubPlugin('p', [new StubModel('M', 1)])],
+      dsls: [],
+      strict: false,
+    });
+    const start = performance.now();
+    const error = await engine.evaluate(rules, makeInput({ data })).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    expect(performance.now() - start).toBeLessThan(3_000);
+    expect(error).toBeInstanceOf(EngineLimitError);
+    expect(error).toMatchObject({ limit: 'maxTraceNodes', max: DEFAULT_LIMITS.maxTraceNodes });
+  }, 60_000);
+
+  it('many rules sharing one string of maxStringLength characters: finishes or is refused by name, under 10 s', async () => {
+    const rules = Array.from({ length: 100 }, (_, i) => texty(`s${i}`));
+    const engine = new PPEEngine({
+      plugins: [new StubPlugin('p', [new StubModel('M', 1)])],
+      dsls: [],
+      strict: false,
+    });
+    const start = performance.now();
+    const outcome = await engine.evaluate(rules, makeInput()).then(
+      (result) => result,
+      (error: unknown) => error,
+    );
+    expect(performance.now() - start).toBeLessThan(10_000);
+    if (outcome instanceof Error) {
+      expect(outcome).toBeInstanceOf(EngineLimitError);
+    }
+  }, 180_000);
+});

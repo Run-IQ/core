@@ -14,6 +14,7 @@ import {
   StubModel,
   InMemorySnapshotAdapter,
   expectSameFailure,
+  expectCopyOf,
 } from '../helpers.js';
 
 // Fail closed: a decision is never returned when it was computed without the preparation a
@@ -105,7 +106,9 @@ describe('beforeEvaluate that fails makes the evaluation fail', () => {
         throw boom;
       },
     });
-    const error = await expectHookFailure(s, 'beforeEvaluate', (cause) => expect(cause).toBe(boom));
+    const error = await expectHookFailure(s, 'beforeEvaluate', (cause) =>
+      expectCopyOf(cause, boom),
+    );
     expect(error.message).toBe('plugin bad beforeEvaluate failed: boom');
   });
 
@@ -143,7 +146,7 @@ describe('beforeEvaluate that fails makes the evaluation fail', () => {
         rules,
       }),
     });
-    await expectHookFailure(s, 'beforeEvaluate', (cause) => expect(cause).toBe(trap));
+    await expectHookFailure(s, 'beforeEvaluate', (cause) => expectCopyOf(cause, trap));
   });
 
   it('a state that is not JSON: it would have been dropped', async () => {
@@ -277,7 +280,7 @@ describe('afterEvaluate that fails makes the evaluation fail', () => {
         throw boom;
       },
     });
-    const error = await expectHookFailure(s, 'afterEvaluate', (cause) => expect(cause).toBe(boom));
+    const error = await expectHookFailure(s, 'afterEvaluate', (cause) => expectCopyOf(cause, boom));
     expect(error.message).toBe('plugin bad afterEvaluate failed: after boom');
   });
 

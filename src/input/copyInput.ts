@@ -4,6 +4,9 @@ import { describeThrown } from '../utils/values.js';
 import { NotPlain, isDateObject, isPlainPrototype } from '../utils/plain.js';
 import { toReferenceDate } from '@run-iq/spec';
 
+/** Characters that weigh one node. */
+const CHARS_PER_NODE = 64;
+
 /** The segment of a JSON pointer for `key`: `~` is `~0`, `/` is `~1`. */
 const escapeSegment = (key: string): string => key.replace(/~/g, '~0').replace(/\//g, '~1');
 
@@ -51,6 +54,8 @@ export class InputCopier {
   leaves = 0;
   /** The properties that could not be read, in the order met. */
   readonly reasons: string[] = [];
+  /** What was thrown by the properties that could not be read, in the same order. */
+  readonly thrown: unknown[] = [];
   /** In rule mode, the objects that are not plain: `<pointer> is not a plain object: Kind`. */
   readonly refusals: string[] = [];
 
@@ -75,11 +80,27 @@ export class InputCopier {
     private readonly ruleMode = false,
   ) {}
 
-  private leaf(): void {
-    this.leaves += 1;
+  private leaf(extra = 0): void {
+    this.leaves += 1 + extra;
     if (this.leaves > this.limits[this.leafLimit]) {
       throw new EngineLimitError(this.leafLimit, this.limits[this.leafLimit], this.leaves);
     }
+  }
+
+  /**
+   * Holds a string (a value or a key) to `maxStringLength` and returns the nodes its characters
+   * add: one per `CHARS_PER_NODE`, so that a long text costs what it weighs.
+   */
+  private text(value: string, pointer: () => string): number {
+    if (value.length > this.limits.maxStringLength) {
+      throw new EngineLimitError(
+        'maxStringLength',
+        this.limits.maxStringLength,
+        value.length,
+        pointer(),
+      );
+    }
+    return Math.floor(value.length / CHARS_PER_NODE);
   }
 
   /** `rootPointer` followed by the keys of `frame` and `key`: where a failure is named. */
@@ -99,6 +120,7 @@ export class InputCopier {
   /** Names a property that cannot be read, and counts it as a leaf. */
   unreadable(pointer: string, error: unknown): void {
     this.reasons.push(`${pointer} could not be read: ${describeThrown(error)}`);
+    this.thrown.push(error);
     this.leaf();
   }
 
@@ -131,7 +153,19 @@ export class InputCopier {
       key: string | number | undefined,
     ): void => {
       if (value === null || typeof value !== 'object') {
-        this.leaf();
+        const extra =
+          typeof value === 'string'
+            ? this.text(value, () =>
+                key === undefined ? rootPointer : this.pointer(rootPointer, parent, key),
+              )
+            : 0;
+        this.leaf(extra);
+        if (value === undefined && this.ruleMode && parent !== undefined && key !== undefined) {
+          // `undefined` is not a JSON value: a member that holds it makes the rule refused.
+          this.refusals.push(`${this.pointer(rootPointer, parent, key)} is not JSON: undefined`);
+          put(parent, key, '<undefined>');
+          return;
+        }
         put(parent, key, typeof value === 'number' && Object.is(value, -0) ? 0 : value);
         return;
       }
@@ -164,7 +198,10 @@ export class InputCopier {
                 try {
                   copy = toReferenceDate(new Date(time));
                 } catch {
-                  copy = new NotPlain('an invalid Date');
+                  if (this.ruleMode) {
+                    this.refusals.push(`${at()} is an invalid Date`);
+                    copy = '<invalid Date>';
+                  } else copy = new NotPlain('an invalid Date');
                 }
               }
               put(parent, key, copy);
@@ -240,7 +277,12 @@ export class InputCopier {
       }
       // An object key is a node of its own, as a scalar and a list element are: a wide object
       // costs what it holds, not only its values.
-      if (frame.keys !== undefined) this.leaf();
+      // Its characters weigh too.
+      if (frame.keys !== undefined) {
+        this.leaf(
+          this.text(memberKey as string, () => this.pointer(rootPointer, frame, memberKey)),
+        );
+      }
       place(member, frame.depth + 1, frame, memberKey);
     }
     return top.value;

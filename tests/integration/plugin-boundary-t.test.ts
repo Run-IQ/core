@@ -1,3 +1,4 @@
+import { UnexpectedEngineError } from '../../src/errors/UnexpectedEngineError.js';
 import { describe, it, expect } from 'vitest';
 import { EXCEPTION_MODEL } from '@run-iq/spec';
 import { PPEEngine } from '../../src/engine/PPEEngine.js';
@@ -280,7 +281,8 @@ describe('T5, T6, T7: the views', () => {
     };
     const built = build([regModel('reg', forger)]);
     const error = await failure(built, [makeRule({ id: 'f', model: 'FOR' })]);
-    expect(error).toBeInstanceOf(FrozenViewWriteError);
+    expect(error).toBeInstanceOf(UnexpectedEngineError);
+    expect((error as { cause: unknown }).cause).toBeInstanceOf(FrozenViewWriteError);
   });
 });
 

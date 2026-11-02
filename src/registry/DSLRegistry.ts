@@ -1,13 +1,26 @@
 import type { DSLEvaluator } from '../types/dsl.js';
+import { copyDeclaration } from './ModelRegistry.js';
 
 export class DSLRegistry {
   private readonly evaluators = new Map<string, DSLEvaluator>();
+  /** The version and capabilities as registered, copied at that moment. */
+  private readonly declared = new Map<
+    string,
+    { readonly version: string; readonly capabilities: DSLEvaluator['capabilities'] }
+  >();
 
   register(evaluator: DSLEvaluator): void {
-    if (this.evaluators.has(evaluator.dsl)) {
-      throw new Error(`DSL evaluator "${evaluator.dsl}" is already registered`);
+    const dsl = evaluator.dsl;
+    if (this.evaluators.has(dsl)) {
+      throw new Error(`DSL evaluator "${dsl}" is already registered`);
     }
-    this.evaluators.set(evaluator.dsl, evaluator);
+    const given: unknown = evaluator.capabilities; // read once
+    const capabilities =
+      given === undefined
+        ? undefined
+        : (copyDeclaration(given, dsl, '/capabilities') as DSLEvaluator['capabilities']);
+    this.evaluators.set(dsl, evaluator);
+    this.declared.set(dsl, { version: evaluator.version, capabilities });
   }
 
   get(dsl: string): DSLEvaluator | undefined {
@@ -26,18 +39,25 @@ export class DSLRegistry {
   /** A registry fixed at this moment: an evaluator registered later is not seen by it. */
   snapshot(): DSLRegistry {
     const fixed = new DSLRegistry();
-    for (const [name, evaluator] of this.evaluators)
-      fixed.evaluators.set(name, fixEvaluator(evaluator));
+    for (const [name, evaluator] of this.evaluators) {
+      // justification: `register` sets both maps together.
+      const declared = this.declared.get(name) as NonNullable<ReturnType<typeof this.declared.get>>;
+      fixed.evaluators.set(name, fixEvaluator(name, evaluator, declared));
+    }
     return fixed;
   }
 }
 
 /** A frozen record of `evaluator` as it is now: its functions taken once and bound. */
-function fixEvaluator(evaluator: DSLEvaluator): DSLEvaluator {
+function fixEvaluator(
+  dsl: string,
+  evaluator: DSLEvaluator,
+  declared: { readonly version: string; readonly capabilities: DSLEvaluator['capabilities'] },
+): DSLEvaluator {
   const { evaluate, listVariables, compute } = evaluator;
   return Object.freeze({
-    dsl: evaluator.dsl,
-    version: evaluator.version,
+    dsl,
+    version: declared.version,
     evaluate: (expression: unknown, context: Record<string, unknown>) =>
       evaluate.call(evaluator, expression, context),
     ...(listVariables === undefined
@@ -49,6 +69,6 @@ function fixEvaluator(evaluator: DSLEvaluator): DSLEvaluator {
           compute: (expression: unknown, context: Record<string, unknown>) =>
             compute.call(evaluator, expression, context),
         }),
-    ...(evaluator.capabilities === undefined ? {} : { capabilities: evaluator.capabilities }),
+    ...(declared.capabilities === undefined ? {} : { capabilities: declared.capabilities }),
   });
 }

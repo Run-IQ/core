@@ -1,10 +1,11 @@
 import { refusalsOf } from '../engine/pluginBoundary.js';
-import { isViewWriteError, trapped } from '../engine/frozenView.js';
+import { ViewScope } from '../engine/frozenView.js';
 import { EXCEPTION_MODEL, SpecError, verifyRuleChecksum } from '@run-iq/spec';
 import type { Rule } from '../types/rule.js';
 import type { SkippedRule } from '../types/result.js';
 import type { ModelRegistry } from '../registry/ModelRegistry.js';
 import { ValidationError } from '../errors/ValidationError.js';
+import { UnexpectedEngineError } from '../errors/UnexpectedEngineError.js';
 import { ruleLabel } from '../utils/values.js';
 
 export interface RuleValidationResult {
@@ -99,11 +100,12 @@ export class RuleValidator {
     if (rule.model !== EXCEPTION_MODEL && this.modelRegistry.has(rule.model)) {
       const model = this.modelRegistry.get(rule.model);
       let validation: ReturnType<typeof model.validateParams>;
+      const scope = new ViewScope();
       try {
-        validation = model.validateParams(trapped(rule.params));
+        validation = model.validateParams(scope.trapped(rule.params));
       } catch (error) {
         // A write into the params is that rule's error, named; any other throw is the model's.
-        if (!isViewWriteError(error)) throw error;
+        if (!scope.isWriteError(error)) throw UnexpectedEngineError.foreign(error);
         return { rule, reason: 'MODEL_ERROR', detail: error.message };
       }
       if (!validation.valid) {

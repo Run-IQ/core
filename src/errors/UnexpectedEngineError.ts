@@ -1,5 +1,6 @@
 import { PPEError } from './PPEError.js';
 import { describeThrown } from '../utils/values.js';
+import { frozenErrorCopy } from '../utils/frozenCopy.js';
 
 /**
  * A thrown value that is not a `PPEError` (a model's `RangeError`, a plugin's `TypeError`...),
@@ -13,6 +14,14 @@ export class UnexpectedEngineError extends PPEError {
     super(describeThrown(cause), 'UNEXPECTED');
     this.name = 'UnexpectedEngineError';
     this.cause = cause;
+  }
+
+  /**
+   * A throw of plugin code (a model, a DSL) as the engine's own error: `cause` is a deep-frozen
+   * copy of what was thrown, never the object the plugin holds, whatever its class.
+   */
+  static foreign(error: unknown): UnexpectedEngineError {
+    return new UnexpectedEngineError(frozenErrorCopy(error));
   }
 
   /** `error` itself when it is a `PPEError`, else `error` wrapped. */

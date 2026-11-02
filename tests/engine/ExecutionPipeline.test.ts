@@ -31,7 +31,7 @@ describe('ExecutionPipeline', () => {
     const pipeline = pipelineWith(new StubModel('M1', 100), new StubModel('M2', 200));
     const rules = [makeRule({ id: 'r1', model: 'M1' }), makeRule({ id: 'r2', model: 'M2' })];
 
-    const result = pipeline.execute(rules, makeInput(), new TraceBuilder(), NONE);
+    const result = pipeline.execute(rules, makeInput(), new TraceBuilder(), NONE, 1);
     expect(result.outputs).toEqual({
       value: {
         name: 'value',
@@ -52,12 +52,12 @@ describe('ExecutionPipeline', () => {
   it('aggregates decimal values without floating-point drift', () => {
     const pipeline = pipelineWith(new StubModel('A', 0.1), new StubModel('B', 0.2));
     const rules = [makeRule({ id: 'r1', model: 'A' }), makeRule({ id: 'r2', model: 'B' })];
-    const result = pipeline.execute(rules, makeInput(), new TraceBuilder(), NONE);
+    const result = pipeline.execute(rules, makeInput(), new TraceBuilder(), NONE, 1);
     expect(result.outputs['value']?.value).toBe(0.3);
   });
 
   it('gives value 0 with no contributor when no rule feeds it', () => {
-    const result = pipelineWith().execute([], makeInput(), new TraceBuilder(), NONE);
+    const result = pipelineWith().execute([], makeInput(), new TraceBuilder(), NONE, 1);
     expect(result).toEqual({
       outputs: {
         value: { name: 'value', type: 'number', combine: 'sum', value: 0, contributors: [] },
@@ -78,7 +78,7 @@ describe('ExecutionPipeline', () => {
       makeRule({ id: 'r1', model: 'M', version: 3, sourceRef: 'CGI art. 12' }),
       makeRule({ id: 'r2', model: 'RISK', output: 'risk' }),
     ];
-    const result = pipeline.execute(rules, makeInput(), trace, NONE);
+    const result = pipeline.execute(rules, makeInput(), trace, NONE, 1);
 
     expect(result.breakdown).toEqual([
       {
@@ -130,7 +130,7 @@ describe('ExecutionPipeline', () => {
       makeRule({ id: 'z', model: 'M', priority: 900 }),
       makeRule({ id: 'a', model: 'M', priority: 100, version: 1 }),
     ];
-    const result = pipeline.execute(rules, makeInput(), trace, NONE);
+    const result = pipeline.execute(rules, makeInput(), trace, NONE, 1);
     const expected = ['z@1', 'a@1', 'a@2', 'b@1'];
     expect(result.applied.map((r) => `${r.id}@${r.version}`)).toEqual(expected);
     expect(trace.build().steps.map((s) => `${s.ruleId}@${s.ruleVersion}`)).toEqual(expected);
@@ -154,6 +154,7 @@ describe('ExecutionPipeline', () => {
         makeInput(),
         new TraceBuilder(),
         NONE,
+        1,
       );
       const detail =
         'rules feeding output risk declare it differently: ' +
@@ -180,6 +181,7 @@ describe('ExecutionPipeline', () => {
         makeInput(),
         new TraceBuilder(),
         NONE,
+        1,
       );
       expect(result.skipped.map((s) => s.reason)).toEqual(['OUTPUT_MISMATCH', 'OUTPUT_MISMATCH']);
       expect(result.outputs['risk']).toBeUndefined();
@@ -194,6 +196,7 @@ describe('ExecutionPipeline', () => {
         makeInput(),
         trace,
         NONE,
+        1,
       );
       expect(result.skipped).toEqual([
         {
@@ -217,7 +220,7 @@ describe('ExecutionPipeline', () => {
       );
       const a = makeRule({ id: 'a', model: 'OBJ', output: 'terms' });
       const n = makeRule({ id: 'n', model: 'NAN' });
-      const result = pipeline.execute([a, n], makeInput(), new TraceBuilder(), NONE);
+      const result = pipeline.execute([a, n], makeInput(), new TraceBuilder(), NONE, 1);
       expect(result.skipped).toEqual([
         {
           rule: a,
@@ -249,6 +252,7 @@ describe('ExecutionPipeline', () => {
         makeInput(),
         new TraceBuilder(),
         NONE,
+        1,
       );
       expect(result.outputs['x']?.value).toEqual({ rate: 1 });
       expect(result.outputs['y']?.value).toEqual({ value: 2, rate: 3 });
@@ -277,6 +281,7 @@ describe('ExecutionPipeline', () => {
         makeInput(),
         trace,
         shortCircuits,
+        1,
       );
       expect(result.outputs).toEqual({
         risk: {
@@ -333,6 +338,7 @@ describe('ExecutionPipeline', () => {
         makeInput(),
         new TraceBuilder(),
         new Map([['risk', { rule: carrier, value: 'high', declaration: RISK }]]),
+        1,
       );
       expect(risk.calls).toBe(0);
       expect(result.outputs['risk']).toEqual({
@@ -368,6 +374,7 @@ describe('ExecutionPipeline', () => {
         makeInput(),
         new TraceBuilder(),
         new Map([['risk', { rule: carrier, value: 'low', declaration: RISK }]]),
+        1,
       );
       expect(result.outputs['value']).toEqual({
         name: 'value',
@@ -399,6 +406,7 @@ describe('ExecutionPipeline', () => {
         new Map([
           ['value', { rule: carrier, value: 5, declaration: { type: 'number', combine: 'sum' } }],
         ]),
+        1,
       );
       expect(result.skipped).toEqual([
         { rule: stray, reason: 'SHORT_CIRCUITED', detail: 'output value short-circuited by X@1' },
@@ -432,6 +440,7 @@ describe('ExecutionPipeline', () => {
           makeInput(),
           new TraceBuilder(),
           NONE,
+          1,
         );
         expect(result.skipped).toEqual([{ rule: x, reason: 'OUTPUT_MISMATCH', detail }]);
         expect(result.outputs.value.value).toBe(2);
@@ -447,8 +456,10 @@ describe('ExecutionPipeline', () => {
       });
       const holey = pipelineWith(new ValueModel('O', object, { a: nested }));
       const rule = makeRule({ id: 'a', model: 'O', output: 'o' });
-      expect(pipeline.execute([rule], makeInput(), new TraceBuilder(), NONE).skipped).toEqual([]);
-      expect(holey.execute([rule], makeInput(), new TraceBuilder(), NONE).skipped).toEqual([
+      expect(pipeline.execute([rule], makeInput(), new TraceBuilder(), NONE, 1).skipped).toEqual(
+        [],
+      );
+      expect(holey.execute([rule], makeInput(), new TraceBuilder(), NONE, 1).skipped).toEqual([
         {
           rule,
           reason: 'OUTPUT_MISMATCH',
@@ -467,6 +478,7 @@ describe('ExecutionPipeline', () => {
       makeInput(),
       new TraceBuilder(),
       NONE,
+      1,
     );
     expect(result.skipped).toEqual([
       {
@@ -488,6 +500,7 @@ describe('ExecutionPipeline', () => {
         makeInput(),
         new TraceBuilder(),
         NONE,
+        1,
       );
       expect.unreachable('should have thrown');
     } catch (e) {
@@ -517,6 +530,7 @@ describe('ExecutionPipeline', () => {
         makeInput(),
         trace,
         NONE,
+        1,
       );
       expect(result.outputs['tax']).toEqual({
         name: 'tax',
@@ -568,6 +582,7 @@ describe('ExecutionPipeline', () => {
         makeInput(),
         new TraceBuilder(),
         NONE,
+        1,
       );
       expect(result.outputs['tax']?.value).toBe('2.01');
       expect(result.breakdown.map((b) => [b.contribution, Object.hasOwn(b, 'unrounded')])).toEqual([
@@ -599,6 +614,7 @@ describe('ExecutionPipeline', () => {
         makeInput(),
         new TraceBuilder(),
         NONE,
+        1,
       );
       const detail =
         'rules feeding output tax declare it differently: ' +
@@ -630,6 +646,7 @@ describe('ExecutionPipeline', () => {
         makeInput(),
         new TraceBuilder(),
         NONE,
+        1,
       );
       expect(result.skipped).toEqual([]);
       expect(result.outputs['tax']?.value).toBe('2.01');
@@ -638,7 +655,7 @@ describe('ExecutionPipeline', () => {
     it('excludes a rule feeding value with a decimal declaration', () => {
       const amount = new ValueModel('AMOUNT', { type: 'decimal', combine: 'sum' }, { a: '1' });
       const a = makeRule({ id: 'a', model: 'AMOUNT' });
-      const result = pipelineWith(amount).execute([a], makeInput(), new TraceBuilder(), NONE);
+      const result = pipelineWith(amount).execute([a], makeInput(), new TraceBuilder(), NONE, 1);
       expect(result.skipped).toEqual([
         {
           rule: a,
@@ -667,6 +684,7 @@ describe('ExecutionPipeline', () => {
           makeInput(),
           new TraceBuilder(),
           NONE,
+          1,
         );
         expect.unreachable('should have thrown');
       } catch (e) {
@@ -689,6 +707,7 @@ describe('ExecutionPipeline', () => {
         makeInput(),
         new TraceBuilder(),
         new Map<string, ShortCircuit>([['amount', { rule: carrier, value, declaration }]]),
+        1,
       );
 
     it("normalizes and rounds the imposed value at 'output', recording it unrounded in the step", () => {
@@ -735,6 +754,7 @@ describe('ExecutionPipeline', () => {
             },
           ],
         ]),
+        1,
       );
       expect(result.outputs['amount']?.value).toBe('1.01');
       expect(result.breakdown.map((b) => [b.contribution, b.unrounded])).toEqual([

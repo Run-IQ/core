@@ -36,11 +36,12 @@ import { PluginSandbox } from '../security/PluginSandbox.js';
 import { SnapshotManager } from '../snapshot/SnapshotManager.js';
 import { SnapshotSerializer } from '../snapshot/SnapshotSerializer.js';
 import { VERSION } from '../utils/version.js';
+import { frozenErrorCopy } from '../utils/frozenCopy.js';
 import { describeThrown, ruleLabel } from '../utils/values.js';
 import { acceptAfterEvaluate } from './afterEvaluateTransition.js';
 import { readBeforeEvaluate } from './beforeEvaluateResult.js';
 import { Budget, RuleLedger, readItems } from './pluginBoundary.js';
-import { trapped } from './frozenView.js';
+import { ViewScope } from './frozenView.js';
 import type { LedgerOutcome } from './pluginBoundary.js';
 import type { BeforeEvaluateReading } from './beforeEvaluateResult.js';
 
@@ -322,6 +323,7 @@ export class PPEEngine {
     const hookDiagnostics: Diagnostic[] = [];
     const pluginState: Record<string, JsonValue> = {};
     let currentInput = prepared.input;
+    let currentInputNodes = prepared.leaves;
     let currentMeta = prepared.meta;
     let currentDate = prepared.evaluationDate;
     // All the nodes the returns of the hooks of this evaluation make the engine read count against
@@ -382,6 +384,7 @@ export class PPEEngine {
       }
       signal.throwIfAborted();
       currentInput = accepted.input;
+      currentInputNodes = accepted.leaves;
       currentMeta = accepted.meta;
       currentDate = accepted.evaluationDate;
       currentRules = outcome.rules;
@@ -422,6 +425,7 @@ export class PPEEngine {
       currentInput,
       traceBuilder,
       exceptionResult.shortCircuits,
+      currentInputNodes,
     );
     allSkipped.push(...pipelineResult.skipped);
     // Every stage lists its own exclusions; the decision lists them by id@version, whatever the
@@ -470,7 +474,7 @@ export class PPEEngine {
       try {
         // A view that refuses every write, over the result as it is: nothing is copied, and a
         // field the hook returns unchanged is the very object of the view.
-        const handed = trapped(before);
+        const handed = new ViewScope().trapped(before);
         const returned = await this.sandbox.runHook(
           () => hook.call(plugin, hookView(currentInput), handed),
           plugin.name,
@@ -494,6 +498,7 @@ export class PPEEngine {
       ENGINE_VERSION,
       pluginVersions,
       dslVersions,
+      this.limits.maxRecordLength,
     );
 
     signal.throwIfAborted();
@@ -542,35 +547,6 @@ function countRules(rules: unknown): number {
   }
   // Not a list: `readItems` says so, as a `ValidationError`.
   return 0;
-}
-
-/**
- * A deep, frozen copy of an error for a plugin that is told of it: its own properties, its `cause`
- * chain and any list in it, copied, so that nothing a plugin writes reaches the error the caller
- * receives. Bounded in depth, and safe on cycles.
- */
-function frozenErrorCopy(value: unknown, depth = 0, seen = new Map<object, unknown>()): unknown {
-  if (typeof value !== 'object' || value === null) return value;
-  const known = seen.get(value);
-  if (known !== undefined) return known;
-  if (depth > 16) return '[too deep]';
-  try {
-    const copy: object = Array.isArray(value) ? [] : Object.create(Object.getPrototypeOf(value));
-    seen.set(value, copy);
-    for (const key of Reflect.ownKeys(value)) {
-      const descriptor = Reflect.getOwnPropertyDescriptor(value, key);
-      if (descriptor === undefined || !('value' in descriptor)) continue;
-      Object.defineProperty(copy, key, {
-        value: frozenErrorCopy(descriptor.value, depth + 1, seen),
-        enumerable: descriptor.enumerable === true,
-        writable: false,
-        configurable: false,
-      });
-    }
-    return Object.freeze(copy);
-  } catch {
-    return '[unreadable]';
-  }
 }
 
 /** True when two canonical metas have the same canonical form (a value without one differs). */

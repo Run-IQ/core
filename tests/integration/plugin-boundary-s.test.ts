@@ -1,3 +1,4 @@
+import { UnexpectedEngineError } from '../../src/errors/UnexpectedEngineError.js';
 import { describe, it, expect } from 'vitest';
 import vm from 'node:vm';
 import { PPEEngine } from '../../src/engine/PPEEngine.js';
@@ -454,7 +455,8 @@ describe('S5: writes are trapped and classified by class, never by message', () 
     };
     const built = build([regModel(thrower)]);
     const error = await failure(built, [makeRule({ id: 't', model: 'TH' })]);
-    expect(error).toBeInstanceOf(TypeError);
+    expect(error).toBeInstanceOf(UnexpectedEngineError);
+    expect((error as { cause: unknown }).cause).toBeInstanceOf(TypeError);
   });
 
   it("E5: a write into the model's own frozen table fails the evaluation", async () => {
@@ -470,7 +472,8 @@ describe('S5: writes are trapped and classified by class, never by message', () 
     };
     const built = build([regModel(own)]);
     const error = await failure(built, [makeRule({ id: 'o', model: 'OWN' })]);
-    expect(error).toBeInstanceOf(TypeError);
+    expect(error).toBeInstanceOf(UnexpectedEngineError);
+    expect((error as { cause: unknown }).cause).toBeInstanceOf(TypeError);
   });
 
   it("a DSL writing into its expression is that rule's DSL_ERROR", async () => {

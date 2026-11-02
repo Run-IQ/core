@@ -13,6 +13,7 @@ import {
   ValueModel,
   InMemorySnapshotAdapter,
   expectSameFailure,
+  expectCopyOf,
 } from '../helpers.js';
 // Imported from the package entry: both errors are public.
 import {
@@ -207,7 +208,7 @@ describe('Hook errors', () => {
       hook: 'beforeEvaluate',
       message: 'plugin broken beforeEvaluate failed: boom',
     });
-    expect((error as PluginHookError).cause).toBe(thrown);
+    expectCopyOf((error as PluginHookError).cause, thrown);
   });
 
   it('calls onError with the PluginHookError and the input given to evaluate', async () => {
@@ -231,7 +232,7 @@ describe('Hook errors', () => {
     expectSameFailure(onError.mock.calls[0]?.[0], error);
     expect(onError.mock.calls[0]?.[1]).toBe(input);
     expect(error).toBeInstanceOf(PluginHookError);
-    expect((error as PluginHookError).cause).toBe(thrown);
+    expectCopyOf((error as PluginHookError).cause, thrown);
   });
 
   it('a failing onError does not hide the hook failure from the caller', async () => {
@@ -642,7 +643,7 @@ describe('Hook timeouts and onError typing', () => {
     });
     const error = await failure(engineWith([broken]), [makeRule({ id: 'r1', model: 'M' })]);
     expect(error).toBeInstanceOf(PluginHookError);
-    expect((error as PluginHookError).cause).toBe(thrown);
+    expectCopyOf((error as PluginHookError).cause, thrown);
     // The PluginHookError is a PPEError: onError gets it as it is, not wrapped.
     expectSameFailure(onError.mock.calls[0]?.[0], error);
   });
@@ -658,12 +659,12 @@ describe('Hook timeouts and onError typing', () => {
     });
     const error = await failure(engineWith([broken]), [makeRule({ id: 'r1', model: 'M' })]);
     expect(error).toBeInstanceOf(PluginHookError);
-    expect((error as PluginHookError).cause).toBe(thrown);
+    expectCopyOf((error as PluginHookError).cause, thrown);
     expect(onError).toHaveBeenCalledTimes(1);
     expectSameFailure(onError.mock.calls[0]?.[0], error);
   });
 
-  it('gives onError a wrapped engine error while the caller gets the original', async () => {
+  it('gives onError and the caller an engine error holding a frozen copy of the throw', async () => {
     const thrown = new RangeError('model crash');
     const onError = vi.fn();
     const crashing: PPEPlugin = {
@@ -682,7 +683,13 @@ describe('Hook timeouts and onError typing', () => {
     };
     const engine = new PPEEngine({ plugins: [crashing], dsls: [], strict: false });
     const outcome = engine.evaluate([makeRule({ id: 'r1', model: 'CRASH' })], makeInput());
-    await expect(outcome).rejects.toBe(thrown);
+    const received: unknown = await outcome.then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    // The caller never holds the object the model threw: it is an engine error with a copy.
+    expect(received).toBeInstanceOf(UnexpectedEngineError);
+    expectCopyOf((received as { cause: unknown }).cause, thrown);
     expect(onError).toHaveBeenCalledTimes(1);
     const error: unknown = onError.mock.calls[0]?.[0];
     expect(error).toBeInstanceOf(UnexpectedEngineError);

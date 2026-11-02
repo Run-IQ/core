@@ -186,3 +186,23 @@ export function expectSameFailure(told: unknown, received: unknown): void {
     expect(ca?.name).toEqual(cb.name);
   }
 }
+
+/**
+ * `copy` is the engine's frozen copy of the thrown value `original`: not the same object (the one
+ * a plugin holds is never handed on), frozen, of the same prototype, with the same message, name
+ * and enumerable own values. A primitive is the same value.
+ */
+export function expectCopyOf(copy: unknown, original: unknown): void {
+  if (typeof original !== 'object' || original === null) {
+    expect(copy).toBe(original);
+    return;
+  }
+  expect(copy).not.toBe(original);
+  if (typeof copy !== 'object' || copy === null) return; // '[unreadable]' for a hostile value
+  expect(Object.isFrozen(copy)).toBe(true);
+  expect(Object.getPrototypeOf(copy)).toBe(Object.getPrototypeOf(original));
+  const a = copy as Record<string, unknown>;
+  const b = original as Record<string, unknown>;
+  expect(a['message']).toEqual(b['message']);
+  expect(a['name']).toEqual(b['name']);
+}

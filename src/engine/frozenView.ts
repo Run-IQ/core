@@ -6,47 +6,77 @@ import { FrozenViewWriteError } from '../errors/FrozenViewWriteError.js';
 // from a `TypeError` of the model's own, and ignored in sloppy mode. A view traps the write itself
 // and throws a dedicated error, so the rule that wrote is told apart by class, never by message.
 
-const VIEWS = new WeakMap<object, object>();
-
-/** What a view shows for a member: a view of an object, a copy of a `Date`, a primitive as is. */
-function show(member: unknown): unknown {
-  if (typeof member !== 'object' || member === null) return member;
-  // A `Date` is a fresh copy at each read: a reader that moves it moves nobody else's.
-  return isDateObject(member)
-    ? new Date(Date.prototype.getTime.call(member) as number)
-    : view(member);
-}
-
 /**
- * The errors the views threw: an error is recognised as a refused write by being in this set,
- * never by its class, which any code can construct.
+ * The views of one call into plugin code (one `calculate`, one `validateParams`, one
+ * `listVariables`, one DSL evaluation, one `afterEvaluate`). The views belong to the scope and so
+ * do the errors they throw: an error is a refused write only for the scope that threw it, and
+ * only while that call is the one being judged. An error caught in one call and thrown again in
+ * another, or forged by any code, is not one (it is the plugin's own throw).
  */
-const VIEW_ERRORS = new WeakSet<object>();
+export class ViewScope {
+  private readonly views = new WeakMap<object, object>();
+  private readonly errors = new WeakSet<object>();
 
-/** True for an error a view threw for a write (not one that merely looks like it). */
-export function isViewWriteError(error: unknown): error is FrozenViewWriteError {
-  return typeof error === 'object' && error !== null && VIEW_ERRORS.has(error);
+  /**
+   * A view of `value` that reads like the value and refuses every write, deeply and lazily. A
+   * primitive is returned as it is. The same object always gives the same view within this
+   * scope. Object identity is that of the view, not of the engine's object.
+   */
+  trapped<T>(value: T): T {
+    if (typeof value !== 'object' || value === null) return value;
+    return this.view(value) as T;
+  }
+
+  /** True for an error a view of this scope threw for a write (not one that merely looks like it). */
+  isWriteError(error: unknown): error is FrozenViewWriteError {
+    return typeof error === 'object' && error !== null && this.errors.has(error);
+  }
+
+  private refuse(key: string | symbol): never {
+    const error = new FrozenViewWriteError(typeof key === 'symbol' ? key.toString() : key);
+    this.errors.add(error);
+    throw error;
+  }
+
+  /** What a view shows for a member: a view of an object, a copy of a `Date`, a primitive as is. */
+  private show(member: unknown): unknown {
+    if (typeof member !== 'object' || member === null) return member;
+    // A `Date` is a fresh copy at each read: a reader that moves it moves nobody else's.
+    return isDateObject(member)
+      ? new Date(Date.prototype.getTime.call(member) as number)
+      : this.view(member);
+  }
+
+  private view(real: object): object {
+    return viewOf(this, real);
+  }
+
+  /** @internal */
+  _known(real: object): object | undefined {
+    return this.views.get(real);
+  }
+
+  /** @internal */
+  _set(real: object, proxy: object): void {
+    this.views.set(real, proxy);
+  }
+
+  /** @internal */
+  _show(member: unknown): unknown {
+    return this.show(member);
+  }
+
+  /** @internal */
+  _refuse(key: string | symbol): never {
+    return this.refuse(key);
+  }
 }
 
-const refuse = (key: string | symbol): never => {
-  const error = new FrozenViewWriteError(typeof key === 'symbol' ? key.toString() : key);
-  VIEW_ERRORS.add(error);
-  throw error;
-};
-
-/**
- * A view of `value` that reads like the value and refuses every write, deeply and lazily. A
- * primitive is returned as it is. The same object always gives the same view. Object identity
- * is that of the view, not of the engine's object.
- */
-export function trapped<T>(value: T): T {
-  if (typeof value !== 'object' || value === null) return value;
-  return view(value) as T;
-}
-
-function view(real: object): object {
-  const known = VIEWS.get(real);
+function viewOf(scope: ViewScope, real: object): object {
+  const known = scope._known(real);
   if (known !== undefined) return known;
+  const show = (member: unknown): unknown => scope._show(member);
+  const refuse = (key: string | symbol): never => scope._refuse(key);
   // The target is an empty stand-in: the invariants of a Proxy are about its target, and a frozen
   // target would force every read to return the very same object.
   const isList = Array.isArray(real);
@@ -88,7 +118,8 @@ function view(real: object): object {
             (field === 'configurable' && descriptor.configurable === false) ||
             (field === 'writable' && descriptor.writable === false),
         );
-      if (freezing) return true;
+      // Only an existing property can be frozen: a new key on a closed stand-in is a write.
+      if (freezing && Reflect.getOwnPropertyDescriptor(target, key) !== undefined) return true;
       return refuse(key);
     },
     deleteProperty: (_target, key) => refuse(key),
@@ -114,6 +145,6 @@ function view(real: object): object {
       return true;
     },
   });
-  VIEWS.set(real, proxy);
+  scope._set(real, proxy);
   return proxy;
 }

@@ -97,8 +97,12 @@ describe('hostile thrown values', () => {
           hook,
           message: `plugin bad ${hook} failed: ${message}`,
         });
-        // Compared by identity: printing or deep-comparing a hostile proxy would throw.
-        expect(error instanceof PluginHookError && error.cause === value).toBe(true);
+        // Never the hostile object itself: a copy where it can be read, else a marker string.
+        expect(error instanceof PluginHookError).toBe(true);
+        const cause = (error as PluginHookError).cause;
+        // Compared with `!==`: printing or deep-comparing a hostile proxy would throw.
+        if (typeof value === 'object' && value !== null) expect(cause !== value).toBe(true);
+        else expect(cause === value).toBe(true);
         expect(onError).toHaveBeenCalledTimes(1);
         expectSameFailure(onError.mock.calls[0]?.[0], error);
       });

@@ -28,8 +28,11 @@ describe('DEFAULT_LIMITS', () => {
       maxReferentialNodes: 100_000,
       maxGroupDepth: 64,
       maxRuleLeaves: 100_000,
-      maxHookLeaves: 3_000_000,
-      maxRuleSetNodes: 3_500_000,
+      maxHookLeaves: 600_000,
+      maxRuleSetNodes: 2_000_000,
+      maxStringLength: 1_000_000,
+      maxRecordLength: 256_000_000,
+      maxTraceNodes: 2_000_000,
     });
     expect(Object.isFrozen(DEFAULT_LIMITS)).toBe(true);
   });

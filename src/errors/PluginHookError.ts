@@ -1,5 +1,6 @@
 import { PPEError } from './PPEError.js';
 import { describeThrown } from '../utils/values.js';
+import { frozenErrorCopy } from '../utils/frozenCopy.js';
 
 /**
  * A plugin hook failed, so the evaluation fails (fail closed): a decision is never returned when
@@ -13,10 +14,15 @@ export class PluginHookError extends PPEError {
   constructor(
     public readonly plugin: string,
     public readonly hook: 'beforeEvaluate' | 'afterEvaluate',
-    /** The error the hook threw, or the error describing what was refused. */
-    public override readonly cause: unknown,
+    cause: unknown,
   ) {
     super(`plugin ${plugin} ${hook} failed: ${describeThrown(cause)}`, 'PLUGIN_HOOK');
     this.name = 'PluginHookError';
+    // What the hook threw is captured once, as a deep-frozen copy: the object the plugin holds is
+    // never handed on, so nothing it does afterwards changes the failure the caller reads.
+    this.cause = frozenErrorCopy(cause);
   }
+
+  /** The error the hook threw (a frozen copy of it), or the error describing what was refused. */
+  declare readonly cause: unknown;
 }

@@ -45,6 +45,21 @@ export function refusalsOf(rule: object): readonly string[] | undefined {
   return REFUSALS.get(rule);
 }
 
+/**
+ * A value that could not be read: a property that threw, a hole, a symbol key. `causes` holds what
+ * the properties threw, in order, so that the caller can tell a refused write from the plugin's
+ * own throw.
+ */
+export class ReadFailure extends Error {
+  constructor(
+    message: string,
+    public readonly causes: readonly unknown[],
+  ) {
+    super(message);
+    this.name = 'ReadFailure';
+  }
+}
+
 /** The leaves read from one list or one return, against one declared limit. */
 export class Budget {
   leaves = 0;
@@ -96,7 +111,9 @@ export function readBounded(
   );
   try {
     const copy = copier.copy(value, what);
-    if (copier.reasons.length > 0) throw new Error(copier.reasons.join('; '));
+    if (copier.reasons.length > 0) {
+      throw new ReadFailure(copier.reasons.join('; '), copier.thrown);
+    }
     if (copier.refusals.length > 0) {
       // A rule that is itself not plain is a hard refusal; a member of it excludes the rule.
       if (typeof copy !== 'object' || copy === null) throw new TypeError(copier.refusals[0]);
@@ -386,6 +403,10 @@ export class RuleLedger {
         if (!this.owned.has(rule) && !intact(rule)) {
           fail(`rewrote rule ${label}: its content is not the one it was given`);
         }
+        // A copy that holds an object that is not plain, or an invalid `Date`, is read as a string
+        // that may equal what was given: it is still not the rule that was given.
+        const refusals = refusalsOf(rule);
+        if (refusals !== undefined) fail(`returned rule ${label} with ${refusals[0]}`);
         used.add(entry);
         kept.add(entry);
         continue;
@@ -416,6 +437,8 @@ export class RuleLedger {
       if (entry === undefined || (!this.owned.has(skip.rule) && !intact(skip.rule))) {
         fail(`skipped rule ${label} with a content other than the one it was given`);
       }
+      const refusals = refusalsOf(skip.rule);
+      if (refusals !== undefined) fail(`skipped rule ${label} with ${refusals[0]}`);
       // justification: the `if` above throws when `entry` is `undefined`.
       used.add(entry as Entry);
       skipped.push(

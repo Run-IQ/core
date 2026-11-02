@@ -147,6 +147,19 @@ export class InputSanitizer {
     if (isRecord(declared) && Object.keys(declared).length === 0) {
       reasons.push('/meta/dimensions is empty: omit it to declare no dimensions');
     }
+    // `undefined` is not a JSON value. In `dimensions` and `dates` the canonical form would drop a
+    // key that holds it, and an input that declares a dimension would then decide like one that
+    // declares none: it is refused, with its pointer, like any other value that is not JSON.
+    for (const part of ['dimensions', 'dates'] as const) {
+      const members: unknown = metaCopy[part];
+      if (!isRecord(members)) continue;
+      for (const [name, value] of Object.entries(members)) {
+        if (value === undefined)
+          reasons.push(
+            `/meta/${part}/${name.replace(/~/g, '~0').replace(/\//g, '~1')} is not JSON: undefined`,
+          );
+      }
+    }
     if (copier.reasons.length > 0 || reasons.length > 0) {
       throw new ValidationError('Invalid evaluation input', [...reasons, ...copier.reasons]);
     }

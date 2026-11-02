@@ -10,8 +10,13 @@ export class EngineLimitError extends PPEError {
     public readonly limit: keyof EngineLimits,
     public readonly max: number,
     public readonly actual: number,
+    /** Where the bound was passed, when it is a place in the data (`/data/text`). */
+    public readonly pointer?: string,
   ) {
-    super(`engine limit ${limit} exceeded: ${actual} > ${max}`, 'ENGINE_LIMIT');
+    super(
+      `engine limit ${limit} exceeded: ${actual} > ${max}${pointer === undefined ? '' : ` at ${pointer}`}`,
+      'ENGINE_LIMIT',
+    );
     this.name = 'EngineLimitError';
   }
 }

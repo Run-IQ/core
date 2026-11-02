@@ -1,4 +1,4 @@
-import { trapped } from './frozenView.js';
+import { ViewScope } from './frozenView.js';
 import type { Rule } from '../types/rule.js';
 import type { EvaluationInput } from '../types/input.js';
 import type { Diagnostic } from '../types/diagnostic.js';
@@ -187,7 +187,8 @@ export class RuleFilter {
 
     // 3. Dimension filter (only when the input declares dimensions), by spec's matchDimension
     const inputDimensions = scope.meta.dimensions;
-    if (scope.input.meta.dimensions !== undefined && rule.dimensions !== undefined) {
+    // The gate is the canonical meta, the one that is recorded: an input decides by it alone.
+    if (Object.keys(inputDimensions).length > 0 && rule.dimensions !== undefined) {
       // The civil date of the evaluation, in UTC: 9P refines it (the rule's reference date).
       const on = now.toISOString().slice(0, 10);
       for (const [key, spec] of Object.entries(rule.dimensions)) {
@@ -238,10 +239,11 @@ export class RuleFilter {
       }
 
       try {
+        const views = new ViewScope();
         const result = await this.sandbox.runDSL(
           evaluator,
-          trapped(rule.condition.value),
-          trapped(scope.context),
+          views.trapped(rule.condition.value),
+          views.trapped(scope.context),
         );
         if (!result) {
           return { reason: 'CONDITION_FALSE', detail: 'condition evaluated to false' };
