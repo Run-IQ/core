@@ -188,21 +188,22 @@ export function expectSameFailure(told: unknown, received: unknown): void {
 }
 
 /**
- * `copy` is the engine's frozen copy of the thrown value `original`: not the same object (the one
- * a plugin holds is never handed on), frozen, of the same prototype, with the same message, name
- * and enumerable own values. A primitive is the same value.
+ * `cause` is what the engine kept of a value a plugin threw: text, not the object. A frozen plain
+ * record with the thrown value's `name` and `message` (and its string `code`), read once; a value
+ * that is not an object is its text as the message.
  */
-export function expectCopyOf(copy: unknown, original: unknown): void {
-  if (typeof original !== 'object' || original === null) {
-    expect(copy).toBe(original);
-    return;
+export function expectCopyOf(cause: unknown, original: unknown): void {
+  expect(typeof cause).toBe('object');
+  expect(cause).not.toBe(original);
+  expect(Object.isFrozen(cause)).toBe(true);
+  const kept = cause as { name?: unknown; message?: unknown; code?: unknown };
+  if (typeof original === 'object' && original !== null) {
+    const given = original as { name?: unknown; message?: unknown; code?: unknown };
+    expect(kept.name).toBe(typeof given.name === 'string' ? given.name : 'Error');
+    expect(kept.message).toBe(typeof given.message === 'string' ? given.message : '');
+    if (typeof given.code === 'string') expect(kept.code).toBe(given.code);
+    expect(Object.getPrototypeOf(cause)).toBe(Object.prototype);
+  } else {
+    expect(kept.message).toBe(String(original));
   }
-  expect(copy).not.toBe(original);
-  if (typeof copy !== 'object' || copy === null) return; // '[unreadable]' for a hostile value
-  expect(Object.isFrozen(copy)).toBe(true);
-  expect(Object.getPrototypeOf(copy)).toBe(Object.getPrototypeOf(original));
-  const a = copy as Record<string, unknown>;
-  const b = original as Record<string, unknown>;
-  expect(a['message']).toEqual(b['message']);
-  expect(a['name']).toEqual(b['name']);
 }

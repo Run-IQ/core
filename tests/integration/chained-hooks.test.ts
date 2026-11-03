@@ -230,7 +230,10 @@ describe('Hook errors', () => {
     expect(onError).toHaveBeenCalledTimes(1);
     expect(onError).toHaveBeenCalledTimes(1);
     expectSameFailure(onError.mock.calls[0]?.[0], error);
-    expect(onError.mock.calls[0]?.[1]).toBe(input);
+    // The engine's frozen copy, never the caller's own object.
+    expect(onError.mock.calls[0]?.[1]).not.toBe(input);
+    expect(onError.mock.calls[0]?.[1]).toEqual(input);
+    expect(Object.isFrozen(onError.mock.calls[0]?.[1])).toBe(true);
     expect(error).toBeInstanceOf(PluginHookError);
     expectCopyOf((error as PluginHookError).cause, thrown);
   });

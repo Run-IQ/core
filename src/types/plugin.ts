@@ -29,6 +29,13 @@ export interface PPEPlugin {
   readonly name: string;
   readonly version: string;
 
+  /**
+   * Called once, when the engine is built. Synchronous: a promise it returns is a breach, never
+   * awaited, and a throw or a promise makes the construction fail with a `PluginHookError`
+   * (`hook: 'onInit'`). The `name` and `version` of a plugin, a model and a DSL are read once, when
+   * they are registered, and checked: a name is 1 to 128 characters of letters, digits and
+   * `. _ - @ /`, a version is semver of at most 64 characters.
+   */
   onInit(context: PluginContext): void;
 
   /**
@@ -107,15 +114,16 @@ export interface PPEPlugin {
   ): UnsealedResult | Promise<UnsealedResult>;
 
   /**
-   * Told of errors, never asked to recover from them. `error` is the thrown value when it is a
-   * `PPEError`; any other thrown value (a model's `RangeError`, a hook's `TypeError`...) arrives
-   * wrapped in `UnexpectedEngineError`, whose `cause` is the value as thrown. The caller of
-   * `evaluate` always receives the original value.
+   * Told of errors, never asked to recover from them. It is synchronous: a promise it returns is
+   * a breach, never awaited, its rejection handled. `error` is a deep-frozen copy of the
+   * evaluation's failure, which the engine built; what a plugin threw is in it as text
+   * (`name`, `message`, `code`), never as the object the plugin holds. `input` is the engine's
+   * own frozen copy of the input, never the caller's object (a frozen empty input when the failure
+   * came before the input was read). The caller of `evaluate` receives the failure itself.
    *
    * - The evaluation failed (a hook failure, which is a `PluginHookError`; invalid input,
    *   `ModelNotFoundError`, `OutputNotFiniteError`, conflicts...): called on every plugin, in
-   *   registration order, with that error and the input given to `evaluate`. No later hook runs
-   *   and nothing is saved. If `onError`
+   *   registration order. No later hook runs and nothing is saved. If `onError`
    *   throws, its failure is dropped: the evaluation's own error always reaches the caller.
    * - Not called for `PipelineTimeoutError`, nor for anything that happens after it: the
    *   pipeline still running is aborted at its next step (no further hook, no save, no

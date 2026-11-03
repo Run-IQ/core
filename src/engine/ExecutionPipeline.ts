@@ -10,10 +10,10 @@ import { describeThrown, isPlainObject, ruleLabel } from '../utils/values.js';
 import type { ShortCircuit } from './ExceptionProcessor.js';
 import type { TraceBuilder } from './TraceBuilder.js';
 import { OutputCombiner } from './OutputCombiner.js';
-import { ReadFailure, defaultCrossing, readBounded } from './pluginBoundary.js';
+import { ReadFailure, causesOf, defaultCrossing, readBounded } from './pluginBoundary.js';
 import type { Budget } from './pluginBoundary.js';
 import { clip } from '../utils/frozenCopy.js';
-import { EngineLimitError } from '../errors/EngineLimitError.js';
+import { isRaisedLimit, raiseLimit } from '../errors/EngineLimitError.js';
 import { ViewScope } from './frozenView.js';
 import { UnexpectedEngineError } from '../errors/UnexpectedEngineError.js';
 import type { EngineLimits } from '../limits.js';
@@ -219,8 +219,8 @@ export class ExecutionPipeline {
           });
         } catch (error) {
           // The budget of the evaluation is the engine's bound, not that rule's fault.
-          if (error instanceof EngineLimitError && error.limit === 'maxHookLeaves') throw error;
-          const causes = error instanceof ReadFailure ? error.causes : [];
+          if (isRaisedLimit(error) && error.limit === 'maxHookLeaves') throw error;
+          const causes = error instanceof ReadFailure ? causesOf(error) : [];
           const written = causes.find((cause) => views.isWriteError(cause));
           if (written !== undefined) {
             skipped.push({ rule, reason: 'MODEL_ERROR', detail: (written as Error).message });
@@ -280,7 +280,7 @@ export class ExecutionPipeline {
     // bound on either one alone holds. Past `maxTraceNodes` the evaluation is refused, by name.
     const traceNodes = inputNodes * steps.length;
     if (traceNodes > this.limits.maxTraceNodes) {
-      throw new EngineLimitError('maxTraceNodes', this.limits.maxTraceNodes, traceNodes);
+      throw raiseLimit('maxTraceNodes', this.limits.maxTraceNodes, traceNodes);
     }
     for (const step of steps) {
       const { rule } = step;

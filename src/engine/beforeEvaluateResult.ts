@@ -1,11 +1,19 @@
 import type { JsonValue } from '@run-iq/spec';
+import { BoundaryError } from './pluginPort.js';
 import type { EngineLimits } from '../limits.js';
 import type { BeforeEvaluateResult } from '../types/plugin.js';
 import type { Rule } from '../types/rule.js';
 import type { SkippedRule } from '../types/result.js';
 import { describeValue, findNonJson } from '../utils/json.js';
 import { isObject } from '../utils/values.js';
-import { PLUGIN_SKIP_REASONS, readBounded, readItems, readSkips } from './pluginBoundary.js';
+
+import {
+  PLUGIN_SKIP_REASONS,
+  readBounded,
+  readItems,
+  readSkips,
+  guarded,
+} from './pluginBoundary.js';
 import type { Budget, OwnedRules } from './pluginBoundary.js';
 
 /** What the engine takes from a `beforeEvaluate` result, read once and checked. */
@@ -45,8 +53,18 @@ export function readBeforeEvaluate(
   budget: Budget,
   owned: OwnedRules,
 ): BeforeEvaluateReading {
+  return guarded(() => readResult(pluginName, returned, limits, budget, owned));
+}
+
+function readResult(
+  pluginName: string,
+  returned: BeforeEvaluateResult,
+  limits: Readonly<EngineLimits>,
+  budget: Budget,
+  owned: OwnedRules,
+): BeforeEvaluateReading {
   const refuse = (what: string): TypeError =>
-    new TypeError(`plugin ${pluginName} beforeEvaluate returned ${what}`);
+    new BoundaryError(`plugin ${pluginName} beforeEvaluate returned ${what}`);
   const raw: unknown = returned;
   if (!isObject(raw)) throw refuse(`${describeValue(raw)}, not a result`);
   // Read by name, once each (own, non-enumerable or inherited getters alike).
@@ -86,7 +104,10 @@ export function readBeforeEvaluate(
 
   // justification: typed as JSON only to be handed to `findNonJson` on the next line, which checks
   // it before anything uses it.
+  const charsBefore = budget.readChars;
   const state = readBounded(stateIn, limits, 'state', { budget }) as JsonValue | undefined;
+  // The state is kept in the record (`pluginState`): its text is certain to be there.
+  budget.record(budget.readChars - charsBefore);
   const stateNotJson = state === undefined ? undefined : findNonJson(state);
   if (stateNotJson !== undefined) throw refuse(`a state that is not JSON at ${stateNotJson}`);
   return {

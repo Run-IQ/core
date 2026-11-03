@@ -5,7 +5,7 @@ import type { UnsealedResult } from '../types/result.js';
 import type { Rule } from '../types/rule.js';
 import type { EvaluationTrace } from '../types/trace.js';
 import type { Snapshot } from '../types/snapshot.js';
-import { EngineLimitError } from '../errors/EngineLimitError.js';
+import { raiseLimit } from '../errors/EngineLimitError.js';
 import { DEFAULT_LIMITS } from '../limits.js';
 
 export class SnapshotSerializer {
@@ -21,7 +21,7 @@ export class SnapshotSerializer {
   ): Snapshot {
     // Deep immutable copy — structuredClone preserves Date objects (Node 17+)
     const tooLong = (): never => {
-      throw new EngineLimitError('maxRecordLength', maxRecordLength, maxRecordLength + 1);
+      throw raiseLimit('maxRecordLength', maxRecordLength, maxRecordLength + 1);
     };
     const clone = <T>(value: T): T => {
       try {
@@ -65,7 +65,7 @@ export class SnapshotSerializer {
       return tooLong();
     }
     if (text.length > maxRecordLength) {
-      throw new EngineLimitError('maxRecordLength', maxRecordLength, text.length);
+      throw raiseLimit('maxRecordLength', maxRecordLength, text.length);
     }
     const checksum = createHash('sha256').update(text).digest('hex');
 

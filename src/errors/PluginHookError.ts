@@ -1,6 +1,7 @@
 import { PPEError } from './PPEError.js';
 import { describeThrown } from '../utils/values.js';
-import { frozenErrorCopy } from '../utils/frozenCopy.js';
+import { clip, frozenErrorCopy } from '../utils/frozenCopy.js';
+import { describeFault, isPluginFault } from '../engine/pluginPort.js';
 import { markEngineError } from './engineError.js';
 
 /**
@@ -17,11 +18,15 @@ export class PluginHookError extends PPEError {
     public readonly hook: 'onInit' | 'beforeEvaluate' | 'afterEvaluate',
     cause: unknown,
   ) {
-    super(`plugin ${plugin} ${hook} failed: ${describeThrown(cause)}`, 'PLUGIN_HOOK');
+    // What the plugin threw is held as text, read once (see `faultOf`); an error the engine raised
+    // while checking what the plugin returned is copied. The message is built from what is kept.
+    const fault = isPluginFault(cause) ? cause.fault : undefined;
+    super(
+      `plugin ${plugin} ${hook} failed: ${fault === undefined ? clip(describeThrown(cause)) : describeFault(fault)}`,
+      'PLUGIN_HOOK',
+    );
     this.name = 'PluginHookError';
-    // What the hook threw is captured once, as a deep-frozen copy: the object the plugin holds is
-    // never handed on, so nothing it does afterwards changes the failure the caller reads.
-    this.cause = frozenErrorCopy(cause);
+    this.cause = fault === undefined ? frozenErrorCopy(cause) : Object.freeze({ ...fault });
   }
 
   /** The error the hook threw (a frozen copy of it), or the error describing what was refused. */

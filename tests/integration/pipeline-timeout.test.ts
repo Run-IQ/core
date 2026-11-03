@@ -2,15 +2,17 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import { PipelineTimeoutError } from '../../src/errors/PipelineTimeoutError.js';
 import { ValidationError } from '../../src/errors/ValidationError.js';
-import type { DSLEvaluator } from '../../src/types/dsl.js';
+import type { PPEPlugin } from '../../src/types/plugin.js';
 import { makeRule, makeInput, StubModel, StubPlugin } from '../helpers.js';
 
-// A DSL evaluator that takes a long time to evaluate
-const slowDslEvaluator: DSLEvaluator = {
-  dsl: 'slow-dsl',
+// A plugin whose hook takes a long time (a hook may be async; a DSL may not).
+const slowPlugin: PPEPlugin = {
+  name: 'slow',
   version: '1.0.0',
-  evaluate: (_expression: unknown, _context: Record<string, unknown>): boolean => {
-    return new Promise((resolve) => setTimeout(() => resolve(true), 500)) as unknown as boolean;
+  onInit: () => undefined,
+  beforeEvaluate: async (input, rules) => {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    return { input, rules };
   },
 };
 
@@ -20,18 +22,13 @@ describe('Pipeline-level timeout', () => {
     const plugin = new StubPlugin('test', [model]);
 
     const engine = new PPEEngine({
-      plugins: [plugin],
-      dsls: [slowDslEvaluator],
+      plugins: [plugin, slowPlugin],
+      dsls: [],
       strict: false,
       timeout: { dsl: 5000, hook: 5000, pipeline: 50 },
     });
 
-    const rule = makeRule({
-      id: 'r1',
-      model: 'M',
-      params: {},
-      condition: { dsl: 'slow-dsl', value: { always: true } },
-    });
+    const rule = makeRule({ id: 'r1', model: 'M', params: {} });
 
     await expect(engine.evaluate([rule], makeInput())).rejects.toThrow(PipelineTimeoutError);
   });

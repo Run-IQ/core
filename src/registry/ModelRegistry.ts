@@ -7,54 +7,83 @@ import { ModelNotFoundError } from '../errors/ModelNotFoundError.js';
 import { InvalidModelError } from '../errors/InvalidModelError.js';
 import { InputCopier } from '../input/copyInput.js';
 import { DEFAULT_LIMITS } from '../limits.js';
+import { isAnyViewError } from '../engine/frozenView.js';
+import { callSync, readIdentity, registering } from '../engine/pluginPort.js';
 
 /**
  * A copy of a declaration a plugin gave (`output`, `capabilities`): read once, frozen, plain, so
  * that a later write by anybody holding the model is not seen. Throws `InvalidModelError`
- * naming what cannot be copied.
+ * naming what cannot be copied. Call inside `registering`.
  */
 export function copyDeclaration(value: unknown, owner: string, what: string): unknown {
-  const copier = new InputCopier(DEFAULT_LIMITS, 'maxRuleLeaves', true, true);
+  const copier = new InputCopier(DEFAULT_LIMITS, 'maxRuleLeaves', true, true, true);
   const copy = copier.copy(value, what);
   const problems = [...copier.reasons, ...copier.refusals];
   if (problems.length > 0) throw new InvalidModelError(owner, problems);
   return copy;
 }
 
+type Fn = (...args: never[]) => unknown;
+
+/** What the engine took from a model when it was registered, and keeps. */
+interface Declared {
+  readonly version: string;
+  readonly output: OutputDeclaration | undefined;
+  readonly validateParams: Fn;
+  readonly calculate: Fn;
+  readonly listVariables: Fn | undefined;
+  readonly describeParams: Fn | undefined;
+}
+
 /**
  * The calculation models by name. Models of any output type register without a cast; a model
  * whose `output` declaration `validateOutputDeclaration` of `@run-iq/spec` refuses is refused
- * with `InvalidModelError`.
+ * with `InvalidModelError`. A model is read once, when it is registered (its `name` and `version`,
+ * its `output` and its functions); the engine keeps those copies and never reads the model again.
  */
 export class ModelRegistry {
   private readonly models = new Map<string, CalculationModel<OutputValue>>();
-  /** What was registered: the version and the output declaration, each copied at that moment. */
-  private readonly declared = new Map<
-    string,
-    { readonly version: string; readonly output: OutputDeclaration | undefined }
-  >();
+  private readonly declared = new Map<string, Declared>();
 
   register(model: CalculationModel<OutputValue>): void {
-    const name = model.name;
-    if (this.models.has(name)) {
-      throw new Error(`Model "${name}" is already registered`);
-    }
-    // The declaration is copied once and the copy is the one validated: what the registry holds is
-    // what was checked, whatever the model object is made to answer afterwards.
-    let output: OutputDeclaration | undefined;
-    const given: unknown = model.output; // read once
-    if (given !== undefined) {
-      output = copyDeclaration(given, name, '/output') as OutputDeclaration;
-      const issues = validateOutputDeclaration(output);
-      if (issues.length > 0) {
-        throw new InvalidModelError(
-          name,
-          issues.map((issue) => issue.message),
-        );
+    registering(() => {
+      const { name, version } = readIdentity(model, 'model', 'name');
+      if (this.models.has(name)) {
+        throw new Error(`Model "${name}" is already registered`);
       }
-    }
-    this.models.set(name, model);
-    this.declared.set(name, { version: model.version, output });
+      // The declaration is copied once and the copy is the one validated: what the registry holds
+      // is what was checked, whatever the model object is made to answer afterwards.
+      let output: OutputDeclaration | undefined;
+      const given: unknown = model.output; // read once
+      if (given !== undefined) {
+        output = copyDeclaration(given, name, '/output') as OutputDeclaration;
+        const issues = validateOutputDeclaration(output);
+        if (issues.length > 0) {
+          throw new InvalidModelError(
+            name,
+            issues.map((issue) => issue.message),
+          );
+        }
+      }
+      const functionOf = (key: keyof CalculationModel, required: boolean): Fn | undefined => {
+        const fn: unknown = model[key];
+        if (typeof fn === 'function') return fn as Fn;
+        if (required || fn !== undefined) {
+          throw new InvalidModelError(name, [`${String(key)} must be a function`]);
+        }
+        return undefined;
+      };
+      const declared: Declared = {
+        version,
+        output,
+        validateParams: functionOf('validateParams', true) as Fn,
+        calculate: functionOf('calculate', true) as Fn,
+        listVariables: functionOf('listVariables', false),
+        describeParams: functionOf('describeParams', false),
+      };
+      this.models.set(name, model);
+      this.declared.set(name, declared);
+    });
   }
 
   get(name: string): CalculationModel<OutputValue> {
@@ -76,48 +105,57 @@ export class ModelRegistry {
 
   /**
    * A registry fixed at this moment: a model registered or replaced later is not seen by it, and
-   * neither is a change to a model object: the functions are taken now and called on the model
-   * as it is now. An evaluation works on one, so that what its rules were validated against is
-   * what runs.
+   * neither is a change to a model object: what was taken when it was registered is what runs. An
+   * evaluation works on one, so that what its rules were validated against is what runs.
    */
   snapshot(): ModelRegistry {
     const fixed = new ModelRegistry();
     for (const [name, model] of this.models) {
       // justification: `register` sets both maps together.
-      const declared = this.declared.get(name) as NonNullable<ReturnType<typeof this.declared.get>>;
+      const declared = this.declared.get(name) as Declared;
       fixed.models.set(name, fixModel(name, model, declared));
+      fixed.declared.set(name, declared);
     }
     return fixed;
   }
 }
 
 /**
- * A frozen record of `model` as it is now: its name, version and output declaration as they were
- * registered (the declaration is the validated copy), and its functions taken once and bound, so
- * that a later assignment to `model.calculate` or to `model.output` (by any plugin holding the
- * model) is not seen by the evaluation. The functions run on the model object itself: its own
- * `this` state is its plugin's (see the threat model in the README).
+ * A frozen record of a model: its name, version and output declaration as they were registered
+ * (the declaration is the validated copy), and its functions as they were registered, each called
+ * through the port (a throw is a fault, a promise is a breach). The functions run on the model
+ * object itself: its own `this` state is its plugin's (see the threat model in the README).
  */
 function fixModel(
   name: string,
   model: CalculationModel<OutputValue>,
-  declared: { readonly version: string; readonly output: OutputDeclaration | undefined },
+  declared: Declared,
 ): CalculationModel<OutputValue> {
-  const { validateParams, calculate, listVariables, describeParams } = model;
+  const call =
+    (fn: Fn) =>
+    (...args: unknown[]): unknown =>
+      callSync(fn, model, args, isAnyViewError);
+  const { listVariables, describeParams } = declared;
   return Object.freeze({
     name,
     version: declared.version,
     ...(declared.output === undefined ? {} : { output: declared.output }),
-    validateParams: (params: unknown) => validateParams.call(model, params),
+    validateParams: call(declared.validateParams) as CalculationModel['validateParams'],
     calculate: (
       input: Record<string, unknown>,
       rule: Readonly<Rule>,
       params: unknown,
     ): ReturnType<CalculationModel<OutputValue>['calculate']> =>
-      calculate.call(model, input, rule, params),
+      callSync(declared.calculate, model, [input, rule, params], isAnyViewError) as ReturnType<
+        CalculationModel<OutputValue>['calculate']
+      >,
     ...(listVariables === undefined
       ? {}
-      : { listVariables: (params: unknown) => listVariables.call(model, params) }),
-    ...(describeParams === undefined ? {} : { describeParams: () => describeParams.call(model) }),
+      : { listVariables: call(listVariables) as NonNullable<CalculationModel['listVariables']> }),
+    ...(describeParams === undefined
+      ? {}
+      : {
+          describeParams: call(describeParams) as NonNullable<CalculationModel['describeParams']>,
+        }),
   });
 }

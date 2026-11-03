@@ -43,14 +43,15 @@ const pluginWith = (name: string, hooks: Partial<PPEPlugin>): PPEPlugin => ({
   ...hooks,
 });
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-const slowDsl: DSLEvaluator = {
-  dsl: 'slow',
+/** A hook that takes a while (a hook may be async; a DSL may not). */
+const slowHook: PPEPlugin = {
+  name: 'slowhook',
   version: '1.0.0',
-  evaluate: () => true,
-};
-const slowAsync: DSLEvaluator = {
-  ...slowDsl,
-  evaluate: (() => sleep(30).then(() => true)) as never,
+  onInit: () => undefined,
+  beforeEvaluate: async (input, rules) => {
+    await sleep(30);
+    return { input, rules };
+  },
 };
 
 interface Built {
@@ -174,19 +175,18 @@ describe('S1: nothing is kept by reference; one definition of plain', () => {
     expect(error).toBeInstanceOf(PluginHookError);
   });
 
-  it('A4b: a foreign source rule changed by the caller during a DSL await keeps its checked content', async () => {
+  it('A4b: a foreign source rule changed by the caller during a hook await keeps its checked content', async () => {
     const rule = foreign<Rule>(
-      `({ id: 'tax', version: 1, model: 'FLAT', priority: 100, tags: [], params: { rate: 5 }, effectiveFrom: '2024-01-01', effectiveUntil: null, condition: { dsl: 'slow', value: null }, checksum: '' })`,
+      `({ id: 'tax', version: 1, model: 'FLAT', priority: 100, tags: [], params: { rate: 5 }, effectiveFrom: '2024-01-01', effectiveUntil: null, checksum: '' })`,
     );
     const good = makeRule({
       id: 'tax',
       model: 'FLAT',
       params: { rate: 5 },
-      condition: { dsl: 'slow', value: null },
       effectiveFrom: '2024-01-01' as never,
     });
     (rule as { checksum: string }).checksum = good.checksum;
-    const built = build([], {}, [slowAsync]);
+    const built = build([slowHook]);
     const pending = built.engine.evaluate([rule], makeInput());
     setTimeout(() => ((rule.params as { rate: number }).rate = 999), 5);
     const result = await pending;
@@ -205,16 +205,12 @@ describe('S1: nothing is kept by reference; one definition of plain', () => {
       params: { rate: 7 },
       effectiveFrom: '2024-01-01' as never,
     }).checksum;
-    const built = build(
-      [pluginWith('h', { beforeEvaluate: (input, rules) => ({ input, rules: [...rules, add] }) })],
-      {},
-      [slowAsync],
-    );
+    const built = build([
+      pluginWith('h', { beforeEvaluate: (input, rules) => ({ input, rules: [...rules, add] }) }),
+      slowHook,
+    ]);
     setTimeout(() => ((add.params as { rate: number }).rate = 7000), 5);
-    const result = await built.engine.evaluate(
-      [makeRule({ id: 'slow', model: 'M', condition: { dsl: 'slow', value: null } })],
-      makeInput(),
-    );
+    const result = await built.engine.evaluate([makeRule({ id: 'slow', model: 'M' })], makeInput());
     expect(result.appliedRules.find((r) => r.id === 'add')?.params).toEqual({ rate: 7 });
   });
 
@@ -456,7 +452,7 @@ describe('S5: writes are trapped and classified by class, never by message', () 
     const built = build([regModel(thrower)]);
     const error = await failure(built, [makeRule({ id: 't', model: 'TH' })]);
     expect(error).toBeInstanceOf(UnexpectedEngineError);
-    expect((error as { cause: unknown }).cause).toBeInstanceOf(TypeError);
+    expect((error as { cause: unknown }).cause).toMatchObject({ name: 'TypeError' });
   });
 
   it("E5: a write into the model's own frozen table fails the evaluation", async () => {
@@ -473,7 +469,7 @@ describe('S5: writes are trapped and classified by class, never by message', () 
     const built = build([regModel(own)]);
     const error = await failure(built, [makeRule({ id: 'o', model: 'OWN' })]);
     expect(error).toBeInstanceOf(UnexpectedEngineError);
-    expect((error as { cause: unknown }).cause).toBeInstanceOf(TypeError);
+    expect((error as { cause: unknown }).cause).toMatchObject({ name: 'TypeError' });
   });
 
   it("a DSL writing into its expression is that rule's DSL_ERROR", async () => {

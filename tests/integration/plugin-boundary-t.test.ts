@@ -282,7 +282,7 @@ describe('T5, T6, T7: the views', () => {
     const built = build([regModel('reg', forger)]);
     const error = await failure(built, [makeRule({ id: 'f', model: 'FOR' })]);
     expect(error).toBeInstanceOf(UnexpectedEngineError);
-    expect((error as { cause: unknown }).cause).toBeInstanceOf(FrozenViewWriteError);
+    expect((error as { cause: unknown }).cause).toMatchObject({ name: 'FrozenViewWriteError' });
   });
 });
 

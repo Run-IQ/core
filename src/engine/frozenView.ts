@@ -14,6 +14,14 @@ import { FrozenViewWriteError } from '../errors/FrozenViewWriteError.js';
  * only while that call is the one being judged. An error caught in one call and thrown again in
  * another, or forged by any code, is not one (it is the plugin's own throw).
  */
+/** Every error a view of any scope threw: a brand the engine alone sets (the set is private). */
+const ALL_VIEW_ERRORS = new WeakSet<object>();
+
+/** True for an error some view of the engine threw for a write (whichever call it belongs to). */
+export function isAnyViewError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && ALL_VIEW_ERRORS.has(error);
+}
+
 export class ViewScope {
   private readonly views = new WeakMap<object, object>();
   private readonly errors = new WeakSet<object>();
@@ -36,6 +44,7 @@ export class ViewScope {
   private refuse(key: string | symbol): never {
     const error = new FrozenViewWriteError(clip(typeof key === 'symbol' ? key.toString() : key));
     this.errors.add(error);
+    ALL_VIEW_ERRORS.add(error);
     throw error;
   }
 

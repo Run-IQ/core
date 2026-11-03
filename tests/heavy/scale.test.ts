@@ -455,6 +455,45 @@ describe('the worst case: every limit at its default, on the costliest shape, at
     expect(error).toMatchObject({ limit: 'maxHookLeaves' });
   }, 60_000);
 
+  it('W3: three afterEvaluate plugins that each set 20 shared texts of control characters are refused by name, quickly', async () => {
+    const hostile = '\u0001'.repeat(DEFAULT_LIMITS.maxStringLength);
+    const annotating = (name: string): PPEPlugin => ({
+      name,
+      version: '1.0.0',
+      onInit: () => undefined,
+      afterEvaluate: (_input, result) => ({
+        ...result,
+        meta: {
+          ...(result.meta ?? {}),
+          [name]: Array.from({ length: 20 }, () => hostile),
+        },
+      }),
+    });
+    const engine = new PPEEngine({
+      plugins: [
+        new StubPlugin('p', [new StubModel('M', 1)]),
+        annotating('one'),
+        annotating('two'),
+        annotating('three'),
+      ],
+      dsls: [],
+      strict: false,
+    });
+    const rules = Array.from({ length: 8 }, (_, i) => makeRule({ id: `a${i}`, model: 'M' }));
+    const start = performance.now();
+    const error = await engine.evaluate(rules, makeInput()).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    expect(performance.now() - start).toBeLessThan(5_000);
+    expect((error as { cause?: unknown }).cause).toBeInstanceOf(EngineLimitError);
+    // One meta of 20 such texts is already past the bound of one read; the budget of the
+    // evaluation catches what several plugins add together.
+    expect(['maxInputLeaves', 'maxHookLeaves']).toContain(
+      ((error as { cause: { limit: string } }).cause as { limit: string }).limit,
+    );
+  }, 60_000);
+
   it('many rules sharing one string of maxStringLength characters: finishes or is refused by name, under 10 s', async () => {
     const rules = Array.from({ length: 100 }, (_, i) => texty(`s${i}`));
     const engine = new PPEEngine({

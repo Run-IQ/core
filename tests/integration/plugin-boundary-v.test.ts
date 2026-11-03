@@ -389,7 +389,7 @@ describe('V5: a refused write is only the one a view of this call threw', () => 
       makeInput({ requestId: 'second' }),
     );
     expect(error).toBeInstanceOf(UnexpectedEngineError);
-    expect((error as UnexpectedEngineError).cause).toBeInstanceOf(FrozenViewWriteError);
+    expect((error as UnexpectedEngineError).cause).toMatchObject({ name: 'FrozenViewWriteError' });
   });
 
   it('Vr: an error caught from the result view of afterEvaluate and thrown by validateParams fails', async () => {

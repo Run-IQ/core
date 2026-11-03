@@ -1,5 +1,4 @@
 import { describe, it, expect } from 'vitest';
-import { expectCopyOf } from '../helpers.js';
 import { PluginHookError } from '../../src/errors/PluginHookError.js';
 import { HookTimeoutError } from '../../src/errors/HookTimeoutError.js';
 import { PPEError } from '../../src/errors/PPEError.js';
@@ -17,14 +16,18 @@ describe('PluginHookError', () => {
       hook: 'beforeEvaluate',
       message: 'plugin fiscal beforeEvaluate failed: too big',
     });
-    expectCopyOf(error.cause, cause);
+    expect(error.cause).not.toBe(cause);
+    expect(error.cause).toBeInstanceOf(RangeError);
+    expect((error.cause as Error).message).toBe('too big');
+    expect(Object.isFrozen(error.cause)).toBe(true);
   });
 
   it('keeps a HookTimeoutError as its cause', () => {
     const cause = new HookTimeoutError('slow', 'afterEvaluate', 50);
     const error = new PluginHookError('slow', 'afterEvaluate', cause);
-    expectCopyOf(error.cause, cause);
+    expect(error.cause).not.toBe(cause);
     expect(error.cause).toBeInstanceOf(HookTimeoutError);
+    expect((error.cause as Error).message).toBe(cause.message);
     expect(error.hook).toBe('afterEvaluate');
     expect(error.message).toBe(
       'plugin slow afterEvaluate failed: plugin slow hook afterEvaluate timed out after 50 ms',

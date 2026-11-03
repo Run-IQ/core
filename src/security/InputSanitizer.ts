@@ -1,4 +1,4 @@
-import { EngineLimitError } from '../errors/EngineLimitError.js';
+import { raiseLimit } from '../errors/EngineLimitError.js';
 import { validateProofInput } from '@run-iq/spec';
 import type { ProofInput } from '@run-iq/spec';
 import type { EvaluationInput } from '../types/input.js';
@@ -112,12 +112,7 @@ export class InputSanitizer {
       reasons.push('requestId must be a non-empty string');
     } else if (requestId.length > limits.maxStringLength) {
       // The id is text the record holds: held to the same bound as any other text.
-      throw new EngineLimitError(
-        'maxStringLength',
-        limits.maxStringLength,
-        requestId.length,
-        '/requestId',
-      );
+      throw raiseLimit('maxStringLength', limits.maxStringLength, requestId.length, '/requestId');
     }
     if (!isRecord(dataIn)) reasons.push('data must be a non-null object');
 

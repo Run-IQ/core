@@ -6,7 +6,8 @@ import { DEFAULT_LIMITS } from '../limits.js';
 import type { PPEPlugin } from '../types/plugin.js';
 import type { CalculationModel } from '../types/model.js';
 import type { DSLEvaluator } from '../types/dsl.js';
-import { EngineLimitError } from '../errors/EngineLimitError.js';
+import { isRaisedLimit, raiseLimit } from '../errors/EngineLimitError.js';
+import { markEngineError } from '../errors/engineError.js';
 import { InputCopier } from '../input/copyInput.js';
 import type { RuleValidator } from '../security/RuleValidator.js';
 import { compareRuleIdentity } from './resolveTie.js';
@@ -14,6 +15,8 @@ import { ruleLabel } from '../utils/values.js';
 import { isPlainPrototype } from '../utils/plain.js';
 import { ViewScope } from './frozenView.js';
 import { clip } from '../utils/frozenCopy.js';
+import { BoundaryError, PluginFaultError, faultOf, isPluginFault, reading } from './pluginPort.js';
+import { CHARS_PER_NODE, serializedLength } from '../utils/weight.js';
 
 // The plugin trust boundary, in one place. The engine owns its state; a plugin is handed views of
 // it and never the objects the engine holds; what a plugin returns is read once, bounded, copied
@@ -57,13 +60,24 @@ export function refusalsOf(rule: object): readonly string[] | undefined {
  * own throw.
  */
 export class ReadFailure extends Error {
-  constructor(
-    message: string,
-    public readonly causes: readonly unknown[],
-  ) {
+  constructor(message: string, causes: readonly unknown[]) {
     super(message);
     this.name = 'ReadFailure';
+    CAUSES.set(this, causes);
   }
+}
+
+/**
+ * What the properties of a value threw, by failure. It is kept out of the error (an own property
+ * of it would be copied with it): the engine classifies the causes at the site that catches the
+ * failure and keeps none of them.
+ */
+const CAUSES = new WeakMap<object, readonly unknown[]>();
+markEngineError(ReadFailure);
+
+/** What the properties threw while the failed value was read, in order (empty if nothing threw). */
+export function causesOf(failure: ReadFailure): readonly unknown[] {
+  return CAUSES.get(failure) ?? [];
 }
 
 /**
@@ -77,19 +91,67 @@ export function charsOfRule(rule: object): number {
   return RULE_CHARS.get(rule) ?? 0;
 }
 
+/**
+ * The reader for the code that walks a value a plugin gave by hand (the fields of a hook's result,
+ * the items of its lists): the engine's own refusals and limits pass as they are, and whatever else
+ * is thrown while a plugin's getter or trap runs inside it is a fault of the plugin, held as text.
+ */
+export function guarded<T>(fn: () => T): T {
+  return reading(() => {
+    try {
+      return fn();
+    } catch (error) {
+      if (
+        error instanceof BoundaryError ||
+        error instanceof ReadFailure ||
+        error instanceof MalformedResult ||
+        isRaisedLimit(error) ||
+        isPluginFault(error)
+      ) {
+        throw error;
+      }
+      throw new PluginFaultError(faultOf(error));
+    }
+  });
+}
+
 /** The leaves read from one list or one return, against one declared limit. */
 export class Budget {
   leaves = 0;
+  /**
+   * The exact serialized length of the text that plugin code handed the engine and that the record
+   * is certain to hold (a skip detail, a `meta` or a `pluginState` of `afterEvaluate`): a lower
+   * bound of the record, known before it is built.
+   */
+  recordChars = 0;
 
   constructor(
     private readonly name: 'maxHookLeaves' | 'maxInputLeaves' | 'maxRuleSetNodes',
     private readonly max: number,
   ) {}
 
+  /** Notes `chars` more characters the record is certain to hold. */
+  record(chars: number): void {
+    this.recordChars += chars;
+  }
+
+  /** The characters read in total, whether or not the record certainly holds them. */
+  readChars = 0;
+
+  noteChars(chars: number): void {
+    this.readChars += chars;
+  }
+
+  /** Counts a text the engine kept from plugin code: its weight, and its place in the record. */
+  addText(text: string): void {
+    this.add(1 + Math.floor(serializedLength(text) / CHARS_PER_NODE));
+    this.record(serializedLength(text));
+  }
+
   /** Counts `count` more leaves; past the limit it throws `EngineLimitError`. */
   add(count: number): void {
     this.leaves += count;
-    if (this.leaves > this.max) throw new EngineLimitError(this.name, this.max, this.leaves);
+    if (this.leaves > this.max) throw raiseLimit(this.name, this.max, this.leaves);
   }
 }
 
@@ -128,6 +190,15 @@ export function readBounded(
   what: string,
   options: ReadOptions = {},
 ): unknown {
+  return reading(() => readOnce(value, limits, what, options));
+}
+
+function readOnce(
+  value: unknown,
+  limits: Readonly<EngineLimits>,
+  what: string,
+  options: ReadOptions,
+): unknown {
   // A scalar that is not text is one node, read once: no walk to set up (a model answers with a
   // number for most rules).
   if (
@@ -154,7 +225,7 @@ export function readBounded(
     }
     if (copier.refusals.length > 0) {
       // A rule that is itself not plain is a hard refusal; a member of it excludes the rule.
-      if (typeof copy !== 'object' || copy === null) throw new TypeError(copier.refusals[0]);
+      if (typeof copy !== 'object' || copy === null) throw new BoundaryError(copier.refusals[0]);
       REFUSALS.set(
         copy,
         copier.refusals.map((refusal) =>
@@ -165,6 +236,7 @@ export function readBounded(
     return copy;
   } finally {
     options.budget?.add(options.budgetMode === 'text' ? copier.textNodes : copier.leaves);
+    options.budget?.noteChars(copier.chars);
   }
 }
 
@@ -208,15 +280,25 @@ export function readItems(
   budget: Budget,
   owned: OwnedRules,
 ): unknown[] {
-  if (!Array.isArray(value)) throw new TypeError(`${what} is not a list`);
+  return guarded(() => readList(value, limits, what, budget, owned));
+}
+
+function readList(
+  value: unknown,
+  limits: Readonly<EngineLimits>,
+  what: string,
+  budget: Budget,
+  owned: OwnedRules,
+): unknown[] {
+  if (!Array.isArray(value)) throw new BoundaryError(`${what} is not a list`);
   const length = value.length;
   if (!Number.isSafeInteger(length) || length < 0)
-    throw new TypeError(`${what} has no valid length`);
-  if (length > limits.maxRules) throw new EngineLimitError('maxRules', limits.maxRules, length);
+    throw new BoundaryError(`${what} has no valid length`);
+  if (length > limits.maxRules) throw raiseLimit('maxRules', limits.maxRules, length);
   const items: unknown[] = [];
   for (let index = 0; index < length; index += 1) {
     if (!Object.hasOwn(value, index)) {
-      throw new TypeError(`${what} has a hole at index ${index}: lists must be dense`);
+      throw new BoundaryError(`${what} has a hole at index ${index}: lists must be dense`);
     }
     const item: unknown = value[index];
     if (typeof item === 'object' && item !== null && owned.has(item)) {
@@ -247,25 +329,35 @@ export function readSkips(
   budget: Budget,
   owned: OwnedRules,
 ): { rule: unknown; reason: unknown; detail: unknown }[] {
-  if (!Array.isArray(value)) throw new TypeError('skipped is not a list');
+  return guarded(() => readSkipList(value, limits, budget, owned));
+}
+
+function readSkipList(
+  value: unknown,
+  limits: Readonly<EngineLimits>,
+  budget: Budget,
+  owned: OwnedRules,
+): { rule: unknown; reason: unknown; detail: unknown }[] {
+  if (!Array.isArray(value)) throw new BoundaryError('skipped is not a list');
   const length = value.length;
   if (!Number.isSafeInteger(length) || length < 0)
-    throw new TypeError('skipped has no valid length');
-  if (length > limits.maxRules) throw new EngineLimitError('maxRules', limits.maxRules, length);
+    throw new BoundaryError('skipped has no valid length');
+  if (length > limits.maxRules) throw raiseLimit('maxRules', limits.maxRules, length);
   const skips: { rule: unknown; reason: unknown; detail: unknown }[] = [];
   for (let index = 0; index < length; index += 1) {
     if (!Object.hasOwn(value, index)) {
-      throw new TypeError(`skipped has a hole at index ${index}: lists must be dense`);
+      throw new BoundaryError(`skipped has a hole at index ${index}: lists must be dense`);
     }
     const raw: unknown = value[index];
     if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-      throw new TypeError('a malformed skipped');
+      throw new BoundaryError('a malformed skipped');
     }
-    if (!isPlainPrototype(Object.getPrototypeOf(raw))) throw new TypeError('a malformed skipped');
+    if (!isPlainPrototype(Object.getPrototypeOf(raw)))
+      throw new BoundaryError('a malformed skipped');
     const record: Record<string, unknown> = {};
     for (const key of Reflect.ownKeys(raw)) {
       if (key !== 'rule' && key !== 'reason' && key !== 'detail') {
-        throw new TypeError('a malformed skipped');
+        throw new BoundaryError('a malformed skipped');
       }
       // Read once, here: a getter answers once and the answer is the one that is checked.
       // justification: `raw` is a plain object (checked above); `key` is one of three names.
@@ -280,7 +372,7 @@ export function readSkips(
         readText(detailIn, { limits, budget }, `skipped/${index}/detail`);
       } catch (error) {
         if (error instanceof TypeError)
-          throw new TypeError('a malformed skipped', { cause: error });
+          throw new BoundaryError('a malformed skipped', { cause: error });
         throw error;
       }
     }
@@ -548,6 +640,7 @@ export class MalformedResult extends Error {
     this.name = 'MalformedResult';
   }
 }
+markEngineError(MalformedResult);
 
 /** What the engine took from a `validateParams`. */
 export type ParamsVerdict =
@@ -580,34 +673,43 @@ export function askValidateParams(
     const raw = model.validateParams(scope.trapped(params));
     // The answer every model gives for almost every rule, `{ valid: true }`, read as the reader
     // reads it (the prototype and the keys once, the property as a data property) without the walk.
-    if (isPlainValid(raw)) return VALID;
+    if (reading(() => isPlainValid(raw))) return VALID;
     const result = readBounded(raw, crossing.limits, what, {
       leafLimit: 'maxRuleLeaves',
       budget: crossing.budget,
       budgetMode: 'text',
     });
     verdict = judgeValidation(result, what);
+    // The text of what the engine keeps of it (the detail of a skip) is in the record; its weight
+    // against the budget was counted when it was read.
+    if (verdict.kind === 'invalid') crossing.budget.record(serializedLength(verdict.errors));
   } catch (error) {
-    if (error instanceof EngineLimitError) {
+    if (isRaisedLimit(error)) {
       // A bound of one result is that rule's fault; the budget of the evaluation is the engine's.
       if (error.limit === 'maxHookLeaves') throw error;
-      return { kind: 'error', detail: clip(`${what}: ${error.message}`) };
+      return errorVerdict(crossing, clip(`${what}: ${error.message}`));
     }
-    if (error instanceof MalformedResult) return { kind: 'error', detail: clip(error.message) };
-    const causes = error instanceof ReadFailure ? error.causes : [error];
+    if (error instanceof MalformedResult) return errorVerdict(crossing, clip(error.message));
+    const causes = error instanceof ReadFailure ? causesOf(error) : [error];
     const written = causes.find((cause) => scope.isWriteError(cause));
     if (written !== undefined) {
-      return { kind: 'error', detail: clip((written as Error).message) };
+      return errorVerdict(crossing, clip((written as Error).message));
     }
     if (error instanceof ReadFailure && causes.length === 0) {
-      return {
-        kind: 'error',
-        detail: clip(`${what} returned a result that cannot be read: ${error.message}`),
-      };
+      return errorVerdict(
+        crossing,
+        clip(`${what} returned a result that cannot be read: ${error.message}`),
+      );
     }
     throw foreign(causes[0] ?? error);
   }
   return verdict;
+}
+
+/** A model that broke its contract: the rule is excluded, and the text of the detail is weighed. */
+function errorVerdict(crossing: Crossing, detail: string): ParamsVerdict {
+  crossing.budget.addText(detail);
+  return { kind: 'error', detail };
 }
 
 const VALID: ParamsVerdict = Object.freeze({ kind: 'valid' });
@@ -666,11 +768,14 @@ export function readVerdict(raw: unknown, crossing: Crossing, what: string): unk
  * length.
  */
 export function readText(value: unknown, crossing: Crossing, what: string): string {
-  if (typeof value !== 'string') throw new TypeError(`${what} is not a string`);
+  if (typeof value !== 'string') throw new BoundaryError(`${what} is not a string`);
   const copier = new InputCopier(crossing.limits, 'maxRuleLeaves');
-  const extra = copier.text(value, () => what);
-  crossing.budget.add(1 + extra);
-  return value;
+  return reading(() => {
+    const extra = copier.text(value, () => what);
+    crossing.budget.add(1 + extra);
+    crossing.budget.record(copier.chars);
+    return value;
+  });
 }
 
 type FunctionKeys<T> = {
@@ -688,6 +793,12 @@ export type PluginCallback =
 export interface CrossingPoint {
   /** True when the engine calls it; false when it is declared and nothing calls it yet. */
   readonly called: boolean;
+  /**
+   * `sync`: the contract is synchronous, a promise it returns is a breach (never awaited, its
+   * rejection handled). `async`: the engine awaits it, within the time limit of the evaluation,
+   * and a rejection is a fault of the plugin. `none`: nothing is called.
+   */
+  readonly contract: 'sync' | 'async' | 'none';
   /** What comes back from the call and what is thrown, and the reader that takes each. */
   readonly reads: string;
 }
@@ -695,9 +806,11 @@ export interface CrossingPoint {
 /**
  * The inventory of the crossing points: every callback a plugin can give, and how what it returns
  * or throws reaches the engine. A value made by plugin code enters the engine through the one
- * reader (`readBounded`, and the `readText` and `askValidateParams` that call it) or, for a throw,
- * through `UnexpectedEngineError.foreign` / `PluginHookError` (a bounded, frozen copy), and through
- * nothing else. The type makes a new callback without an entry a compile error, and
+ * port (`pluginPort.ts`: `reading`, `callSync`, `callAsync`, `faultOf`) and the one reader
+ * (`readBounded`, and the `readText` and `askValidateParams` that call it), and through nothing
+ * else; a throw is reduced to text (`name`, `message`, `code`) by the port. The hostile-Proxy test
+ * (`tests/integration/hostile-proxy.test.ts`) fails if the engine touches plugin data outside the
+ * port. The type makes a new callback without an entry a compile error, and
  * `tests/integration/crossing-points.test.ts` runs three probes against each entry that is called
  * (an oversized value, a forged engine error, an `undefined` hidden in a list) and looks for a call
  * of each entry that is not called.
@@ -705,52 +818,61 @@ export interface CrossingPoint {
 export const CROSSING_POINTS: Readonly<Record<PluginCallback, CrossingPoint>> = {
   'PPEPlugin.onInit': {
     called: true,
+    contract: 'sync',
     reads:
-      'returns nothing that is read; a throw becomes a PluginHookError (hook onInit) holding a frozen copy',
+      'returns nothing that is read; a throw or a promise becomes a PluginHookError (hook onInit) holding its text',
   },
   'PPEPlugin.beforeEvaluate': {
     called: true,
+    contract: 'async',
     reads:
-      'readBeforeEvaluate: input, rules, skips (with their detail through readText) and state through readBounded against the one budget; a throw becomes a PluginHookError',
+      'readBeforeEvaluate: input, rules, skips (with their detail through readText) and state through readBounded against the one budget; a throw or a rejection becomes a PluginHookError holding its text',
   },
   'PPEPlugin.afterEvaluate': {
     called: true,
+    contract: 'async',
     reads:
-      'acceptAfterEvaluate: each changed field through readBounded against the one budget; a throw becomes a PluginHookError',
+      'acceptAfterEvaluate: each changed field through readBounded against the one budget of the evaluation (the text of meta and pluginState is also in the record room); a throw or a rejection becomes a PluginHookError holding its text',
   },
   'PPEPlugin.onError': {
     called: true,
+    contract: 'sync',
     reads:
-      'is handed a frozen copy and returns nothing that is read; a throw is swallowed (the evaluation own error reaches the caller)',
+      'is handed frozen copies (the error and the engine own input) and returns nothing that is read; a throw or a promise is swallowed, its rejection handled (the evaluation own error reaches the caller)',
   },
-  'PPEPlugin.getModels': { called: false, reads: 'nothing calls it' },
-  'PPEPlugin.teardown': { called: false, reads: 'nothing calls it' },
+  'PPEPlugin.getModels': { called: false, contract: 'none', reads: 'nothing calls it' },
+  'PPEPlugin.teardown': { called: false, contract: 'none', reads: 'nothing calls it' },
   'CalculationModel.validateParams': {
     called: true,
+    contract: 'sync',
     reads:
-      'askValidateParams: the result through readBounded (text against the one budget), a plain { valid: boolean, errors?: string[] }; a throw becomes an UnexpectedEngineError holding a frozen copy',
+      'askValidateParams: the result through readBounded (text against the one budget), a plain { valid: boolean, errors?: string[] }; a throw or a promise becomes an UnexpectedEngineError holding its text',
   },
   'CalculationModel.calculate': {
     called: true,
+    contract: 'sync',
     reads:
-      'ExecutionPipeline: the output through readBounded against the one budget; a throw becomes an UnexpectedEngineError holding a frozen copy',
+      'ExecutionPipeline: the output through readBounded against the one budget; a throw or a promise becomes an UnexpectedEngineError holding its text',
   },
-  'CalculationModel.describeParams': { called: false, reads: 'nothing calls it' },
+  'CalculationModel.describeParams': { called: false, contract: 'none', reads: 'nothing calls it' },
   'CalculationModel.listVariables': {
-    called: true,
+    called: false,
+    contract: 'none',
     reads:
-      'readsOf: the answer through readBounded (text against the one budget); a throw is a problem naming it',
+      'the engine never asks a model during evaluate (9M1 does); the exported readsOf can, and reads the answer through readBounded (text against the one budget)',
   },
   'DSLEvaluator.evaluate': {
     called: true,
+    contract: 'sync',
     reads:
-      'RuleFilter: the verdict through readVerdict (readBounded against the one budget); a throw is a DSL_ERROR exclusion with a cut message',
+      'RuleFilter: the verdict through readVerdict (readBounded against the one budget); a throw or a promise is a DSL_ERROR exclusion with a cut message, weighed against the budget',
   },
   'DSLEvaluator.listVariables': {
     called: true,
+    contract: 'sync',
     reads:
       'readsOf: the answer through readBounded (text against the one budget); a throw is a problem naming it',
   },
-  'DSLEvaluator.compute': { called: false, reads: 'nothing calls it' },
-  'DSLEvaluator.describeSyntax': { called: false, reads: 'nothing calls it' },
+  'DSLEvaluator.compute': { called: false, contract: 'none', reads: 'nothing calls it' },
+  'DSLEvaluator.describeSyntax': { called: false, contract: 'none', reads: 'nothing calls it' },
 };

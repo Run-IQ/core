@@ -15,8 +15,7 @@ import {
 } from '@run-iq/spec';
 import type { DimensionSpec, Referential } from '@run-iq/spec';
 import { DSLEvaluationError } from '../errors/DSLEvaluationError.js';
-import { DSLTimeoutError } from '../errors/DSLTimeoutError.js';
-import { EngineLimitError } from '../errors/EngineLimitError.js';
+import { isRaisedLimit } from '../errors/EngineLimitError.js';
 import { defaultCrossing, readVerdict } from './pluginBoundary.js';
 import type { Crossing } from './pluginBoundary.js';
 import { clip } from '../utils/frozenCopy.js';
@@ -246,7 +245,7 @@ export class RuleFilter {
 
       try {
         const views = new ViewScope();
-        const result = await this.sandbox.runDSL(
+        const { answer: result } = await this.sandbox.runDSL(
           evaluator,
           views.trapped(rule.condition.value),
           views.trapped(scope.context),
@@ -256,15 +255,12 @@ export class RuleFilter {
           return { reason: 'CONDITION_FALSE', detail: 'condition evaluated to false' };
         }
       } catch (error) {
-        if (error instanceof EngineLimitError) throw error;
-        if (error instanceof DSLTimeoutError) {
-          return { reason: 'CONDITION_TIMEOUT', detail: error.message };
-        }
+        if (isRaisedLimit(error)) throw error;
         const cause = error instanceof DSLEvaluationError ? error.originalError : error;
-        return {
-          reason: 'DSL_ERROR',
-          detail: clip(cause instanceof Error ? cause.message : String(cause)),
-        };
+        const detail = clip(cause instanceof Error ? cause.message : String(cause));
+        // The text of a plugin's fault is in the record: it is weighed like the rest.
+        this.crossing.budget.addText(detail);
+        return { reason: 'DSL_ERROR', detail };
       }
     }
 

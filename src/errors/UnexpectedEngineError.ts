@@ -1,6 +1,6 @@
 import { PPEError } from './PPEError.js';
 import { describeThrown } from '../utils/values.js';
-import { frozenErrorCopy } from '../utils/frozenCopy.js';
+import { describeFault, faultOf, isPluginFault } from '../engine/pluginPort.js';
 import { markEngineError } from './engineError.js';
 
 /**
@@ -11,18 +11,20 @@ import { markEngineError } from './engineError.js';
 export class UnexpectedEngineError extends PPEError {
   override readonly cause: unknown;
 
-  constructor(cause: unknown) {
-    super(describeThrown(cause), 'UNEXPECTED');
+  constructor(cause: unknown, message?: string) {
+    super(message ?? describeThrown(cause), 'UNEXPECTED');
     this.name = 'UnexpectedEngineError';
     this.cause = cause;
   }
 
   /**
-   * A throw of plugin code (a model, a DSL) as the engine's own error: `cause` is a deep-frozen
-   * copy of what was thrown, never the object the plugin holds, whatever its class.
+   * A throw of plugin code (a model, a DSL) as the engine's own error: whatever its class or brand,
+   * it is held as text (`name`, `message` and a `code`, each read once and cut), never as the object
+   * the plugin holds or a copy of it.
    */
   static foreign(error: unknown): UnexpectedEngineError {
-    return new UnexpectedEngineError(frozenErrorCopy(error));
+    const fault = isPluginFault(error) ? error.fault : faultOf(error);
+    return new UnexpectedEngineError(Object.freeze({ ...fault }), describeFault(fault));
   }
 
   /** `error` itself when it is a `PPEError`, else `error` wrapped. */

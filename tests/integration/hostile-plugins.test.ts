@@ -62,8 +62,8 @@ describe('hostile thrown values', () => {
   const thrown: [string, () => unknown, string][] = [
     ['a number', () => 42, '42'],
     ['a symbol', () => Symbol('s'), 'Symbol(s)'],
-    ['a null-prototype object', () => Object.create(null), '(unprintable error)'],
-    ['a revoked proxy', revokedProxy, '(unprintable error)'],
+    ['a null-prototype object', () => Object.create(null), 'Error'],
+    ['a revoked proxy', revokedProxy, 'Error'],
     [
       'a proxy whose getPrototypeOf throws',
       () =>
@@ -75,7 +75,7 @@ describe('hostile thrown values', () => {
             },
           },
         ),
-      '(unprintable error)',
+      'Error',
     ],
   ];
   for (const hook of ['beforeEvaluate', 'afterEvaluate'] as const) {
@@ -99,10 +99,12 @@ describe('hostile thrown values', () => {
         });
         // Never the hostile object itself: a copy where it can be read, else a marker string.
         expect(error instanceof PluginHookError).toBe(true);
-        const cause = (error as PluginHookError).cause;
-        // Compared with `!==`: printing or deep-comparing a hostile proxy would throw.
-        if (typeof value === 'object' && value !== null) expect(cause !== value).toBe(true);
-        else expect(cause === value).toBe(true);
+        // Whatever was thrown, the engine holds its text: a frozen plain record, never the value.
+        const cause = (error as PluginHookError).cause as { name: string; message: string };
+        expect(cause !== value).toBe(true);
+        expect(Object.isFrozen(cause)).toBe(true);
+        expect(Object.getPrototypeOf(cause)).toBe(Object.prototype);
+        expect(cause.message).toBe(message === 'Error' ? '' : message);
         expect(onError).toHaveBeenCalledTimes(1);
         expectSameFailure(onError.mock.calls[0]?.[0], error);
       });

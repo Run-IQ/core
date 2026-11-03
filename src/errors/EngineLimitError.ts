@@ -35,3 +35,26 @@ export class EngineLimitError extends PPEError {
 }
 
 markEngineError(EngineLimitError);
+
+/** The limit errors the engine raised itself: a brand a plugin cannot set (the set is private). */
+const RAISED = new WeakSet<object>();
+
+/**
+ * Raises a limit error. The engine tells the errors it raised from an `EngineLimitError` a plugin
+ * built (the class is exported) by this brand, never by class.
+ */
+export function raiseLimit(
+  limit: keyof EngineLimits,
+  max: number,
+  actual: number,
+  pointer?: string,
+): EngineLimitError {
+  const error = new EngineLimitError(limit, max, actual, pointer);
+  RAISED.add(error);
+  return error;
+}
+
+/** True for a limit error the engine raised itself. */
+export function isRaisedLimit(value: unknown): value is EngineLimitError {
+  return typeof value === 'object' && value !== null && RAISED.has(value);
+}

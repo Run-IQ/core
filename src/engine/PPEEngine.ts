@@ -3,7 +3,7 @@ import type { JsonValue } from '@run-iq/spec';
 import type { Rule } from '../types/rule.js';
 import type { EvaluationInput } from '../types/input.js';
 import type { SkippedRule, UnsealedResult } from '../types/result.js';
-import type { PPEPlugin, PluginContext } from '../types/plugin.js';
+import type { BeforeEvaluateResult, PPEPlugin, PluginContext } from '../types/plugin.js';
 import type { DSLEvaluator } from '../types/dsl.js';
 import type { ISnapshotAdapter } from '../types/snapshot.js';
 import type { Diagnostic } from '../types/diagnostic.js';
@@ -18,7 +18,7 @@ import { PluginRegistry } from '../registry/PluginRegistry.js';
 import { DSLRegistry } from '../registry/DSLRegistry.js';
 import { InputSanitizer } from '../security/InputSanitizer.js';
 import type { PreparedInput } from '../security/InputSanitizer.js';
-import { EngineLimitError } from '../errors/EngineLimitError.js';
+import { isRaisedLimit, raiseLimit } from '../errors/EngineLimitError.js';
 import { checkDerivedSeed, readInputSeedConfig } from '../input/inputSeed.js';
 import type { InputSeedConfig } from '../input/inputSeed.js';
 import { resolveLimits } from '../limits.js';
@@ -41,6 +41,8 @@ import { describeThrown, ruleLabel } from '../utils/values.js';
 import { acceptAfterEvaluate } from './afterEvaluateTransition.js';
 import { readBeforeEvaluate } from './beforeEvaluateResult.js';
 import { Budget, RuleLedger, charsOfRule, readItems } from './pluginBoundary.js';
+import { callAsync, callSync, reading } from './pluginPort.js';
+import type { PluginHandle } from '../registry/PluginRegistry.js';
 import type { Crossing } from './pluginBoundary.js';
 import { ViewScope } from './frozenView.js';
 import type { LedgerOutcome } from './pluginBoundary.js';
@@ -111,7 +113,7 @@ export class PPEEngine {
   private readonly dominanceResolver: DominanceResolver;
   private readonly sandbox: PluginSandbox;
   private readonly snapshotManager: SnapshotManager;
-  private readonly plugins: readonly PPEPlugin[];
+  private readonly plugins: readonly PluginHandle[];
   private readonly strict: boolean;
   private readonly conflictMode: 'throw' | 'first';
   private readonly dryRun: boolean;
@@ -148,23 +150,27 @@ export class PPEEngine {
       this.dslRegistry.register(dsl);
     }
 
-    // Initialize plugins
-    this.plugins = config.plugins;
+    // Initialize plugins. Each is read once, when it is registered; from then on the engine uses
+    // what it took (a name and a version it checked, the functions) and calls them through the port.
     const context: PluginContext = {
       modelRegistry: this.modelRegistry,
       dslRegistry: this.dslRegistry,
       engineVersion: ENGINE_VERSION,
     };
 
-    for (const plugin of this.plugins) {
-      this.pluginRegistry.register(plugin);
+    const handles: PluginHandle[] = [];
+    for (const plugin of config.plugins) {
+      const handle = this.pluginRegistry.register(plugin);
+      handles.push(handle);
       try {
-        plugin.onInit(context);
+        // `onInit` is synchronous: a promise it returns is a fault, and its rejection is handled.
+        callSync(handle.onInit, plugin, [context]);
       } catch (error) {
-        // A throw of plugin code reaches the caller as the engine's own error.
-        throw new PluginHookError(plugin.name, 'onInit', error);
+        // A throw of plugin code reaches the caller as the engine's own error, holding its text.
+        throw new PluginHookError(handle.name, 'onInit', error);
       }
     }
+    this.plugins = handles;
   }
 
   /**
@@ -215,17 +221,21 @@ export class PPEEngine {
     options: EvaluateOptions | undefined,
     signal: AbortSignal,
   ): Promise<UnsealedResult> {
+    const seen: { input?: EvaluationInput } = {};
     try {
-      return await this.runPipeline(rules, input, options, signal);
+      return await this.runPipeline(rules, input, options, signal, seen);
     } catch (error) {
       if (signal.aborted) throw error;
       // What the plugins are told is not writable: one plugin cannot rewrite the attribution (the
-      // `plugin`, the `message`) of a failure that the caller then receives.
+      // `plugin`, the `message`) of a failure that the caller then receives. Nor is the input: it
+      // is the engine's frozen copy, never the caller's object.
       const told = frozenErrorCopy(UnexpectedEngineError.wrap(error)) as PPEError;
+      const shown = seen.input === undefined ? ABSENT_INPUT : hookView(seen.input);
       for (const plugin of this.plugins) {
         if (!plugin.onError) continue;
         try {
-          plugin.onError(told, input);
+          // `onError` is synchronous: a promise it returns is a fault, and its rejection handled.
+          callSync(plugin.onError, plugin.source, [told, shown]);
         } catch {
           // Contract of PPEPlugin.onError: the evaluation's own error reaches the caller.
         }
@@ -251,7 +261,7 @@ export class PPEEngine {
         owned,
       ) as Rule[];
     } catch (error) {
-      if (error instanceof EngineLimitError) throw error;
+      if (isRaisedLimit(error)) throw error;
       throw new ValidationError('Invalid rules', [describeThrown(error)]);
     }
   }
@@ -261,11 +271,16 @@ export class PPEEngine {
    * input (once, and again in each step of the trace) is a lower bound of the record, known before
    * anything is cloned or serialized.
    */
-  private assertRecordRoom(rules: ReadonlyArray<Rule>, inputChars: number, steps: number): void {
-    let chars = inputChars * (1 + steps);
+  private assertRecordRoom(
+    rules: ReadonlyArray<Rule>,
+    inputChars: number,
+    steps: number,
+    pluginChars: number,
+  ): void {
+    let chars = inputChars * (1 + steps) + pluginChars;
     for (const rule of rules) chars += charsOfRule(rule);
     if (chars > this.limits.maxRecordLength) {
-      throw new EngineLimitError('maxRecordLength', this.limits.maxRecordLength, chars);
+      throw raiseLimit('maxRecordLength', this.limits.maxRecordLength, chars);
     }
   }
 
@@ -289,13 +304,14 @@ export class PPEEngine {
     input: EvaluationInput,
     options: EvaluateOptions | undefined,
     signal: AbortSignal,
+    seen: { input?: EvaluationInput },
   ): Promise<UnsealedResult> {
     // The options and the number of rules come first: no hook runs, nothing is read, for a call
     // that is refused whatever the input.
     checkEvaluateOptions(options);
     const ruleCount = countRules(rules);
     if (ruleCount > this.limits.maxRules) {
-      throw new EngineLimitError('maxRules', this.limits.maxRules, ruleCount);
+      throw raiseLimit('maxRules', this.limits.maxRules, ruleCount);
     }
 
     const traceBuilder = new TraceBuilder();
@@ -306,6 +322,7 @@ export class PPEEngine {
     const prepared = this.acceptInput(input);
     // The request id read once, by `prepare`: the seed, the duplicate check, the result and the
     // record all use this one, never the caller's object again.
+    seen.input = prepared.input;
     const requestId = prepared.input.requestId;
     const tenantId = prepared.input.meta.tenantId;
     checkDerivedSeed(this.inputSeed, requestId);
@@ -337,7 +354,7 @@ export class PPEEngine {
     const sourceCopies = this.copySourceRules(rules, owned);
     // The text of the rules alone may already be more than the record can hold: refused before any
     // checksum is computed.
-    this.assertRecordRoom(sourceCopies, prepared.chars, 0);
+    this.assertRecordRoom(sourceCopies, prepared.chars, 0, 0);
     const initialValidation = ruleValidator.validate(sourceCopies);
     allSkipped.push(...initialValidation.invalid);
 
@@ -358,26 +375,26 @@ export class PPEEngine {
       const hook = plugin.beforeEvaluate;
       if (!hook) continue;
       signal.throwIfAborted();
-      let reading: BeforeEvaluateReading;
+      let read: BeforeEvaluateReading;
       let accepted: PreparedInput;
       let outcome: LedgerOutcome;
       try {
-        // Read once and checked as a whole: nothing is committed unless every check passes.
-        reading = readBeforeEvaluate(
-          plugin.name,
+        // The call is the port's; a throw, a rejection or a promise where none is allowed is a fault
+        // of the plugin, held as text. What it returned is read once and checked as a whole:
+        // nothing is committed unless every check passes.
+        const returned = (
           await this.sandbox.runHook(
-            () => hook.call(plugin, hookView(currentInput), ledger.view()),
+            () => callAsync(hook, plugin.source, [hookView(currentInput), ledger.view()]),
             plugin.name,
             'beforeEvaluate',
             signal,
-          ),
-          this.limits,
-          budget,
-          owned,
-        );
+          )
+        ).value as BeforeEvaluateResult;
+        read = readBeforeEvaluate(plugin.name, returned, this.limits, budget, owned);
         // The input a hook returns is checked as the caller's was (bounds, spec, strict mode),
         // and it is the same request: the idempotence check and the record rest on these two.
-        accepted = this.acceptInput(reading.input);
+        const handed = read.input;
+        accepted = reading(() => this.acceptInput(handed));
         budget.add(accepted.leaves);
         if (accepted.input.requestId !== requestId) {
           throw new Error(
@@ -401,7 +418,7 @@ export class PPEEngine {
         ) {
           throw new Error(`plugin ${plugin.name} changed meta, which only the caller declares`);
         }
-        outcome = ledger.apply(plugin.name, reading, ruleValidator);
+        outcome = ledger.apply(plugin.name, read, ruleValidator);
       } catch (error) {
         // Fail closed: a decision computed without what a plugin was to prepare is not returned.
         signal.throwIfAborted();
@@ -415,7 +432,7 @@ export class PPEEngine {
       currentDate = accepted.evaluationDate;
       currentRules = outcome.rules;
       allSkipped.push(...outcome.skipped);
-      if (reading.state !== undefined) pluginState[plugin.name] = reading.state;
+      if (read.state !== undefined) pluginState[plugin.name] = read.state;
       if (outcome.added.length > 0) {
         hookDiagnostics.push(
           hookDiagnostic(
@@ -467,10 +484,7 @@ export class PPEEngine {
       pluginVersions[plugin.name] = plugin.version;
     }
 
-    const dslVersions: Record<string, string> = {};
-    for (const [name, evaluator] of dsls.getAll()) {
-      dslVersions[name] = evaluator.version;
-    }
+    const dslVersions = dsls.versions();
 
     // Build initial result
     let result: UnsealedResult = {
@@ -501,21 +515,32 @@ export class PPEEngine {
         // A view that refuses every write, over the result as it is: nothing is copied, and a
         // field the hook returns unchanged is the very object of the view.
         const handed = new ViewScope().trapped(before);
-        const returned = await this.sandbox.runHook(
-          () => hook.call(plugin, hookView(currentInput), handed),
-          plugin.name,
-          'afterEvaluate',
-          signal,
-        );
+        const returned = (
+          await this.sandbox.runHook(
+            () => callAsync(hook, plugin.source, [hookView(currentInput), handed]),
+            plugin.name,
+            'afterEvaluate',
+            signal,
+          )
+        ).value as UnsealedResult;
         signal.throwIfAborted();
-        result = acceptAfterEvaluate(plugin.name, before, handed, returned, this.limits).result;
+        // What it changed is read through the one budget of the evaluation, like every other
+        // thing plugin code hands the engine.
+        result = acceptAfterEvaluate(
+          plugin.name,
+          before,
+          handed,
+          returned,
+          this.limits,
+          budget,
+        ).result;
       } catch (error) {
         signal.throwIfAborted();
         throw new PluginHookError(plugin.name, 'afterEvaluate', error);
       }
     }
 
-    this.assertRecordRoom(currentRules, currentInputChars, trace.steps.length);
+    this.assertRecordRoom(currentRules, currentInputChars, trace.steps.length, budget.recordChars);
 
     // Step 10: Snapshot — use the rules that actually executed (post-plugin)
     const snapshot = SnapshotSerializer.serialize(
@@ -538,6 +563,13 @@ export class PPEEngine {
 }
 
 type HookName = 'beforeEvaluate' | 'afterEvaluate';
+
+/** What `onError` is handed when the failure came before the input was copied. */
+const ABSENT_INPUT: EvaluationInput = Object.freeze({
+  requestId: '',
+  data: Object.freeze({}),
+  meta: Object.freeze({ tenantId: '' }),
+});
 
 /**
  * The input as a hook gets it: the engine's frozen data, and its own copies of the dates of
@@ -586,6 +618,6 @@ function sameCanonical(a: unknown, b: unknown): boolean {
   }
 }
 
-function hookDiagnostic(plugin: PPEPlugin, hook: HookName, message: string): Diagnostic {
+function hookDiagnostic(plugin: PluginHandle, hook: HookName, message: string): Diagnostic {
   return { source: 'hook', plugin: plugin.name, hook, message };
 }

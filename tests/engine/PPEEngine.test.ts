@@ -4,12 +4,7 @@ import type { OutputDeclaration } from '@run-iq/spec';
 import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import { ValidationError } from '../../src/errors/ValidationError.js';
 // Imported from the package entry: both errors are public.
-import {
-  DecimalPrecisionError,
-  InvalidModelError,
-  OutputNotFiniteError,
-  PluginHookError,
-} from '../../src/index.js';
+import { DecimalPrecisionError, OutputNotFiniteError, PluginHookError } from '../../src/index.js';
 import { VERSION } from '../../src/utils/version.js';
 import {
   makeRule,
@@ -529,7 +524,7 @@ describe('PPEEngine', () => {
       }
       expect(error).toBeInstanceOf(PluginHookError);
       expect(error).toMatchObject({ hook: 'onInit' });
-      expect((error as PluginHookError).cause).toBeInstanceOf(InvalidModelError);
+      expect((error as PluginHookError).cause).toMatchObject({ name: 'InvalidModelError' });
     });
 
     it('keeps value a number: a rule feeding it with a boolean declaration is excluded', async () => {

@@ -816,25 +816,5 @@ describe('RuleFilter', () => {
         detail: 'DSL not found: unknown_dsl',
       });
     });
-
-    it('describes the timeout on CONDITION_TIMEOUT', async () => {
-      const registry = new DSLRegistry();
-      registry.register({
-        dsl: 'slow',
-        version: '1.0.0',
-        // An async evaluator, which the contract does not declare: only the timeout stops it.
-        evaluate: (() =>
-          new Promise<boolean>((resolve) => {
-            setTimeout(() => resolve(true), 200);
-          })) as unknown as DSLEvaluator['evaluate'],
-      });
-      const filter = new RuleFilter(registry, new PluginSandbox(500, 20));
-      const rule = makeRule({ id: 'r1', model: 'M', condition: { dsl: 'slow', value: {} } });
-      const result = await filter.filter([rule], makeInput(), at);
-      expect(result.skipped[0]).toMatchObject({
-        reason: 'CONDITION_TIMEOUT',
-        detail: 'DSL "slow" evaluation timed out after 20ms',
-      });
-    });
   });
 });

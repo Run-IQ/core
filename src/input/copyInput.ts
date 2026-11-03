@@ -1,6 +1,6 @@
-import { EngineLimitError } from '../errors/EngineLimitError.js';
+import { raiseLimit } from '../errors/EngineLimitError.js';
 import type { EngineLimits } from '../limits.js';
-import { describeThrown } from '../utils/values.js';
+import { describeFault, faultOf } from '../engine/pluginPort.js';
 import { NotPlain, isDateObject, isPlainPrototype } from '../utils/plain.js';
 import { toReferenceDate } from '@run-iq/spec';
 import { CHARS_PER_NODE, serializedLength } from '../utils/weight.js';
@@ -91,7 +91,7 @@ export class InputCopier {
   private leaf(extra = 0): void {
     this.leaves += 1 + extra;
     if (this.leaves > this.limits[this.leafLimit]) {
-      throw new EngineLimitError(this.leafLimit, this.limits[this.leafLimit], this.leaves);
+      throw raiseLimit(this.leafLimit, this.limits[this.leafLimit], this.leaves);
     }
   }
 
@@ -102,12 +102,7 @@ export class InputCopier {
    */
   text(value: string, pointer: () => string): number {
     if (value.length > this.limits.maxStringLength) {
-      throw new EngineLimitError(
-        'maxStringLength',
-        this.limits.maxStringLength,
-        value.length,
-        pointer(),
-      );
+      throw raiseLimit('maxStringLength', this.limits.maxStringLength, value.length, pointer());
     }
     const written = serializedLength(value);
     this.chars += written;
@@ -132,7 +127,7 @@ export class InputCopier {
 
   /** Names a property that cannot be read, and counts it as a leaf. */
   unreadable(pointer: string, error: unknown): void {
-    this.reasons.push(`${pointer} could not be read: ${describeThrown(error)}`);
+    this.reasons.push(`${pointer} could not be read: ${describeFault(faultOf(error))}`);
     this.thrown.push(error);
     this.leaf();
   }
@@ -257,7 +252,7 @@ export class InputCopier {
         return;
       }
       if (depth > this.limits.maxInputDepth) {
-        throw new EngineLimitError('maxInputDepth', this.limits.maxInputDepth, depth);
+        throw raiseLimit('maxInputDepth', this.limits.maxInputDepth, depth);
       }
       stack.push({ src: value, dst, keys, length, index: 0, depth, parent, key });
     };

@@ -1,10 +1,11 @@
 import { canonicalize } from '@run-iq/spec';
+import { BoundaryError } from './pluginPort.js';
 import type { JsonValue } from '@run-iq/spec';
 import type { UnsealedResult } from '../types/result.js';
 import { describeValue, findNonJson } from '../utils/json.js';
 import type { EngineLimits } from '../limits.js';
 import { isObject } from '../utils/values.js';
-import { Budget, readBounded, resultLimits } from './pluginBoundary.js';
+import { Budget, readBounded, resultLimits, guarded } from './pluginBoundary.js';
 
 /** What the engine keeps of a result returned by `afterEvaluate`. */
 export interface AfterEvaluateTransition {
@@ -44,9 +45,21 @@ export function acceptAfterEvaluate(
   handed: UnsealedResult,
   returned: UnsealedResult,
   limits: Readonly<EngineLimits>,
+  joint: Budget,
+): AfterEvaluateTransition {
+  return guarded(() => accept(pluginName, before, handed, returned, limits, joint));
+}
+
+function accept(
+  pluginName: string,
+  before: UnsealedResult,
+  handed: UnsealedResult,
+  returned: UnsealedResult,
+  limits: Readonly<EngineLimits>,
+  joint: Budget,
 ): AfterEvaluateTransition {
   const refuse = (what: string): TypeError =>
-    new TypeError(`plugin ${pluginName} afterEvaluate returned ${what}`);
+    new BoundaryError(`plugin ${pluginName} afterEvaluate returned ${what}`);
   const raw: unknown = returned;
   if (!isObject(raw) || typeof raw !== 'object' || raw === null) {
     throw refuse(`${describeValue(raw)}, not a result`);
@@ -60,7 +73,6 @@ export function acceptAfterEvaluate(
   const theirs: Record<string, unknown> = {};
   const changed: string[] = [];
   let bounds: Readonly<EngineLimits> | undefined;
-  let budget: Budget | undefined;
   const keep = (field: string, value: unknown): void => {
     // defineProperty: a field named `__proto__` stays a field.
     Object.defineProperty(theirs, field, {
@@ -82,8 +94,11 @@ export function acceptAfterEvaluate(
       continue;
     }
     bounds ??= resultLimits(before, limits);
-    budget ??= new Budget('maxInputLeaves', bounds.maxInputLeaves);
-    keep(field, readBounded(value, bounds, field, { budget, allowUndefined: true }));
+    // What it changed counts against the one budget of the evaluation; the text of what it may
+    // set (`meta`, `pluginState`) is certain to be in the record.
+    const charsBefore = joint.readChars;
+    keep(field, readBounded(value, bounds, field, { budget: joint, allowUndefined: true }));
+    if (settable) joint.record(joint.readChars - charsBefore);
   }
 
   // A field the plugin left out was read as `undefined`: it differs, so it counts as changed.
@@ -105,7 +120,7 @@ export function acceptAfterEvaluate(
     if (!sameData(set, kept)) metaChanged.push(name);
   }
   if (metaChanged.length > 0) {
-    throw new TypeError(
+    throw new BoundaryError(
       `plugin ${pluginName} afterEvaluate changed meta keys another plugin set: ${metaChanged.sort().join(', ')}`,
     );
   }
@@ -143,7 +158,7 @@ export function acceptAfterEvaluate(
   }
 
   if (changed.length > 0) {
-    throw new TypeError(
+    throw new BoundaryError(
       `plugin ${pluginName} afterEvaluate changed the decision: ${changed.sort().join(', ')}`,
     );
   }
