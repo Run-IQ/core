@@ -9,6 +9,7 @@ import { readsOf } from '../../src/context/reads.js';
 import { Budget, readBounded } from '../../src/engine/pluginBoundary.js';
 import { DEFAULT_LIMITS } from '../../src/limits.js';
 import { clipText, hasLoneSurrogate } from '../../src/utils/weight.js';
+import { clip } from '../../src/utils/frozenCopy.js';
 import type { PPEPlugin } from '../../src/types/plugin.js';
 import type { CalculationModel } from '../../src/types/model.js';
 import type { DSLEvaluator } from '../../src/types/dsl.js';
@@ -156,17 +157,18 @@ describe('AD1, B71, B75: an engine error raised for plugin code is a plugin faul
           onInit: (context) => {
             context.modelRegistry.register(FLAT.name === 'x' ? FLAT : { ...FLAT, name: 'p-flat' });
           },
-          beforeEvaluate: (input, rules) => {
-            // A source that raised is the stolen error; the rest of the probe needs one.
-            stolen = source({ register: (m) => engineContext?.modelRegistry.register(m as never) });
-            return {
-              input,
-              rules,
-              get skipped(): never {
-                throw stolen;
-              },
-            };
-          },
+          beforeEvaluate: (input, rules) => ({
+            input,
+            rules,
+            // The source runs inside the getter, that is, while the engine is reading: the
+            // error it raises must not be taken for one the read raised itself.
+            get skipped(): never {
+              stolen = source({
+                register: (m) => engineContext?.modelRegistry.register(m as never),
+              });
+              throw stolen;
+            },
+          }),
         }),
         pluginWith('grab', { onInit: (c) => void (engineContext = c) }),
       ]);
@@ -184,14 +186,14 @@ describe('AD1, B71, B75: an engine error raised for plugin code is a plugin faul
       let stolen: unknown;
       const engine = build([
         pluginWith('p', {
-          afterEvaluate: () => {
-            stolen = source({ register: (m) => engineContext?.modelRegistry.register(m as never) });
-            return {
-              get annotations(): never {
-                throw stolen;
-              },
-            };
-          },
+          afterEvaluate: () => ({
+            get annotations(): never {
+              stolen = source({
+                register: (m) => engineContext?.modelRegistry.register(m as never),
+              });
+              throw stolen;
+            },
+          }),
         }),
         pluginWith('grab', { onInit: (c) => void (engineContext = c) }),
       ]);
@@ -208,15 +210,18 @@ describe('AD1, B71, B75: an engine error raised for plugin code is a plugin faul
         dsl: 'l',
         version: '1.0.0',
         evaluate: () => true,
-        listVariables: () => {
-          stolen = source({ register: (m) => engineContext?.modelRegistry.register(m as never) });
-          return new Proxy([] as unknown[], {
+        listVariables: () =>
+          new Proxy([] as unknown[], {
             get(target, key, receiver) {
-              if (key === 'length') throw stolen;
+              if (key === 'length') {
+                stolen = source({
+                  register: (m) => engineContext?.modelRegistry.register(m as never),
+                });
+                throw stolen;
+              }
               return Reflect.get(target, key, receiver);
             },
-          });
-        },
+          }),
       };
       const engine = build([pluginWith('grab', { onInit: (c) => void (engineContext = c) })], {}, [
         dsl,
@@ -291,6 +296,8 @@ describe('AD1, B71, B75: an engine error raised for plugin code is a plugin faul
       name: 'EngineLimitError',
       message: expect.stringContaining('engine limit maxHookLeaves exceeded'),
     });
+    expect(error.cause).not.toBeInstanceOf(EngineLimitError);
+    expect(Object.getPrototypeOf(error.cause)).toBe(Object.prototype);
     expect(Object.isFrozen(error.cause)).toBe(true);
   });
 
@@ -609,5 +616,25 @@ describe('B39: a string or a key counts max(1, ceil(w / 64)) nodes', () => {
     ['\n'.repeat(32), 2], // w = 66
   ])('%j weighs %i', (text, expected) => {
     expect(nodesOf(text)).toBe(expected);
+  });
+});
+
+describe('B94: the text the engine writes is well-formed', () => {
+  it('clip replaces a lone surrogate in a short text', () => {
+    expect(clip('a\uD800')).toBe('a\uFFFD');
+    expect(clip('fine')).toBe('fine');
+  });
+
+  it('a pointer in a limit error never holds a lone surrogate', () => {
+    const limits = { ...DEFAULT_LIMITS, maxStringLength: 100 };
+    const hostile = { [`k\uD800${'x'.repeat(200)}`]: 1 };
+    let message = '';
+    try {
+      readBounded(hostile, limits, '/data', {});
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).not.toBe('');
+    expect(hasLoneSurrogate(message)).toBe(false);
   });
 });
