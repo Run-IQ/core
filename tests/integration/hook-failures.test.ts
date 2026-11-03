@@ -3,7 +3,6 @@ import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import type { PPEEngineConfig } from '../../src/engine/PPEEngine.js';
 import { PluginHookError } from '../../src/errors/PluginHookError.js';
 import { HookTimeoutError } from '../../src/errors/HookTimeoutError.js';
-import { EngineLimitError } from '../../src/errors/EngineLimitError.js';
 import { ValidationError } from '../../src/errors/ValidationError.js';
 import type { PPEPlugin, PluginContext } from '../../src/types/plugin.js';
 import type { PPEError } from '../../src/errors/PPEError.js';

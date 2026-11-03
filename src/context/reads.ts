@@ -11,7 +11,7 @@ import { isolated } from '../engine/trust.js';
 import { isRaisedLimit } from '../errors/EngineLimitError.js';
 import { clip } from '../utils/frozenCopy.js';
 import { defaultCrossing, guarded, readBounded } from '../engine/pluginBoundary.js';
-import { callSync, reading } from '../engine/pluginPort.js';
+import { callSync } from '../engine/pluginPort.js';
 import type { Crossing } from '../engine/pluginBoundary.js';
 
 /** Why a `listVariables` is not taken as it is (D-39, D-1). */

@@ -485,8 +485,8 @@ describe('the worst case: every limit at its default, on the costliest shape, at
     expect((error as { cause?: unknown }).cause).toMatchObject({ name: 'EngineLimitError' });
     // One meta of 20 such texts is already past the bound of one read; the budget of the
     // evaluation catches what several plugins add together.
-    expect(['maxInputLeaves', 'maxHookLeaves']).toContain(
-      ((error as { cause: { limit: string } }).cause as { limit: string }).limit,
+    expect((error as { cause: { message: string } }).cause.message).toMatch(
+      /^engine limit (maxInputLeaves|maxHookLeaves) exceeded/,
     );
   }, 60_000);
 

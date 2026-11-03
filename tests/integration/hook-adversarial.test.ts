@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import type { PPEEngineConfig } from '../../src/engine/PPEEngine.js';
 import { PluginHookError } from '../../src/errors/PluginHookError.js';
-import { EngineLimitError } from '../../src/errors/EngineLimitError.js';
 import { ValidationError } from '../../src/errors/ValidationError.js';
 import { InputSanitizer } from '../../src/security/InputSanitizer.js';
 import { copyData } from '../../src/utils/values.js';
