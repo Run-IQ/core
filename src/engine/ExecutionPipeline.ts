@@ -10,7 +10,7 @@ import { describeThrown, isPlainObject, ruleLabel } from '../utils/values.js';
 import type { ShortCircuit } from './ExceptionProcessor.js';
 import type { TraceBuilder } from './TraceBuilder.js';
 import { OutputCombiner } from './OutputCombiner.js';
-import { ReadFailure, causesOf, defaultCrossing, readBounded } from './pluginBoundary.js';
+import { causesOf, defaultCrossing, isReadFailure, readBounded } from './pluginBoundary.js';
 import type { Budget } from './pluginBoundary.js';
 import { clip } from '../utils/frozenCopy.js';
 import { isRaisedLimit, raiseLimit } from '../errors/EngineLimitError.js';
@@ -220,7 +220,7 @@ export class ExecutionPipeline {
         } catch (error) {
           // The budget of the evaluation is the engine's bound, not that rule's fault.
           if (isRaisedLimit(error) && error.limit === 'maxHookLeaves') throw error;
-          const causes = error instanceof ReadFailure ? causesOf(error) : [];
+          const causes = isReadFailure(error) ? causesOf(error) : [];
           const written = causes.find((cause) => views.isWriteError(cause));
           if (written !== undefined) {
             skipped.push({ rule, reason: 'MODEL_ERROR', detail: (written as Error).message });

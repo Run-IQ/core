@@ -66,24 +66,29 @@ export class DSLRegistry {
     return new Map(this.evaluators);
   }
 
-  /** A registry fixed at this moment: what was taken at registration is what runs. */
-  snapshot(): DSLRegistry {
-    const fixed = new DSLRegistry();
-    for (const [name, evaluator] of this.evaluators) {
-      // justification: `register` sets both maps together.
-      const declared = this.declared.get(name) as Declared;
-      fixed.evaluators.set(name, fixEvaluator(name, evaluator, declared));
-      fixed.declared.set(name, declared);
-    }
-    return fixed;
-  }
-
   /** The versions of the evaluators, as registered. */
   versions(): Record<string, string> {
     const out: Record<string, string> = {};
     for (const [name, declared] of this.declared) out[name] = declared.version;
     return out;
   }
+}
+
+/** A registry fixed at this moment: what was taken at registration is what runs. Internal. */
+export function snapshotDsls(registry: DSLRegistry): DSLRegistry {
+  const source = registry as unknown as {
+    evaluators: Map<string, DSLEvaluator>;
+    declared: Map<string, Declared>;
+  };
+  const fixed = new DSLRegistry();
+  const target = fixed as unknown as typeof source;
+  for (const [name, evaluator] of source.evaluators) {
+    // justification: `register` sets both maps together.
+    const declared = source.declared.get(name) as Declared;
+    target.evaluators.set(name, fixEvaluator(name, evaluator, declared));
+    target.declared.set(name, declared);
+  }
+  return fixed;
 }
 
 /** A frozen record of `evaluator`: its functions as registered, each called through the port. */

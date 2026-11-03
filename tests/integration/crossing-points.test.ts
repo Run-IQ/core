@@ -194,7 +194,7 @@ const harness: Harness = {
   'PPEPlugin.afterEvaluate': {
     oversized: async () => {
       const bad = plugin('bad', {
-        afterEvaluate: (_input, result) => ({ ...result, meta: { text: BIG } }),
+        afterEvaluate: () => ({ annotations: { text: BIG } }),
       });
       const error = (await outcome(() =>
         engine([bad], { maxStringLength: 100 }).evaluate([], makeInput()),
@@ -215,7 +215,7 @@ const harness: Harness = {
     },
     hidden: async () => {
       const bad = plugin('bad', {
-        afterEvaluate: (_input, result) => ({ ...result, meta: { list: [1, undefined] } }),
+        afterEvaluate: () => ({ annotations: { list: [1, undefined] } }) as never,
       });
       const error = (await outcome(() =>
         engine([bad]).evaluate([], makeInput()),
@@ -363,7 +363,7 @@ const harness: Harness = {
 
   'DSLEvaluator.evaluate': {
     oversized: async () => {
-      const wordy: DSLEvaluator = { dsl: 'w', version: '1', evaluate: () => BIG as never };
+      const wordy: DSLEvaluator = { dsl: 'w', version: '1.0.0', evaluate: () => BIG as never };
       const withCondition = makeRule({
         id: 'c',
         model: 'ONE',
@@ -381,7 +381,7 @@ const harness: Harness = {
       const fake = forged();
       const throwing: DSLEvaluator = {
         dsl: 't',
-        version: '1',
+        version: '1.0.0',
         evaluate: () => {
           throw fake;
         },
@@ -395,7 +395,7 @@ const harness: Harness = {
     hidden: async () => {
       const holey: DSLEvaluator = {
         dsl: 'h',
-        version: '1',
+        version: '1.0.0',
         evaluate: () => [1, undefined] as never,
       };
       const rule = makeRule({ id: 'c', model: 'ONE', condition: { dsl: 'h', value: {} } });
@@ -411,7 +411,7 @@ const harness: Harness = {
     oversized: async () => {
       const dsl: DSLEvaluator = {
         dsl: 'l',
-        version: '1',
+        version: '1.0.0',
         evaluate: () => true,
         listVariables: () => ['/' + BIG],
       };
@@ -428,7 +428,7 @@ const harness: Harness = {
       const fake = forged();
       const dsl: DSLEvaluator = {
         dsl: 'l',
-        version: '1',
+        version: '1.0.0',
         evaluate: () => true,
         listVariables: () => {
           throw fake;
@@ -441,7 +441,7 @@ const harness: Harness = {
     hidden: async () => {
       const dsl: DSLEvaluator = {
         dsl: 'l',
-        version: '1',
+        version: '1.0.0',
         evaluate: () => true,
         listVariables: () => ['/a', undefined] as never,
       };
@@ -518,7 +518,7 @@ const thenables: Partial<Record<PluginCallback, () => Promise<void>>> = {
     expect((error as Error).message).toContain('returned a promise');
   },
   'DSLEvaluator.evaluate': async () => {
-    const promising: DSLEvaluator = { dsl: 'p', version: '1', evaluate: rejecting as never };
+    const promising: DSLEvaluator = { dsl: 'p', version: '1.0.0', evaluate: rejecting as never };
     const rule = makeRule({ id: 'c', model: 'ONE', condition: { dsl: 'p', value: {} } });
     const result = await engine([plugin('m', { onInit: registering(model('ONE', {})) })], {}, [
       promising,
@@ -529,7 +529,7 @@ const thenables: Partial<Record<PluginCallback, () => Promise<void>>> = {
   'DSLEvaluator.listVariables': async () => {
     const promising: DSLEvaluator = {
       dsl: 'p',
-      version: '1',
+      version: '1.0.0',
       evaluate: () => true,
       listVariables: rejecting as never,
     };

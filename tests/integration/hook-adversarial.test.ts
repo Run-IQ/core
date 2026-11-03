@@ -290,9 +290,9 @@ describe('N5: the evaluation copy is frozen and private', () => {
   it('afterEvaluate writing into the input fails the evaluation', async () => {
     const built = build([
       pluginWith('h', {
-        afterEvaluate: (input, result) => {
+        afterEvaluate: (input, _result) => {
           (input.data as Record<string, unknown>)['revenue'] = 999;
-          return result;
+          return undefined;
         },
       }),
     ]);
@@ -330,9 +330,9 @@ describe('N5: the evaluation copy is frozen and private', () => {
     const built = build(
       [
         pluginWith('h', {
-          afterEvaluate: (input, result) => {
+          afterEvaluate: (input, _result) => {
             input.meta.effectiveDate?.setTime(0);
-            return result;
+            return undefined;
           },
         }),
       ],
@@ -621,40 +621,35 @@ describe('N12: a __proto__ key of a hook result is kept', () => {
   });
 });
 
-describe("N13: a plugin cannot change another plugin's meta keys", () => {
-  const setter = (name: string, meta: Record<string, unknown>): PPEPlugin =>
-    pluginWith(name, {
-      afterEvaluate: (_input, result) => ({ ...result, meta: { ...result.meta, ...meta } }),
-    });
+describe("N13: a plugin's annotations are its own, under its name", () => {
+  const setter = (name: string, annotations: Record<string, unknown>): PPEPlugin =>
+    pluginWith(name, { afterEvaluate: () => ({ annotations: annotations as never }) });
 
-  it('adding a key is allowed', async () => {
-    const built = build([setter('a', { a: 'audit-ok' }), setter('b', { b: 'x' })]);
+  it('two plugins annotate side by side', async () => {
+    const built = build([setter('a', { ok: 'audit-ok' }), setter('b', { x: 1 })]);
     const result = await built.engine.evaluate([tax()], makeInput());
-    expect(result.meta).toEqual({ a: 'audit-ok', b: 'x' });
+    expect(result.meta).toEqual({ a: { ok: 'audit-ok' }, b: { x: 1 } });
   });
 
-  it('replacing a key fails', async () => {
+  it('a plugin cannot reach the annotations of another: it returns nothing but its own', async () => {
     const built = build([
-      setter('a', { a: 'audit-ok' }),
+      setter('a', { ok: 'audit-ok' }),
       pluginWith('b', {
-        afterEvaluate: (_i, result) => ({ ...result, meta: { ...result.meta, a: 'changed' } }),
+        afterEvaluate: (_i, result) => ({ ...result, meta: { b: 'x' } }) as never,
       }),
     ]);
     await expectHookFailure(
       await failure(built),
-      'plugin b afterEvaluate changed meta keys another plugin set: a',
+      'plugin b afterEvaluate returned a field other than annotations: requestId',
     );
   });
 
-  it('removing the meta fails', async () => {
-    const built = build([
-      setter('a', { a: 'audit-ok' }),
-      pluginWith('b', { afterEvaluate: (_i, result) => ({ ...result, meta: { b: 'x' } }) }),
-    ]);
-    await expectHookFailure(
-      await failure(built),
-      'plugin b afterEvaluate changed meta keys another plugin set: a',
-    );
+  it('the annotations are a copy: a later change by the plugin shows nowhere', async () => {
+    const mine = { n: 1 };
+    const built = build([pluginWith('a', { afterEvaluate: () => ({ annotations: mine }) })]);
+    const result = await built.engine.evaluate([tax()], makeInput());
+    mine.n = 2;
+    expect(result.meta).toEqual({ a: { n: 1 } });
   });
 });
 

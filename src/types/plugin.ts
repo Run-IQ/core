@@ -5,13 +5,35 @@ import type { Rule } from './rule.js';
 import type { CalculationModel } from './model.js';
 import type { OutputValue } from './output.js';
 import type { PPEError } from '../errors/PPEError.js';
-import type { ModelRegistry } from '../registry/ModelRegistry.js';
-import type { DSLRegistry } from '../registry/DSLRegistry.js';
+import type { DSLEvaluator } from './dsl.js';
+
+/** What a plugin can do with the models: register, look up and list. Nothing else of the engine. */
+export interface ModelRegistryApi {
+  register(model: CalculationModel<OutputValue>): void;
+  get(name: string): CalculationModel<OutputValue>;
+  has(name: string): boolean;
+  /** A copy: writing to it changes nothing. */
+  getAll(): ReadonlyMap<string, CalculationModel<OutputValue>>;
+}
+
+/** What a plugin can do with the DSL evaluators: register, look up and list. */
+export interface DslRegistryApi {
+  register(evaluator: DSLEvaluator): void;
+  get(dsl: string): DSLEvaluator | undefined;
+  has(dsl: string): boolean;
+  /** A copy: writing to it changes nothing. */
+  getAll(): ReadonlyMap<string, DSLEvaluator>;
+}
 
 export interface PluginContext {
-  readonly modelRegistry: ModelRegistry;
-  readonly dslRegistry: DSLRegistry;
+  readonly modelRegistry: ModelRegistryApi;
+  readonly dslRegistry: DslRegistryApi;
   readonly engineVersion: string;
+}
+
+/** What `afterEvaluate` returns: annotations on the result, under the plugin's name in `meta`. */
+export interface AfterEvaluateResult {
+  readonly annotations?: Readonly<Record<string, JsonValue>> | undefined;
 }
 
 export interface BeforeEvaluateResult {
@@ -90,28 +112,22 @@ export interface PPEPlugin {
   /**
    * Runs after the decision is computed, in registration order, on a view of the result that
    * refuses every write (a `FrozenViewWriteError`, which fails the hook): nothing it does to the
-   * view reaches the engine's records or the caller's rules. A field it returns as it received it
-   * is unchanged; any other is read once (by name, own, non-enumerable or inherited), copied and
-   * bounded. **Fail closed**: it cannot change the decision, and:
-   *
-   * - it may set `meta` (an object of JSON: annotations on the result; it may add keys, and changing or
-   *   removing a key another plugin set fails) and its own entry of `pluginState`
-   *   (`pluginState[<name>]`, JSON);
-   * - any change to `value`, `outputs`, `appliedRules`, `skippedRules`, `breakdown`, `trace` or
-   *   any other field of the result (a field it adds, one it drops), and any change to another
-   *   plugin's `pluginState` entry, fails the evaluation: `plugin <name> afterEvaluate changed
-   *   the decision: <fields>`;
-   * - a value that is not an object, a `meta` that is not an object, or a `pluginState` entry that
-   *   is not JSON, fails the evaluation too;
-   * - a hook that throws or exceeds `timeout.hook` fails it.
+   * view reaches the engine's records or the caller's rules. **It returns annotations, not a
+   * result**: nothing, or `{ annotations?: <JSON object> }`, and nothing else. The annotations are
+   * read once through the reader (copied, bounded, their text weighed against the one budget of
+   * the evaluation and counted in the record room) and merged into `result.meta` under the
+   * plugin's name; the result is not copied. **Fail closed**: it cannot change the decision,
+   * because it cannot return anything that would. A field other than `annotations`, a return that
+   * is not nothing or a plain object, annotations that are not a JSON object, a hook that throws,
+   * rejects or exceeds `timeout.hook` fails the evaluation.
    *
    * Every failure is a `PluginHookError` (`hook: 'afterEvaluate'`); `onError` is called on every
    * plugin and nothing is saved.
    */
   afterEvaluate?(
     input: EvaluationInput,
-    result: UnsealedResult,
-  ): UnsealedResult | Promise<UnsealedResult>;
+    result: Readonly<UnsealedResult>,
+  ): AfterEvaluateResult | void | Promise<AfterEvaluateResult | void>;
 
   /**
    * Told of errors, never asked to recover from them. It is synchronous: a promise it returns is

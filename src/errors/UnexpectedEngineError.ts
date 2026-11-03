@@ -1,6 +1,6 @@
 import { PPEError } from './PPEError.js';
 import { describeThrown } from '../utils/values.js';
-import { describeFault, faultOf, isPluginFault } from '../engine/pluginPort.js';
+import { describeFault, faultOf, trustedFault } from '../engine/pluginPort.js';
 import { markEngineError } from './engineError.js';
 
 /**
@@ -23,7 +23,7 @@ export class UnexpectedEngineError extends PPEError {
    * the plugin holds or a copy of it.
    */
   static foreign(error: unknown): UnexpectedEngineError {
-    const fault = isPluginFault(error) ? error.fault : faultOf(error);
+    const fault = trustedFault(error) ?? faultOf(error);
     return new UnexpectedEngineError(Object.freeze({ ...fault }), describeFault(fault));
   }
 

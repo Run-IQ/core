@@ -1,6 +1,7 @@
 import { PPEError } from './PPEError.js';
 import type { EngineLimits } from '../limits.js';
 import { markEngineError } from './engineError.js';
+import { isRaised, raised } from '../engine/trust.js';
 
 /** Characters of a pointer shown in a message (spec cuts its issue text at 1 024). */
 const MAX_POINTER_TEXT = 1024;
@@ -36,12 +37,10 @@ export class EngineLimitError extends PPEError {
 
 markEngineError(EngineLimitError);
 
-/** The limit errors the engine raised itself: a brand a plugin cannot set (the set is private). */
-const RAISED = new WeakSet<object>();
-
 /**
- * Raises a limit error. The engine tells the errors it raised from an `EngineLimitError` a plugin
- * built (the class is exported) by this brand, never by class.
+ * Raises a limit error. The engine tells the errors it raised itself, in this call, from an
+ * `EngineLimitError` a plugin built (the class is exported) by the record of this call, never by
+ * class.
  */
 export function raiseLimit(
   limit: keyof EngineLimits,
@@ -49,12 +48,10 @@ export function raiseLimit(
   actual: number,
   pointer?: string,
 ): EngineLimitError {
-  const error = new EngineLimitError(limit, max, actual, pointer);
-  RAISED.add(error);
-  return error;
+  return raised(new EngineLimitError(limit, max, actual, pointer));
 }
 
-/** True for a limit error the engine raised itself. */
+/** True for a limit error the engine raised itself, in this call. */
 export function isRaisedLimit(value: unknown): value is EngineLimitError {
-  return typeof value === 'object' && value !== null && RAISED.has(value);
+  return value instanceof EngineLimitError && isRaised(value);
 }

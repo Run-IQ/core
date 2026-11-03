@@ -537,7 +537,7 @@ describe('X9: survivors of round 7', () => {
   it('the defaults are the calibrated ones', () => {
     expect(DEFAULT_LIMITS).toMatchObject({
       maxRuleSetNodes: 2_000_000,
-      maxHookLeaves: 600_000,
+      maxHookLeaves: 400_000,
       maxStringLength: 1_000_000,
       maxRecordLength: 256_000_000,
       maxTraceNodes: 10_000_000,

@@ -1,4 +1,5 @@
 import { isEngineErrorPrototype } from '../errors/engineError.js';
+import { clipText } from './weight.js';
 
 /** Nodes of one copy; past it the rest is a marker. */
 const MAX_NODES = 1000;
@@ -17,11 +18,11 @@ const INTRINSIC_ERRORS: ReadonlySet<unknown> = new Set([
   URIError.prototype,
 ]);
 
-/** `text` as it is, or cut to `MAX_TEXT` characters with its length. */
+/** `text` as it is, or cut to `MAX_TEXT` characters on a code point with its length. */
 export function clip(text: string): string {
   return text.length <= MAX_TEXT
     ? text
-    : `${text.slice(0, MAX_TEXT)}... (${text.length} characters)`;
+    : clipText(text, MAX_TEXT, `... (${text.length} characters)`);
 }
 
 interface State {

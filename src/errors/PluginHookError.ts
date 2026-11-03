@@ -1,7 +1,7 @@
 import { PPEError } from './PPEError.js';
 import { describeThrown } from '../utils/values.js';
 import { clip, frozenErrorCopy } from '../utils/frozenCopy.js';
-import { describeFault, isPluginFault } from '../engine/pluginPort.js';
+import { describeFault, trustedFault } from '../engine/pluginPort.js';
 import { markEngineError } from './engineError.js';
 
 /**
@@ -20,7 +20,7 @@ export class PluginHookError extends PPEError {
   ) {
     // What the plugin threw is held as text, read once (see `faultOf`); an error the engine raised
     // while checking what the plugin returned is copied. The message is built from what is kept.
-    const fault = isPluginFault(cause) ? cause.fault : undefined;
+    const fault = trustedFault(cause);
     super(
       `plugin ${plugin} ${hook} failed: ${fault === undefined ? clip(describeThrown(cause)) : describeFault(fault)}`,
       'PLUGIN_HOOK',

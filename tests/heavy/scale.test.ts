@@ -154,7 +154,7 @@ describe('maxRules (100 000) with plugins: three beforeEvaluate hooks and one af
       name: 'after',
       version: '1.0.0',
       onInit: () => undefined,
-      afterEvaluate: (_input, result) => result,
+      afterEvaluate: () => undefined,
     };
     const engine = new PPEEngine({
       plugins: [
@@ -267,7 +267,7 @@ describe('the worst case: every limit at its default, on the costliest shape, at
   const texty = (id: string): Rule => makeRule({ id, model: 'M', params: { text } });
   it('pins the calibrated defaults by value', () => {
     expect(DEFAULT_LIMITS.maxRuleSetNodes).toBe(2_000_000);
-    expect(DEFAULT_LIMITS.maxHookLeaves).toBe(600_000);
+    expect(DEFAULT_LIMITS.maxHookLeaves).toBe(400_000);
     expect(DEFAULT_LIMITS.maxTraceNodes).toBe(10_000_000);
     expect(DEFAULT_LIMITS.maxStringLength).toBe(1_000_000);
   });
@@ -322,7 +322,7 @@ describe('the worst case: every limit at its default, on the costliest shape, at
       name: 'after',
       version: '1.0.0',
       onInit: () => undefined,
-      afterEvaluate: (_input, result) => result,
+      afterEvaluate: () => undefined,
     };
     const engine = new PPEEngine({
       plugins: [new StubPlugin('p', [new StubModel('M', 1)]), adder, after],
@@ -461,13 +461,7 @@ describe('the worst case: every limit at its default, on the costliest shape, at
       name,
       version: '1.0.0',
       onInit: () => undefined,
-      afterEvaluate: (_input, result) => ({
-        ...result,
-        meta: {
-          ...(result.meta ?? {}),
-          [name]: Array.from({ length: 20 }, () => hostile),
-        },
-      }),
+      afterEvaluate: () => ({ annotations: { texts: Array.from({ length: 20 }, () => hostile) } }),
     });
     const engine = new PPEEngine({
       plugins: [
@@ -493,6 +487,30 @@ describe('the worst case: every limit at its default, on the costliest shape, at
       ((error as { cause: { limit: string } }).cause as { limit: string }).limit,
     );
   }, 60_000);
+
+  it('AB3: an input of maxInputLeaves nodes with 20 rules and five annotators is evaluated in under 10 s', async () => {
+    const data: Record<string, unknown> = {};
+    for (let i = 0; i < (DEFAULT_LIMITS.maxInputLeaves - 2) / 2; i += 1) data[`k${i}`] = i;
+    const rules = Array.from({ length: 20 }, (_, i) => makeRule({ id: `r${i}`, model: 'M' }));
+    const annotating = (name: string): PPEPlugin => ({
+      name,
+      version: '1.0.0',
+      onInit: () => undefined,
+      afterEvaluate: () => ({ annotations: { seen: 1 } }),
+    });
+    const engine = new PPEEngine({
+      plugins: [
+        new StubPlugin('p', [new StubModel('M', 1)]),
+        ...['one', 'two', 'three', 'four', 'five'].map(annotating),
+      ],
+      dsls: [],
+      strict: false,
+    });
+    const start = performance.now();
+    const result = await engine.evaluate(rules, makeInput({ data }));
+    expect(performance.now() - start).toBeLessThan(10_000);
+    expect(Object.keys(result.meta ?? {}).sort()).toEqual(['five', 'four', 'one', 'three', 'two']);
+  }, 120_000);
 
   it('many rules sharing one string of maxStringLength characters: finishes or is refused by name, under 10 s', async () => {
     const rules = Array.from({ length: 100 }, (_, i) => texty(`s${i}`));

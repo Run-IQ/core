@@ -3,7 +3,7 @@ import type { EngineLimits } from '../limits.js';
 import { describeFault, faultOf } from '../engine/pluginPort.js';
 import { NotPlain, isDateObject, isPlainPrototype } from '../utils/plain.js';
 import { toReferenceDate } from '@run-iq/spec';
-import { CHARS_PER_NODE, serializedLength } from '../utils/weight.js';
+import { CHARS_PER_NODE, hasLoneSurrogate, serializedLength } from '../utils/weight.js';
 
 /** The segment of a JSON pointer for `key`: `~` is `~0`, `/` is `~1`. */
 const escapeSegment = (key: string): string => key.replace(/~/g, '~0').replace(/\//g, '~1');
@@ -103,6 +103,11 @@ export class InputCopier {
   text(value: string, pointer: () => string): number {
     if (value.length > this.limits.maxStringLength) {
       throw raiseLimit('maxStringLength', this.limits.maxStringLength, value.length, pointer());
+    }
+    // Text a plugin hands the engine is held to what spec's canonical form accepts: no lone
+    // surrogate. (The caller's input is checked by spec itself.)
+    if (this.refuseUndefined && hasLoneSurrogate(value)) {
+      this.reasons.push(`${pointer()} holds a lone surrogate: not well-formed text`);
     }
     const written = serializedLength(value);
     this.chars += written;

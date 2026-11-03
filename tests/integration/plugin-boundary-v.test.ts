@@ -7,8 +7,8 @@ import { UnexpectedEngineError } from '../../src/errors/UnexpectedEngineError.js
 import { EngineLimitError } from '../../src/errors/EngineLimitError.js';
 import { ValidationError } from '../../src/errors/ValidationError.js';
 import { SnapshotSerializer } from '../../src/snapshot/SnapshotSerializer.js';
-import { DSLRegistry } from '../../src/registry/DSLRegistry.js';
-import { ModelRegistry } from '../../src/registry/ModelRegistry.js';
+import { DSLRegistry, snapshotDsls } from '../../src/registry/DSLRegistry.js';
+import { ModelRegistry, snapshotModels } from '../../src/registry/ModelRegistry.js';
 import type { PPEPlugin, PluginContext } from '../../src/types/plugin.js';
 import type { CalculationModel } from '../../src/types/model.js';
 import type { DSLEvaluator } from '../../src/types/dsl.js';
@@ -145,7 +145,7 @@ describe('V1: the declarations a model gives are copied when it is registered', 
     const registry = new ModelRegistry();
     registry.register(model);
     expect(reads).toBe(1);
-    const fixed = registry.snapshot().get('ONCE');
+    const fixed = snapshotModels(registry).get('ONCE');
     expect(reads).toBe(1);
     expect(fixed.output).toEqual(declaration());
     expect(Object.isFrozen(fixed.output)).toBe(true);
@@ -168,14 +168,14 @@ describe('V1: the declarations a model gives are copied when it is registered', 
     const capabilities = { pure: true };
     const evaluator = {
       dsl: 'cap',
-      version: '1',
+      version: '1.0.0',
       evaluate: () => true,
       capabilities,
     } as unknown as DSLEvaluator;
     const registry = new DSLRegistry();
     registry.register(evaluator);
     (capabilities as { pure: boolean }).pure = false;
-    const fixed = registry.snapshot().get('cap');
+    const fixed = snapshotDsls(registry).get('cap');
     expect((fixed as unknown as { capabilities: unknown }).capabilities).toEqual({ pure: true });
     expect(Object.isFrozen((fixed as unknown as { capabilities: unknown }).capabilities)).toBe(
       true,
@@ -401,7 +401,7 @@ describe('V5: a refused write is only the one a view of this call threw', () => 
         } catch (error) {
           caught = error;
         }
-        return result;
+        return undefined;
       },
     });
     const replayer: CalculationModel = {

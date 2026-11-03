@@ -33,3 +33,26 @@ const NEEDS_ESCAPE = /["\\\u0000-\u001f\ud800-\udfff]/;
 
 /** Serialized characters that weigh one node. */
 export const CHARS_PER_NODE = 64;
+
+/**
+ * `text` cut to at most `max` characters, never in the middle of a surrogate pair, with `marker`
+ * when it was cut, and well-formed (a lone surrogate becomes U+FFFD): text the record can hold.
+ */
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+const LONE_SURROGATES = new RegExp(LONE_SURROGATE.source, 'g');
+
+/** True when `text` holds a lone surrogate, which the canonical form of spec refuses. */
+export function hasLoneSurrogate(text: string): boolean {
+  const native = (text as unknown as { isWellFormed?: () => boolean }).isWellFormed;
+  if (typeof native === 'function') return !native.call(text);
+  return LONE_SURROGATE.test(text);
+}
+
+export function clipText(text: string, max: number, marker: string): string {
+  const whole = LONE_SURROGATE.test(text) ? text.replace(LONE_SURROGATES, '\uFFFD') : text;
+  if (whole.length <= max) return whole;
+  let end = max;
+  const last = whole.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1; // the cut would split a pair
+  return `${whole.slice(0, end)}${marker}`;
+}

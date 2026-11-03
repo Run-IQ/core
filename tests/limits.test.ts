@@ -28,7 +28,7 @@ describe('DEFAULT_LIMITS', () => {
       maxReferentialNodes: 100_000,
       maxGroupDepth: 64,
       maxRuleLeaves: 100_000,
-      maxHookLeaves: 600_000,
+      maxHookLeaves: 400_000,
       maxRuleSetNodes: 2_000_000,
       maxStringLength: 1_000_000,
       maxRecordLength: 256_000_000,

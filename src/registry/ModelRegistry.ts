@@ -102,22 +102,29 @@ export class ModelRegistry {
   getAll(): ReadonlyMap<string, CalculationModel<OutputValue>> {
     return new Map(this.models);
   }
+}
 
-  /**
-   * A registry fixed at this moment: a model registered or replaced later is not seen by it, and
-   * neither is a change to a model object: what was taken when it was registered is what runs. An
-   * evaluation works on one, so that what its rules were validated against is what runs.
-   */
-  snapshot(): ModelRegistry {
-    const fixed = new ModelRegistry();
-    for (const [name, model] of this.models) {
-      // justification: `register` sets both maps together.
-      const declared = this.declared.get(name) as Declared;
-      fixed.models.set(name, fixModel(name, model, declared));
-      fixed.declared.set(name, declared);
-    }
-    return fixed;
+/**
+ * A registry fixed at this moment: a model registered or replaced later is not seen by it, and
+ * neither is a change to a model object: what was taken when it was registered is what runs. An
+ * evaluation works on one, so that what its rules were validated against is what runs. Internal to
+ * the engine (not exported by the package): the descriptors it holds are callable, and a plugin
+ * has no path to them.
+ */
+export function snapshotModels(registry: ModelRegistry): ModelRegistry {
+  const source = registry as unknown as {
+    models: Map<string, CalculationModel<OutputValue>>;
+    declared: Map<string, Declared>;
+  };
+  const fixed = new ModelRegistry();
+  const target = fixed as unknown as typeof source;
+  for (const [name, model] of source.models) {
+    // justification: `register` sets both maps together.
+    const declared = source.declared.get(name) as Declared;
+    target.models.set(name, fixModel(name, model, declared));
+    target.declared.set(name, declared);
   }
+  return fixed;
 }
 
 /**

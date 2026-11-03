@@ -347,7 +347,7 @@ describe('S3: the total a hook can make the engine read is bounded', () => {
     expect(Date.now() - started).toBeLessThan(3000);
   });
 
-  it('D2: an afterEvaluate result with many extra fields is refused before they are copied', async () => {
+  it('D2: an afterEvaluate return with many extra fields is refused at the first, before any is read', async () => {
     const big = new Array<number>(400_000).fill(1);
     const built = build([
       pluginWith('h', {
@@ -361,7 +361,7 @@ describe('S3: the total a hook can make the engine read is bounded', () => {
     const started = Date.now();
     const error = (await failure(built, [tax()])) as PluginHookError;
     expect(error).toBeInstanceOf(PluginHookError);
-    expect((error.cause as Error).message).toMatch(/changed the decision: f0, f1/);
+    expect((error.cause as Error).message).toMatch(/a field other than annotations: requestId/);
     expect(Date.now() - started).toBeLessThan(1500);
   });
 });
@@ -647,7 +647,7 @@ describe('S11: the views refuse writes', () => {
             }
           }
           seen['timestamp'] = result.timestamp.toISOString().length;
-          return result;
+          return undefined;
         },
       }),
     ]);
@@ -750,12 +750,12 @@ describe('S12: the survivors of the fourth review', () => {
     expect(error.cause).toMatchObject({ limit: 'maxRules', max: 3, actual: 4 });
   });
 
-  it('M58: the depth of the result an afterEvaluate returns is bounded', async () => {
+  it('M58: the depth of the annotations an afterEvaluate returns is bounded', async () => {
     let deep: unknown = 1;
     for (let i = 0; i < 20_000; i += 1) deep = { a: deep };
     const built = build([
       pluginWith('h', {
-        afterEvaluate: (_input, result) => ({ ...result, meta: { deep } }) as never,
+        afterEvaluate: () => ({ annotations: { deep } }) as never,
       }),
     ]);
     const error = (await failure(built, [tax()])) as PluginHookError;
@@ -928,7 +928,7 @@ describe('the view handed to afterEvaluate is stable', () => {
           seen.push(result.appliedRules === result.appliedRules);
           seen.push(result.appliedRules[0] === result.appliedRules[0]);
           seen.push(result.timestamp !== result.timestamp);
-          return result;
+          return undefined;
         },
       }),
     ]);

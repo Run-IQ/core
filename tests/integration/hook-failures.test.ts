@@ -287,9 +287,9 @@ describe('afterEvaluate that fails makes the evaluation fail', () => {
   it('a hook that times out', async () => {
     const s = setup(
       {
-        afterEvaluate: async (_input, result) => {
+        afterEvaluate: async (_input, _result) => {
           await new Promise((resolve) => setTimeout(resolve, 200));
-          return result;
+          return undefined;
         },
       },
       { timeout: { hook: 20 } },
@@ -304,61 +304,38 @@ describe('afterEvaluate that fails makes the evaluation fail', () => {
     const s = setup({ afterEvaluate: (() => 42) as never });
     await expectHookFailure(s, 'afterEvaluate', (cause) => {
       expect(cause).toBeInstanceOf(TypeError);
-      expect((cause as Error).message).toBe('plugin bad afterEvaluate returned 42, not a result');
+      expect((cause as Error).message).toBe(
+        'plugin bad afterEvaluate returned 42, not annotations',
+      );
     });
   });
 
-  it('the decision changed: it would have been replaced', async () => {
+  it('a result returned in place of annotations: the decision cannot be changed, so it cannot be returned', async () => {
     const s = setup({
-      afterEvaluate: (_input, result) => ({ ...result, appliedRules: 'nope' as never }),
+      afterEvaluate: (_input, result) => ({ ...result, appliedRules: 'nope' as never }) as never,
     });
     await expectHookFailure(s, 'afterEvaluate', (cause) => {
       expect(cause).toBeInstanceOf(TypeError);
       expect((cause as Error).message).toBe(
-        'plugin bad afterEvaluate changed the decision: appliedRules',
+        'plugin bad afterEvaluate returned a field other than annotations: requestId',
       );
     });
   });
 
-  it('a value rewritten, even to a finite number', async () => {
-    const s = setup({
-      afterEvaluate: (_input, result) => ({ ...result, value: 99 }),
-    });
-    await expectHookFailure(s, 'afterEvaluate', (cause) => {
-      expect((cause as Error).message).toBe('plugin bad afterEvaluate changed the decision: value');
-    });
-  });
-
-  it('a value rewritten to something that is not a number', async () => {
-    const s = setup({
-      afterEvaluate: (_input, result) => ({ ...result, value: 'many' }),
-    });
-    await expectHookFailure(s, 'afterEvaluate', (cause) => {
-      expect((cause as Error).message).toBe('plugin bad afterEvaluate changed the decision: value');
-    });
-  });
-
-  it('engine fields changed', async () => {
-    const s = setup({
-      afterEvaluate: (_input, result) => ({ ...result, requestId: 'other', engineVersion: '9' }),
-    });
+  it('a value in place of annotations', async () => {
+    const s = setup({ afterEvaluate: (() => ({ value: 99 })) as never });
     await expectHookFailure(s, 'afterEvaluate', (cause) => {
       expect((cause as Error).message).toBe(
-        'plugin bad afterEvaluate changed the decision: engineVersion, requestId',
+        'plugin bad afterEvaluate returned a field other than annotations: value',
       );
     });
   });
 
-  it('rules removed from the applied rules, with no skip', async () => {
-    const s = setup({
-      afterEvaluate: (_input, result) => ({
-        ...result,
-        appliedRules: result.appliedRules.filter((r) => r.id !== 'r2'),
-      }),
-    });
+  it('annotations that are not an object', async () => {
+    const s = setup({ afterEvaluate: (() => ({ annotations: 'many' })) as never });
     await expectHookFailure(s, 'afterEvaluate', (cause) => {
       expect((cause as Error).message).toBe(
-        'plugin bad afterEvaluate changed the decision: appliedRules',
+        'plugin bad afterEvaluate returned annotations that are not an object',
       );
     });
   });

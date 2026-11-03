@@ -15,8 +15,9 @@ import { ruleLabel } from '../utils/values.js';
 import { isPlainPrototype } from '../utils/plain.js';
 import { ViewScope } from './frozenView.js';
 import { clip } from '../utils/frozenCopy.js';
-import { BoundaryError, PluginFaultError, faultOf, isPluginFault, reading } from './pluginPort.js';
-import { CHARS_PER_NODE, serializedLength } from '../utils/weight.js';
+import { faultFrom, reading, refusal } from './pluginPort.js';
+import { isRaised, raised } from './trust.js';
+import { CHARS_PER_NODE, hasLoneSurrogate, serializedLength } from '../utils/weight.js';
 
 // The plugin trust boundary, in one place. The engine owns its state; a plugin is handed views of
 // it and never the objects the engine holds; what a plugin returns is read once, bounded, copied
@@ -60,10 +61,9 @@ export function refusalsOf(rule: object): readonly string[] | undefined {
  * own throw.
  */
 export class ReadFailure extends Error {
-  constructor(message: string, causes: readonly unknown[]) {
+  constructor(message: string) {
     super(message);
     this.name = 'ReadFailure';
-    CAUSES.set(this, causes);
   }
 }
 
@@ -74,6 +74,18 @@ export class ReadFailure extends Error {
  */
 const CAUSES = new WeakMap<object, readonly unknown[]>();
 markEngineError(ReadFailure);
+
+/** A failed read, raised by the engine in this call, with what the properties threw. */
+function readFailure(message: string, causes: readonly unknown[]): ReadFailure {
+  const failure = raised(new ReadFailure(message));
+  CAUSES.set(failure, causes);
+  return failure;
+}
+
+/** True for a failed read the engine raised in this call. */
+export function isReadFailure(value: unknown): value is ReadFailure {
+  return value instanceof ReadFailure && isRaised(value);
+}
 
 /** What the properties threw while the failed value was read, in order (empty if nothing threw). */
 export function causesOf(failure: ReadFailure): readonly unknown[] {
@@ -101,16 +113,10 @@ export function guarded<T>(fn: () => T): T {
     try {
       return fn();
     } catch (error) {
-      if (
-        error instanceof BoundaryError ||
-        error instanceof ReadFailure ||
-        error instanceof MalformedResult ||
-        isRaisedLimit(error) ||
-        isPluginFault(error)
-      ) {
-        throw error;
-      }
-      throw new PluginFaultError(faultOf(error));
+      // What the engine raised itself in this call passes; anything else, a forged engine error
+      // included, is a fault of the plugin whose getter or trap threw it.
+      if (isRaised(error)) throw error;
+      throw faultFrom(error);
     }
   });
 }
@@ -221,11 +227,12 @@ function readOnce(
       RULE_CHARS.set(copy, copier.chars);
     }
     if (copier.reasons.length > 0) {
-      throw new ReadFailure(copier.reasons.join('; '), copier.thrown);
+      throw readFailure(copier.reasons.join('; '), copier.thrown);
     }
     if (copier.refusals.length > 0) {
       // A rule that is itself not plain is a hard refusal; a member of it excludes the rule.
-      if (typeof copy !== 'object' || copy === null) throw new BoundaryError(copier.refusals[0]);
+      if (typeof copy !== 'object' || copy === null)
+        throw refusal(copier.refusals[0] ?? 'a value that is not plain data');
       REFUSALS.set(
         copy,
         copier.refusals.map((refusal) =>
@@ -239,32 +246,6 @@ function readOnce(
     options.budget?.noteChars(copier.chars);
   }
 }
-
-/**
- * The limits for reading the result an `afterEvaluate` returned: the size of the result it was
- * handed (trusted, so measured, not bounded) plus `maxInputLeaves`, and a few levels more than
- * `maxInputDepth` for the result's own nesting. A hook may grow a result by a bounded amount, not
- * by any amount.
- */
-export function resultLimits(
-  handed: unknown,
-  limits: Readonly<EngineLimits>,
-): Readonly<EngineLimits> {
-  const measure = new InputCopier({
-    ...limits,
-    maxInputLeaves: Number.MAX_SAFE_INTEGER,
-    maxInputDepth: limits.maxInputDepth + RESULT_DEPTH,
-  });
-  measure.copy(handed, 'result');
-  return {
-    ...limits,
-    maxInputLeaves: measure.leaves + limits.maxInputLeaves,
-    maxInputDepth: limits.maxInputDepth + RESULT_DEPTH,
-  };
-}
-
-/** Levels a decision adds around the data it holds (trace, steps, rules). */
-const RESULT_DEPTH = 16;
 
 /**
  * Reads a list (`rules`, `skipped`): its `length` once, at most `maxRules` items, each item read
@@ -290,15 +271,14 @@ function readList(
   budget: Budget,
   owned: OwnedRules,
 ): unknown[] {
-  if (!Array.isArray(value)) throw new BoundaryError(`${what} is not a list`);
+  if (!Array.isArray(value)) throw refusal(`${what} is not a list`);
   const length = value.length;
-  if (!Number.isSafeInteger(length) || length < 0)
-    throw new BoundaryError(`${what} has no valid length`);
+  if (!Number.isSafeInteger(length) || length < 0) throw refusal(`${what} has no valid length`);
   if (length > limits.maxRules) throw raiseLimit('maxRules', limits.maxRules, length);
   const items: unknown[] = [];
   for (let index = 0; index < length; index += 1) {
     if (!Object.hasOwn(value, index)) {
-      throw new BoundaryError(`${what} has a hole at index ${index}: lists must be dense`);
+      throw refusal(`${what} has a hole at index ${index}: lists must be dense`);
     }
     const item: unknown = value[index];
     if (typeof item === 'object' && item !== null && owned.has(item)) {
@@ -338,26 +318,24 @@ function readSkipList(
   budget: Budget,
   owned: OwnedRules,
 ): { rule: unknown; reason: unknown; detail: unknown }[] {
-  if (!Array.isArray(value)) throw new BoundaryError('skipped is not a list');
+  if (!Array.isArray(value)) throw refusal('skipped is not a list');
   const length = value.length;
-  if (!Number.isSafeInteger(length) || length < 0)
-    throw new BoundaryError('skipped has no valid length');
+  if (!Number.isSafeInteger(length) || length < 0) throw refusal('skipped has no valid length');
   if (length > limits.maxRules) throw raiseLimit('maxRules', limits.maxRules, length);
   const skips: { rule: unknown; reason: unknown; detail: unknown }[] = [];
   for (let index = 0; index < length; index += 1) {
     if (!Object.hasOwn(value, index)) {
-      throw new BoundaryError(`skipped has a hole at index ${index}: lists must be dense`);
+      throw refusal(`skipped has a hole at index ${index}: lists must be dense`);
     }
     const raw: unknown = value[index];
     if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-      throw new BoundaryError('a malformed skipped');
+      throw refusal('a malformed skipped');
     }
-    if (!isPlainPrototype(Object.getPrototypeOf(raw)))
-      throw new BoundaryError('a malformed skipped');
+    if (!isPlainPrototype(Object.getPrototypeOf(raw))) throw refusal('a malformed skipped');
     const record: Record<string, unknown> = {};
     for (const key of Reflect.ownKeys(raw)) {
       if (key !== 'rule' && key !== 'reason' && key !== 'detail') {
-        throw new BoundaryError('a malformed skipped');
+        throw refusal('a malformed skipped');
       }
       // Read once, here: a getter answers once and the answer is the one that is checked.
       // justification: `raw` is a plain object (checked above); `key` is one of three names.
@@ -368,13 +346,8 @@ function readSkipList(
     // The text crosses with the rest: a string, held to `maxStringLength`, weighed by its exact
     // serialized length against the one budget of the evaluation.
     if (detailIn !== undefined) {
-      try {
-        readText(detailIn, { limits, budget }, `skipped/${index}/detail`);
-      } catch (error) {
-        if (error instanceof TypeError)
-          throw new BoundaryError('a malformed skipped', { cause: error });
-        throw error;
-      }
+      if (typeof detailIn !== 'string') throw refusal('a malformed skipped');
+      readText(detailIn, { limits, budget }, `skipped/${index}/detail`);
     }
     skips.push({
       rule:
@@ -642,6 +615,16 @@ export class MalformedResult extends Error {
 }
 markEngineError(MalformedResult);
 
+/** A malformed result, raised by the engine in this call. */
+function malformed(message: string): MalformedResult {
+  return raised(new MalformedResult(message));
+}
+
+/** True for a malformed result the engine raised in this call. */
+export function isMalformed(value: unknown): value is MalformedResult {
+  return value instanceof MalformedResult && isRaised(value);
+}
+
 /** What the engine took from a `validateParams`. */
 export type ParamsVerdict =
   | { readonly kind: 'valid' }
@@ -689,13 +672,13 @@ export function askValidateParams(
       if (error.limit === 'maxHookLeaves') throw error;
       return errorVerdict(crossing, clip(`${what}: ${error.message}`));
     }
-    if (error instanceof MalformedResult) return errorVerdict(crossing, clip(error.message));
-    const causes = error instanceof ReadFailure ? causesOf(error) : [error];
+    if (isMalformed(error)) return errorVerdict(crossing, clip(error.message));
+    const causes = isReadFailure(error) ? causesOf(error) : [error];
     const written = causes.find((cause) => scope.isWriteError(cause));
     if (written !== undefined) {
       return errorVerdict(crossing, clip((written as Error).message));
     }
-    if (error instanceof ReadFailure && causes.length === 0) {
+    if (isReadFailure(error) && causes.length === 0) {
       return errorVerdict(
         crossing,
         clip(`${what} returned a result that cannot be read: ${error.message}`),
@@ -730,23 +713,23 @@ function isPlainValid(raw: unknown): boolean {
 
 function judgeValidation(result: unknown, what: string): ParamsVerdict {
   if (typeof result !== 'object' || result === null || Array.isArray(result)) {
-    throw new MalformedResult(`${what} returned a result that is not an object`);
+    throw malformed(`${what} returned a result that is not an object`);
   }
   const record = result as Record<string, unknown>;
   for (const key of Object.keys(record)) {
     if (key !== 'valid' && key !== 'errors') {
-      throw new MalformedResult(`${what} returned a result with an unknown key "${key}"`);
+      throw malformed(`${what} returned a result with an unknown key "${key}"`);
     }
   }
   const valid = record['valid'];
   if (valid !== true && valid !== false) {
-    throw new MalformedResult(`${what} returned a result whose "valid" is not true or false`);
+    throw malformed(`${what} returned a result whose "valid" is not true or false`);
   }
   const errors = record['errors'];
   let texts: string[] = [];
   if (errors !== undefined) {
     if (!Array.isArray(errors) || !errors.every((item) => typeof item === 'string')) {
-      throw new MalformedResult(`${what} returned "errors" that is not a list of strings`);
+      throw malformed(`${what} returned "errors" that is not a list of strings`);
     }
     texts = errors as string[];
   }
@@ -768,9 +751,11 @@ export function readVerdict(raw: unknown, crossing: Crossing, what: string): unk
  * length.
  */
 export function readText(value: unknown, crossing: Crossing, what: string): string {
-  if (typeof value !== 'string') throw new BoundaryError(`${what} is not a string`);
+  if (typeof value !== 'string') throw refusal(`${what} is not a string`);
   const copier = new InputCopier(crossing.limits, 'maxRuleLeaves');
   return reading(() => {
+    if (hasLoneSurrogate(value))
+      throw refusal(`${what} holds a lone surrogate: not well-formed text`);
     const extra = copier.text(value, () => what);
     crossing.budget.add(1 + extra);
     crossing.budget.record(copier.chars);

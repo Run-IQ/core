@@ -1,5 +1,5 @@
 import type { JsonValue } from '@run-iq/spec';
-import { BoundaryError } from './pluginPort.js';
+import { refusal } from './pluginPort.js';
 import type { EngineLimits } from '../limits.js';
 import type { BeforeEvaluateResult } from '../types/plugin.js';
 import type { Rule } from '../types/rule.js';
@@ -64,7 +64,7 @@ function readResult(
   owned: OwnedRules,
 ): BeforeEvaluateReading {
   const refuse = (what: string): TypeError =>
-    new BoundaryError(`plugin ${pluginName} beforeEvaluate returned ${what}`);
+    refusal(`plugin ${pluginName} beforeEvaluate returned ${what}`);
   const raw: unknown = returned;
   if (!isObject(raw)) throw refuse(`${describeValue(raw)}, not a result`);
   // Read by name, once each (own, non-enumerable or inherited getters alike).
@@ -84,7 +84,8 @@ function readResult(
   try {
     records = readSkips(skippedIn ?? [], limits, budget, owned);
   } catch (error) {
-    if (error instanceof TypeError) throw refuse('a malformed skipped');
+    // A refusal of the reader says what is wrong (and where): it is kept, with the plugin named.
+    if (error instanceof TypeError) throw refuse(error.message);
     throw error;
   }
   const skipped: SkippedRule[] = records.map((record) => {

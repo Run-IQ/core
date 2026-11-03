@@ -13,7 +13,14 @@ export type { OutputValue, DecisionOutput } from './types/output.js';
 export type { Diagnostic } from './types/diagnostic.js';
 export type { DecisionStore } from './types/store.js';
 export type { OutputType, CombineStrategy, OutputDeclaration, DecisionProof } from '@run-iq/spec';
-export type { PPEPlugin, PluginContext, BeforeEvaluateResult } from './types/plugin.js';
+export type {
+  PPEPlugin,
+  PluginContext,
+  BeforeEvaluateResult,
+  AfterEvaluateResult,
+  ModelRegistryApi,
+  DslRegistryApi,
+} from './types/plugin.js';
 export type {
   CalculationModel,
   CalculationOutput,

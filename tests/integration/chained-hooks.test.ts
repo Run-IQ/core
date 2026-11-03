@@ -3,14 +3,11 @@ import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import type { PPEPlugin, PluginContext, BeforeEvaluateResult } from '../../src/types/plugin.js';
 import type { EvaluationInput } from '../../src/types/input.js';
 import type { Rule } from '../../src/types/rule.js';
-import type { UnsealedResult } from '../../src/types/result.js';
 import type { DSLEvaluator } from '../../src/types/dsl.js';
 import {
   makeRule,
   makeInput,
   StubModel,
-  StubDSL,
-  ValueModel,
   InMemorySnapshotAdapter,
   expectSameFailure,
   expectCopyOf,
@@ -240,7 +237,7 @@ describe('Hook errors', () => {
 
   it('a failing onError does not hide the hook failure from the caller', async () => {
     const broken = pluginWith('broken', {
-      afterEvaluate(): UnsealedResult {
+      afterEvaluate(): undefined {
         throw new Error('boom');
       },
       onError(): void {
@@ -271,7 +268,7 @@ describe('Hook errors', () => {
           input,
           rules: [...rules, makeRule({ id: `${name}-rule`, model: 'M' })],
         }),
-        afterEvaluate: (_input, result) => result,
+        afterEvaluate: () => undefined,
       });
     const result = await engineWith([adding('p1'), adding('p2')], [facts]).evaluate(
       [makeRule({ id: 'r1', model: 'M', condition: { dsl: 'facts', value: 'x' } })],
@@ -292,9 +289,9 @@ describe('Plugin state', () => {
       beforeEvaluate(input, rules): BeforeEvaluateResult {
         return { input, rules, state: { a: 1 } };
       },
-      afterEvaluate(_input, result): UnsealedResult {
+      afterEvaluate(_input, result): undefined {
         seen = result.pluginState['stateful'];
-        return result;
+        return undefined;
       },
     });
     const result = await engineWith([stateful]).evaluate(
@@ -342,170 +339,110 @@ describe('Plugin state', () => {
   });
 });
 
-describe('afterEvaluate cannot change the decision', () => {
+describe('afterEvaluate returns annotations, not a result', () => {
   const rules1 = (): Rule[] => [makeRule({ id: 'r1', model: 'M' })];
 
-  /** The failure is a PluginHookError of the plugin, naming exactly the fields it changed. */
-  async function expectChanged(
-    plugin: PPEPlugin,
-    fields: string,
-    plugins: PPEPlugin[] = [],
-    engine = engineWith([...plugins, plugin]),
-    rules = rules1(),
-  ): Promise<void> {
-    const error = await failure(engine, rules);
+  /** The failure is a PluginHookError of the plugin, with the message of its cause. */
+  async function expectRefused(plugin: PPEPlugin, message: string): Promise<void> {
+    const error = await failure(engineWith([plugin]), rules1());
     expect(error).toBeInstanceOf(PluginHookError);
     expect(error).toMatchObject({ plugin: plugin.name, hook: 'afterEvaluate' });
-    expect((error as PluginHookError).cause).toMatchObject({
-      message: `plugin ${plugin.name} afterEvaluate changed the decision: ${fields}`,
-    });
+    expect((error as PluginHookError).cause).toMatchObject({ message });
   }
 
-  it('fails for a rewritten value', async () => {
-    await expectChanged(
-      pluginWith('fiscal', { afterEvaluate: (_input, result) => ({ ...result, value: 0 }) }),
-      'value',
+  it('accepts nothing, an empty object, or annotations, and the decision is untouched', async () => {
+    const plain = await engineWith([]).evaluate(rules1(), makeInput());
+    for (const returned of [undefined, {}, { annotations: undefined }]) {
+      const result = await engineWith([
+        pluginWith('fiscal', { afterEvaluate: () => returned as never }),
+      ]).evaluate(rules1(), makeInput({ requestId: `r-${JSON.stringify(returned)}` }));
+      expect(result.meta).toBeUndefined();
+      expect(result.value).toBe(plain.value);
+      expect(result.appliedRules).toEqual(plain.appliedRules);
+    }
+  });
+
+  it('merges annotations into meta under the name of the plugin, and keeps those of the others', async () => {
+    const annotating = (name: string, annotations: Record<string, number>): PPEPlugin =>
+      pluginWith(name, { afterEvaluate: () => ({ annotations }) });
+    const result = await engineWith([
+      annotating('fiscal', { a: 1 }),
+      annotating('audit', { b: 2 }),
+    ]).evaluate(rules1(), makeInput());
+    expect(result.meta).toEqual({ fiscal: { a: 1 }, audit: { b: 2 } });
+    const plain = await engineWith([]).evaluate(rules1(), makeInput({ requestId: 'plain' }));
+    expect(result.value).toBe(plain.value);
+    expect(result.outputs).toEqual(plain.outputs);
+    expect(result.appliedRules).toEqual(plain.appliedRules);
+    expect(result.trace.steps).toEqual(
+      plain.trace.steps.map((step) => ({ ...step, durationMs: expect.any(Number) })),
     );
   });
 
-  it('fails for rules added to, removed from or moved between the applied and skipped lists', async () => {
-    const pseudo = makeRule({ id: 'SC', model: 'META_SHORT_CIRCUIT', priority: 9999 });
-    const error = await failure(
-      engineWith(
-        [
-          pluginWith('fiscal', {
-            afterEvaluate(_input, result): UnsealedResult {
-              const r2 = result.appliedRules.find((r) => r.id === 'r2')!;
-              return {
-                ...result,
-                appliedRules: [...result.appliedRules.filter((r) => r !== r2), pseudo],
-                skippedRules: [{ rule: r2, reason: 'RULE_CONFLICT' }],
-              };
-            },
-          }),
-        ],
-        [new StubDSL('never', false)],
-      ),
-      [
-        makeRule({ id: 'r1', model: 'M' }),
-        makeRule({ id: 'r2', model: 'M' }),
-        makeRule({ id: 'gone', model: 'M', condition: { dsl: 'never', value: null } }),
-      ],
-    );
-    expect((error as PluginHookError).cause).toMatchObject({
-      message: 'plugin fiscal afterEvaluate changed the decision: appliedRules, skippedRules',
-    });
-  });
-
-  it('fails for rules removed without a skip', async () => {
-    await expectChanged(
+  it('fails for any field other than annotations: a rewritten value, a returned result', async () => {
+    await expectRefused(
       pluginWith('fiscal', {
-        afterEvaluate: (_input, result) => ({ ...result, appliedRules: [] }),
+        afterEvaluate: (_input, result) => ({ ...result, value: 0 }) as never,
       }),
-      'appliedRules',
+      'plugin fiscal afterEvaluate returned a field other than annotations: requestId',
+    );
+    await expectRefused(
+      pluginWith('fiscal', { afterEvaluate: () => ({ value: 0 }) as never }),
+      'plugin fiscal afterEvaluate returned a field other than annotations: value',
+    );
+    await expectRefused(
+      pluginWith('fiscal', { afterEvaluate: () => ({ annotations: {}, meta: {} }) as never }),
+      'plugin fiscal afterEvaluate returned a field other than annotations: meta',
     );
   });
 
-  it('fails for a changed breakdown or trace', async () => {
-    await expectChanged(
-      pluginWith('fiscal', {
-        afterEvaluate: (_input, result) => ({ ...result, breakdown: [] }),
-      }),
-      'breakdown',
-    );
-    await expectChanged(
-      pluginWith('fiscal', {
-        afterEvaluate: (_input, result) => ({ ...result, trace: { ...result.trace, steps: [] } }),
-      }),
-      'trace',
-    );
-  });
-
-  it('fails for a field the plugin adds, or one it drops', async () => {
-    await expectChanged(
-      pluginWith('fiscal', {
-        afterEvaluate: (_input, result) => ({ ...result, extra: 1 }) as UnsealedResult,
-      }),
-      'extra',
-    );
-    await expectChanged(
-      pluginWith('fiscal', {
-        afterEvaluate(_input, result): UnsealedResult {
-          const rest: Partial<Record<keyof UnsealedResult, unknown>> = { ...result };
-          delete rest.timestamp;
-          return rest as UnsealedResult;
-        },
-      }),
-      'timestamp',
-    );
-  });
-
-  it('fails for a direct change of outputs, however it is written', async () => {
-    const RISK = { type: 'string', combine: 'highestPriority' } as const;
-    const host: PPEPlugin = {
-      name: 'model-host',
-      version: '1.0.0',
-      onInit(context: PluginContext): void {
-        context.modelRegistry.register(new StubModel('M', 100));
-        context.modelRegistry.register(new ValueModel('RISK', RISK, { k: 'low' }));
-      },
-    };
-    const rules = (): Rule[] => [
-      makeRule({ id: 'r1', model: 'M' }),
-      makeRule({ id: 'k', model: 'RISK', output: 'risk' }),
-    ];
-    const run = async (plugin: PPEPlugin, fields: string): Promise<void> => {
-      const engine = new PPEEngine({ plugins: [host, plugin], dsls: [], strict: false });
-      const error = await failure(engine, rules());
+  it('fails for a return that is not nothing or a plain object', async () => {
+    for (const [returned, described] of [
+      [42, '42'],
+      ['str', '"str"'],
+      [null, 'null'],
+      [[1], 'something that is not a plain object'],
+    ] as const) {
+      const error = await failure(
+        engineWith([pluginWith('fiscal', { afterEvaluate: () => returned as never })]),
+        rules1(),
+      );
+      expect(error).toBeInstanceOf(PluginHookError);
       expect((error as PluginHookError).cause).toMatchObject({
-        message: `plugin ${plugin.name} afterEvaluate changed the decision: ${fields}`,
+        message: expect.stringContaining('plugin fiscal afterEvaluate returned'),
       });
-    };
-    await run(
-      pluginWith('sneaky', {
-        afterEvaluate(_input, result): UnsealedResult {
-          const value = { ...result.outputs['value']!, value: 7 };
-          return { ...result, outputs: { ...result.outputs, value } };
-        },
-      }),
-      'outputs',
+      void described;
+    }
+  });
+
+  it('fails for annotations that are not a JSON object', async () => {
+    await expectRefused(
+      pluginWith('fiscal', { afterEvaluate: () => ({ annotations: 5 }) as never }),
+      'plugin fiscal afterEvaluate returned annotations that are not an object',
     );
-    await run(
-      pluginWith('sneaky', {
-        afterEvaluate(_input, result): UnsealedResult {
-          const kept = Object.fromEntries(
-            Object.entries(result.outputs).filter(([name]) => name !== 'risk'),
-          );
-          return {
-            ...result,
-            outputs: { ...kept, extra: { ...result.outputs['value']!, name: 'extra' } },
-          };
-        },
-      }),
-      'outputs',
+    await expectRefused(
+      pluginWith('fiscal', { afterEvaluate: () => ({ annotations: [1] }) as never }),
+      'plugin fiscal afterEvaluate returned annotations that are not an object',
     );
-    await run(
-      pluginWith('tidy', {
-        afterEvaluate(_input, result): UnsealedResult {
-          const value = { ...result.outputs['value']!, value: 0 };
-          return { ...result, value: 0, outputs: { ...result.outputs, value } };
-        },
+    await expectRefused(
+      pluginWith('fiscal', {
+        afterEvaluate: () => ({ annotations: { at: new Date(0) } }) as never,
       }),
-      'outputs, value',
+      'plugin fiscal afterEvaluate returned annotations that are not JSON at $.at (Date)',
     );
   });
 
-  it('hands plugins a copy: a plugin that writes into it changes nothing, and the evaluation fails', async () => {
+  it('hands plugins a view: a plugin that writes into it changes nothing, and the evaluation fails', async () => {
     const rule = makeRule({ id: 'r1', model: 'M', params: { rate: 1 } });
     const careless = pluginWith('careless', {
-      afterEvaluate(_input, result): UnsealedResult {
+      afterEvaluate(_input, result): undefined {
         // A careless plugin writing through the readonly types.
         const writable: MutableResult = result as unknown as MutableResult;
         writable.value = 0;
         writable.appliedRules.push({ id: 'SC', model: 'META_SHORT_CIRCUIT', params: {} });
         writable.appliedRules[0]!.params['rate'] = 2;
         writable.outputs['value']!.contributors.push('ghost');
-        return result;
+        return undefined;
       },
     });
     const adapter = new InMemorySnapshotAdapter();
@@ -520,76 +457,6 @@ describe('afterEvaluate cannot change the decision', () => {
     );
     expect(rule.params).toEqual({ rate: 1 });
     expect(await adapter.exists(makeInput().requestId)).toBe(false);
-  });
-
-  it('accepts a result that leaves the decision as it is, and sets its meta and its own pluginState', async () => {
-    const annotating = pluginWith('fiscal', {
-      afterEvaluate: (_input, result) => ({
-        ...result,
-        meta: { note: 'checked' },
-        pluginState: { ...result.pluginState, fiscal: { regime: 'normal' } },
-      }),
-    });
-    const plain = await engineWith([]).evaluate(rules1(), makeInput());
-    const result = await engineWith([annotating]).evaluate(rules1(), makeInput());
-    expect(result.meta).toEqual({ note: 'checked' });
-    expect(result.pluginState).toEqual({ fiscal: { regime: 'normal' } });
-    expect(result.value).toBe(plain.value);
-    expect(result.outputs).toEqual(plain.outputs);
-    expect(result.appliedRules).toEqual(plain.appliedRules);
-    expect(result.diagnostics).toEqual([]);
-  });
-
-  it("fails for a change to another plugin's pluginState, or its removal", async () => {
-    const keeper = pluginWith('keeper', {
-      beforeEvaluate: (input, rules) => ({ input, rules, state: 1 }),
-    });
-    await expectChanged(
-      pluginWith('fiscal', {
-        afterEvaluate: (_input, result) => ({
-          ...result,
-          pluginState: { ...result.pluginState, keeper: 2 },
-        }),
-      }),
-      'pluginState',
-      [keeper],
-    );
-    await expectChanged(
-      pluginWith('fiscal', {
-        afterEvaluate: (_input, result) => ({ ...result, pluginState: {} }),
-      }),
-      'pluginState',
-      [keeper],
-    );
-  });
-
-  it('fails for a pluginState entry of its own that is not JSON', async () => {
-    const error = await failure(
-      engineWith([
-        pluginWith('fiscal', {
-          afterEvaluate: (_input, result) =>
-            ({ ...result, pluginState: { fiscal: { at: new Date(0) } } }) as never,
-        }),
-      ]),
-      rules1(),
-    );
-    expect((error as PluginHookError).cause).toMatchObject({
-      message: 'plugin fiscal afterEvaluate returned a pluginState that is not JSON at $.at (Date)',
-    });
-  });
-
-  it('fails for a meta that is not an object', async () => {
-    const error = await failure(
-      engineWith([
-        pluginWith('fiscal', {
-          afterEvaluate: (_input, result) => ({ ...result, meta: 5 }) as never,
-        }),
-      ]),
-      rules1(),
-    );
-    expect((error as PluginHookError).cause).toMatchObject({
-      message: 'plugin fiscal afterEvaluate returned a malformed meta',
-    });
   });
 });
 
@@ -639,7 +506,7 @@ describe('Hook timeouts and onError typing', () => {
     const thrown = new TypeError('bad shape');
     const onError = vi.fn();
     const broken = pluginWith('broken', {
-      afterEvaluate(): UnsealedResult {
+      afterEvaluate(): undefined {
         throw thrown;
       },
       onError,

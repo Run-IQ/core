@@ -18,7 +18,6 @@ import { DSLEvaluationError } from '../errors/DSLEvaluationError.js';
 import { isRaisedLimit } from '../errors/EngineLimitError.js';
 import { defaultCrossing, readVerdict } from './pluginBoundary.js';
 import type { Crossing } from './pluginBoundary.js';
-import { clip } from '../utils/frozenCopy.js';
 import { ruleLabel } from '../utils/values.js';
 import { buildContext } from '../context/buildContext.js';
 import { readsOf } from '../context/reads.js';
@@ -257,7 +256,8 @@ export class RuleFilter {
       } catch (error) {
         if (isRaisedLimit(error)) throw error;
         const cause = error instanceof DSLEvaluationError ? error.originalError : error;
-        const detail = clip(cause instanceof Error ? cause.message : String(cause));
+        // The port has already cut the text of a fault of the plugin.
+        const detail = cause instanceof Error ? cause.message : String(cause);
         // The text of a plugin's fault is in the record: it is weighed like the rest.
         this.crossing.budget.addText(detail);
         return { reason: 'DSL_ERROR', detail };

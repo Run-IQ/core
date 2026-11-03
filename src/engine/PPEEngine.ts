@@ -3,7 +3,13 @@ import type { JsonValue } from '@run-iq/spec';
 import type { Rule } from '../types/rule.js';
 import type { EvaluationInput } from '../types/input.js';
 import type { SkippedRule, UnsealedResult } from '../types/result.js';
-import type { BeforeEvaluateResult, PPEPlugin, PluginContext } from '../types/plugin.js';
+import type {
+  BeforeEvaluateResult,
+  DslRegistryApi,
+  ModelRegistryApi,
+  PPEPlugin,
+  PluginContext,
+} from '../types/plugin.js';
 import type { DSLEvaluator } from '../types/dsl.js';
 import type { ISnapshotAdapter } from '../types/snapshot.js';
 import type { Diagnostic } from '../types/diagnostic.js';
@@ -13,9 +19,9 @@ import { PipelineTimeoutError } from '../errors/PipelineTimeoutError.js';
 import { UnexpectedEngineError } from '../errors/UnexpectedEngineError.js';
 import { PluginHookError } from '../errors/PluginHookError.js';
 import type { PPEError } from '../errors/PPEError.js';
-import { ModelRegistry } from '../registry/ModelRegistry.js';
+import { ModelRegistry, snapshotModels } from '../registry/ModelRegistry.js';
 import { PluginRegistry } from '../registry/PluginRegistry.js';
-import { DSLRegistry } from '../registry/DSLRegistry.js';
+import { DSLRegistry, snapshotDsls } from '../registry/DSLRegistry.js';
 import { InputSanitizer } from '../security/InputSanitizer.js';
 import type { PreparedInput } from '../security/InputSanitizer.js';
 import { isRaisedLimit, raiseLimit } from '../errors/EngineLimitError.js';
@@ -42,6 +48,7 @@ import { acceptAfterEvaluate } from './afterEvaluateTransition.js';
 import { readBeforeEvaluate } from './beforeEvaluateResult.js';
 import { Budget, RuleLedger, charsOfRule, readItems } from './pluginBoundary.js';
 import { callAsync, callSync, reading } from './pluginPort.js';
+import { inCall } from './trust.js';
 import type { PluginHandle } from '../registry/PluginRegistry.js';
 import type { Crossing } from './pluginBoundary.js';
 import { ViewScope } from './frozenView.js';
@@ -152,24 +159,44 @@ export class PPEEngine {
 
     // Initialize plugins. Each is read once, when it is registered; from then on the engine uses
     // what it took (a name and a version it checked, the functions) and calls them through the port.
-    const context: PluginContext = {
-      modelRegistry: this.modelRegistry,
-      dslRegistry: this.dslRegistry,
-      engineVersion: ENGINE_VERSION,
+    // What a plugin is handed are two thin views of the registries, closures over the real ones:
+    // they register, look up and list, and reach nothing else of the engine.
+    const models = this.modelRegistry;
+    const dsls = this.dslRegistry;
+    const modelApi: ModelRegistryApi = {
+      register: (model) => models.register(model),
+      get: (name) => models.get(name),
+      has: (name) => models.has(name),
+      getAll: () => models.getAll(),
     };
+    const dslApi: DslRegistryApi = {
+      register: (evaluator) => dsls.register(evaluator),
+      get: (dsl) => dsls.get(dsl),
+      has: (dsl) => dsls.has(dsl),
+      getAll: () => dsls.getAll(),
+    };
+    Object.freeze(modelApi);
+    Object.freeze(dslApi);
+    const context: PluginContext = Object.freeze({
+      modelRegistry: modelApi,
+      dslRegistry: dslApi,
+      engineVersion: ENGINE_VERSION,
+    });
 
     const handles: PluginHandle[] = [];
-    for (const plugin of config.plugins) {
-      const handle = this.pluginRegistry.register(plugin);
-      handles.push(handle);
-      try {
-        // `onInit` is synchronous: a promise it returns is a fault, and its rejection is handled.
-        callSync(handle.onInit, plugin, [context]);
-      } catch (error) {
-        // A throw of plugin code reaches the caller as the engine's own error, holding its text.
-        throw new PluginHookError(handle.name, 'onInit', error);
+    inCall(() => {
+      for (const plugin of config.plugins) {
+        const handle = this.pluginRegistry.register(plugin);
+        handles.push(handle);
+        try {
+          // `onInit` is synchronous: a promise it returns is a fault, and its rejection is handled.
+          callSync(handle.onInit, plugin, [context]);
+        } catch (error) {
+          // A throw of plugin code reaches the caller as the engine's own error, holding its text.
+          throw new PluginHookError(handle.name, 'onInit', error);
+        }
       }
-    }
+    });
     this.plugins = handles;
   }
 
@@ -223,7 +250,8 @@ export class PPEEngine {
   ): Promise<UnsealedResult> {
     const seen: { input?: EvaluationInput } = {};
     try {
-      return await this.runPipeline(rules, input, options, signal, seen);
+      // One call of the engine: the errors it raises are its own, and no other evaluation's.
+      return await inCall(() => this.runPipeline(rules, input, options, signal, seen));
     } catch (error) {
       if (signal.aborted) throw error;
       // What the plugins are told is not writable: one plugin cannot rewrite the attribution (the
@@ -333,8 +361,8 @@ export class PPEEngine {
 
     // The registries are fixed for this evaluation: a model or a DSL registered or replaced while
     // it runs is not seen, so that what the rules are validated against is what runs.
-    const models = this.modelRegistry.snapshot();
-    const dsls = this.dslRegistry.snapshot();
+    const models = snapshotModels(this.modelRegistry);
+    const dsls = snapshotDsls(this.dslRegistry);
     // Everything plugin code hands the engine in this evaluation (what the hooks return, what the
     // models and the DSLs answer, the text of their errors) is read through the one reader and
     // counted against this one budget: three hooks cannot read three times as much.
@@ -522,18 +550,12 @@ export class PPEEngine {
             'afterEvaluate',
             signal,
           )
-        ).value as UnsealedResult;
+        ).value;
         signal.throwIfAborted();
-        // What it changed is read through the one budget of the evaluation, like every other
-        // thing plugin code hands the engine.
-        result = acceptAfterEvaluate(
-          plugin.name,
-          before,
-          handed,
-          returned,
-          this.limits,
-          budget,
-        ).result;
+        // It returns annotations, not a result: they are read through the one budget of the
+        // evaluation, like every other thing plugin code hands the engine, and merged under its
+        // name. The result is not copied.
+        result = acceptAfterEvaluate(plugin.name, before, returned, this.limits, budget).result;
       } catch (error) {
         signal.throwIfAborted();
         throw new PluginHookError(plugin.name, 'afterEvaluate', error);

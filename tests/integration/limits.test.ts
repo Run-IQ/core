@@ -21,9 +21,9 @@ function spyingPlugin(): PPEPlugin & { calls: string[] } {
       calls.push('beforeEvaluate');
       return { input, rules };
     },
-    afterEvaluate(_input, result) {
+    afterEvaluate(_input, _result) {
       calls.push('afterEvaluate');
-      return result;
+      return undefined;
     },
   };
 }

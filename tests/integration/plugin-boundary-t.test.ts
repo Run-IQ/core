@@ -202,7 +202,7 @@ describe('T4: the models an evaluation runs are fixed with their functions', () 
     (context.modelRegistry.getAll() as Map<string, CalculationModel>).set('X', FLAT);
     (context.dslRegistry.getAll() as Map<string, DSLEvaluator>).set('x', {
       dsl: 'x',
-      version: '1',
+      version: '1.0.0',
       evaluate: () => true,
     });
     expect(context.modelRegistry.has('X')).toBe(false);
@@ -290,8 +290,8 @@ describe('T8: a Date a view shows is not shared between readers', () => {
   it('N20: one plugin moving result.timestamp does not move what the next one reads', async () => {
     const seen: string[] = [];
     const built = build([
-      pluginWith('a', { afterEvaluate: (_i, r) => ((r.timestamp as Date).setTime(0), r) }),
-      pluginWith('b', { afterEvaluate: (_i, r) => (seen.push(r.timestamp.toISOString()), r) }),
+      pluginWith('a', { afterEvaluate: (_i, r) => void (r.timestamp as Date).setTime(0) }),
+      pluginWith('b', { afterEvaluate: (_i, r) => void seen.push(r.timestamp.toISOString()) }),
     ]);
     await built.engine.evaluate([tax()], makeInput());
     expect(seen[0]).not.toBe('1970-01-01T00:00:00.000Z');

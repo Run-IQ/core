@@ -434,10 +434,10 @@ describe('R9: a plugin skip has the exact shape and a plugin reason', () => {
   });
 });
 
-describe('R10: the meta an afterEvaluate returns is JSON', () => {
+describe('R10: the annotations an afterEvaluate returns are JSON', () => {
   const setMeta = (meta: unknown): PPEPlugin =>
     pluginWith('h', {
-      afterEvaluate: (_input, result) => ({ ...result, meta }) as never,
+      afterEvaluate: () => ({ annotations: meta }) as never,
     });
   for (const [label, value, path] of [
     ['a function', () => 1, '$.m'],
@@ -450,7 +450,7 @@ describe('R10: the meta an afterEvaluate returns is JSON', () => {
       const error = await expectHookFailure(built, await failure(built));
       expect(error.hook).toBe('afterEvaluate');
       expect((error.cause as Error).message).toMatch(
-        new RegExp(`meta that is not JSON at \\$\\.m`),
+        new RegExp(`annotations that are not JSON at \\$\\.m`),
       );
       void path;
     });
@@ -539,9 +539,9 @@ describe('R13 and R16: what a hook is handed is a view', () => {
   it('afterEvaluate gets its own copy of meta.dates: moving it changes the record not', async () => {
     const built = build([
       pluginWith('h', {
-        afterEvaluate: (input, result) => {
+        afterEvaluate: (input, _result) => {
           (input.meta.dates?.['facture'] as Date).setTime(0);
-          return result;
+          return undefined;
         },
       }),
     ]);
@@ -557,7 +557,7 @@ describe('R13 and R16: what a hook is handed is a view', () => {
     let writes = 0;
     const built = build([
       pluginWith('h', {
-        afterEvaluate: (input, result) => {
+        afterEvaluate: (input, _result) => {
           for (const target of [input, input.meta]) {
             try {
               (target as unknown as Record<string, unknown>)['x'] = 1;
@@ -565,7 +565,7 @@ describe('R13 and R16: what a hook is handed is a view', () => {
               writes += 1;
             }
           }
-          return result;
+          return undefined;
         },
       }),
     ]);
@@ -647,7 +647,7 @@ describe('R18: what a hook returns is bounded in size and depth', () => {
     ]);
     const error = await expectHookFailure(built, await failure(built));
     expect(error.cause).toBeInstanceOf(EngineLimitError);
-    expect(error.cause).toMatchObject({ limit: 'maxInputLeaves' });
+    expect(error.cause).toMatchObject({ limit: 'maxHookLeaves' });
   });
 
   it('a state 20 000 levels deep is refused with the limit, not a stack overflow', async () => {
@@ -698,21 +698,15 @@ describe('survivors of the third review (R16) and the views', () => {
     expect((error.cause as Error).message).toBe('rules has a hole at index 1: lists must be dense');
   });
 
-  it('the result an afterEvaluate returns is bounded in size', async () => {
+  it('the annotations an afterEvaluate returns are bounded in size', async () => {
     const built = build([
       pluginWith('h', {
-        afterEvaluate: (_input, result) => ({
-          ...result,
-          trace: {
-            ...result.trace,
-            steps: [...result.trace.steps, { big: new Array(2_000_000).fill(1) } as never],
-          },
-        }),
+        afterEvaluate: () => ({ annotations: { big: new Array(2_000_000).fill(1) } }),
       }),
     ]);
     const error = await expectHookFailure(built, await failure(built));
     expect(error.cause).toBeInstanceOf(EngineLimitError);
-    expect(error.cause).toMatchObject({ limit: 'maxInputLeaves' });
+    expect(error.cause).toMatchObject({ limit: 'maxHookLeaves' });
   });
 
   it('the forbidden keys of data are looked for on the copy, not on a later listing', () => {

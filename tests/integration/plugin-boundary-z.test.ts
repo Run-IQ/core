@@ -186,9 +186,9 @@ describe('Z1: an engine error a plugin built is a plugin fault', () => {
 });
 
 describe('Z2 to Z3: afterEvaluate is inside the one budget and the record room', () => {
-  const setting = (meta: Record<string, unknown>) =>
+  const setting = (annotations: Record<string, unknown>) =>
     pluginWith('annotator', {
-      afterEvaluate: (_input, result) => ({ ...result, meta }),
+      afterEvaluate: () => ({ annotations: annotations as never }),
     });
 
   it('Zb1: a meta of 10 000 keys is refused by the budget', async () => {
@@ -215,12 +215,9 @@ describe('Z2 to Z3: afterEvaluate is inside the one budget and the record room',
   it('W3: several afterEvaluate plugins share one budget', async () => {
     const some = (name: string): PPEPlugin =>
       pluginWith(name, {
-        afterEvaluate: (_input, result) => ({
-          ...result,
-          meta: { ...(result.meta ?? {}), [name]: Array.from({ length: 40 }, (_, i) => i) },
-        }),
+        afterEvaluate: () => ({ annotations: { list: Array.from({ length: 200 }, (_, i) => i) } }),
       });
-    const limits = { maxHookLeaves: 600 };
+    const limits = { maxHookLeaves: 800 };
     await expect(
       build([some('one'), some('two'), some('three')], { limits }).evaluate([], makeInput()),
     ).resolves.toBeDefined();
@@ -230,7 +227,7 @@ describe('Z2 to Z3: afterEvaluate is inside the one budget and the record room',
       makeInput({ requestId: 'five' }),
     )) as PluginHookError;
     expect(error).toBeInstanceOf(PluginHookError);
-    expect(error.cause).toMatchObject({ limit: 'maxHookLeaves', max: 600 });
+    expect(error.cause).toMatchObject({ limit: 'maxHookLeaves', max: 800 });
   });
 
   it('the text a plugin sets in meta counts in the record room, before the record is built', async () => {
@@ -289,16 +286,39 @@ describe('Z4: the identity of a plugin, a model and a DSL is read once, at regis
   });
 
   it('refuses names the engine would not keep, naming the field', () => {
-    for (const name of ['', 'has space', 'x'.repeat(129), '-leading', 'tab\tname']) {
-      expect(NAME_PATTERN.test(name), JSON.stringify(name)).toBe(false);
+    for (const name of [
+      '',
+      'has space',
+      'x'.repeat(129),
+      '-leading',
+      'tab\tname',
+      'Fiscal',
+      '@scope/x',
+      'a..b',
+      'a/b',
+      '__proto__',
+      '@',
+    ]) {
       const plugin = { ...pluginWith('p', {}), name } as PPEPlugin;
-      expect(() => build([plugin])).toThrow(/name/);
+      expect(() => build([plugin]), JSON.stringify(name)).toThrow(/name/);
     }
-    for (const name of ['fiscal', 'Fiscal_VAT', '@run-iq/exception', 'a.b-c_d']) {
+    for (const name of ['fiscal', 'fiscal-vat', 'a.b-c_d', 'x'.repeat(128)]) {
       expect(NAME_PATTERN.test(name), name).toBe(true);
     }
-    for (const version of ['1', '1.0', '1.0.0', '1.0.0-rc.1', '2.1.0+build.5']) {
+    // The official SemVer 2.0.0 expression: no leading zeros, three parts.
+    for (const version of ['1.0.0', '1.0.0-rc.1', '2.1.0+build.5', '0.0.0-alpha.1+001']) {
       expect(VERSION_PATTERN.test(version), version).toBe(true);
+    }
+    for (const version of [
+      '1',
+      '1.0',
+      '01.2.3',
+      '1.0.0-',
+      '1.0.0+..',
+      '1.0.0-+-',
+      '1'.repeat(21),
+    ]) {
+      expect(VERSION_PATTERN.test(version), version).toBe(false);
     }
   });
 
