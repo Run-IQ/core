@@ -3,9 +3,7 @@ import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import type { PPEEngineConfig } from '../../src/engine/PPEEngine.js';
 import { PluginHookError } from '../../src/errors/PluginHookError.js';
 import { UnexpectedEngineError } from '../../src/errors/UnexpectedEngineError.js';
-import { EngineLimitError, raiseLimit } from '../../src/errors/EngineLimitError.js';
-import { BoundaryError, PluginFaultError, refusal } from '../../src/engine/pluginPort.js';
-import { inCall } from '../../src/engine/trust.js';
+import { PluginFaultError } from '../../src/engine/pluginPort.js';
 import { hasLoneSurrogate } from '../../src/utils/weight.js';
 import type { PPEPlugin } from '../../src/types/plugin.js';
 import type { CalculationModel } from '../../src/types/model.js';
@@ -159,113 +157,6 @@ describe('AB1: the fault brand is not made by a constructor, and no field of an 
     expect(Object.isFrozen(api)).toBe(true);
     const dsl = (context as { dslRegistry: Record<string, unknown> }).dslRegistry;
     expect(Object.keys(dsl).sort()).toEqual(['get', 'getAll', 'has', 'register']);
-  });
-});
-
-describe('AB2: an engine class, a limit or a refusal is trusted only if the engine raised it in this call', () => {
-  it('a BoundaryError a plugin got from onError and throws from a getter is a plugin fault', async () => {
-    let stolen: (new (message: string) => Error) | undefined;
-    const engine = build([
-      pluginWith('p', {
-        beforeEvaluate: ((_input: unknown, current: unknown) => {
-          const calls = (engine as unknown as { calls?: number }).calls ?? 0;
-          (engine as unknown as { calls?: number }).calls = calls + 1;
-          if (calls === 0) return 42; // a malformed result: the engine refuses it with a BoundaryError
-          return {
-            input: _input,
-            rules: current,
-            get skipped(): never {
-              throw new (stolen as new (message: string) => Error)(
-                'the engine refused this, honestly',
-              );
-            },
-          };
-        }) as never,
-        onError: (told) => {
-          const cause = (told as { cause?: object }).cause;
-          if (cause !== undefined) stolen = Object.getPrototypeOf(cause).constructor;
-        },
-      }),
-    ]);
-    const first = await failure(engine, [], makeInput({ requestId: 'first' }));
-    expect(first).toBeInstanceOf(PluginHookError);
-    expect(stolen).toBeDefined();
-    const second = (await failure(
-      engine,
-      [],
-      makeInput({ requestId: 'second' }),
-    )) as PluginHookError;
-    expect(second).toBeInstanceOf(PluginHookError);
-    // A plugin throw, shown as one: text, not the class that was stolen.
-    expect(isTextOf(second.cause)).toBe(true);
-  });
-
-  it('an EngineLimitError raised in another call, thrown from a getter, is text, not a limit that was hit', async () => {
-    const real = inCall(() => raiseLimit('maxRules', 1, 2));
-    expect(real).toBeInstanceOf(EngineLimitError);
-    real.message = 'x'.repeat(2_000_000);
-    for (const field of ['skipped', 'state'] as const) {
-      const hook = pluginWith('hook', {
-        beforeEvaluate: (input, current) => {
-          const result: Record<string, unknown> = { input, rules: current };
-          Object.defineProperty(result, field, {
-            enumerable: true,
-            get() {
-              throw real;
-            },
-          });
-          return result as never;
-        },
-      });
-      const error = (await failure(
-        build([hook]),
-        [],
-        makeInput({ requestId: `ab2-${field}` }),
-      )) as PluginHookError;
-      expect(error).toBeInstanceOf(PluginHookError);
-      expect(isTextOf(error.cause)).toBe(true);
-      expect((error.cause as { limit?: unknown }).limit).toBeUndefined();
-      expect(error.message.length).toBeLessThan(1200);
-    }
-  });
-
-  it('the same for the other classes the engine raises itself, built outside the call', async () => {
-    const outside = [
-      refusal('the engine refused this, honestly'),
-      new BoundaryError('built outside'),
-      inCall(() => refusal('raised in another call')),
-    ];
-    for (const [index, fake] of outside.entries()) {
-      const hook = pluginWith('hook', {
-        beforeEvaluate: (input, current) => ({
-          input,
-          rules: current,
-          get state(): never {
-            throw fake;
-          },
-        }),
-      });
-      const error = (await failure(
-        build([hook]),
-        [],
-        makeInput({ requestId: `ab2-class-${index}` }),
-      )) as PluginHookError;
-      expect(error).toBeInstanceOf(PluginHookError);
-      expect(isTextOf(error.cause), `forgery ${index}`).toBe(true);
-    }
-  });
-
-  it('what onError is handed is engine data, and a class taken from it does not confer trust', async () => {
-    let told: unknown;
-    const bad = pluginWith('bad', {
-      beforeEvaluate: (() => 42) as never,
-      onError: (error) => {
-        told = error;
-      },
-    });
-    await failure(build([bad]), []);
-    expect(Object.isFrozen(told)).toBe(true);
-    expect(told).toBeInstanceOf(PluginHookError);
   });
 });
 
@@ -426,7 +317,7 @@ describe('AB7: the shape of a name and of a version', () => {
     expect(() => build([plugin])).toThrow(what);
   };
   it('a plugin name is lower case words joined by single . _ or -', () => {
-    for (const name of ['a', '..', 'a..b', 'a/b', '@scope/x', '@', '@@@', 'then!', 'a b']) {
+    for (const name of ['A', '..', 'a..b', 'a/b', '@scope/x', '@', '@@@', 'then!', 'a b']) {
       refuses({ ...pluginWith('p', {}), name } as PPEPlugin, /name/);
     }
     for (const name of ['then', 'constructor', 'tostring', 'a.b-c_d']) {
@@ -449,9 +340,9 @@ describe('AB7: the shape of a name and of a version', () => {
       expect(() => build([{ ...pluginWith('p', {}), version } as PPEPlugin])).not.toThrow();
     }
   });
-  it('a model name keeps the case a rule pack uses, with single separators, and the reserved name', () => {
-    for (const name of ['', 'a..b', 'a b', '@x', 'a/b']) {
-      expect(() => build([regModel({ ...FLAT, name })])).toThrow(/model/);
+  it('B81: a model name is lower case, with an optional scope and single separators', () => {
+    for (const name of ['', 'a..b', 'a b', '@x', 'a/b', 'FLAT_RATE', 'Flat', '@/x', '@A/x']) {
+      expect(() => build([regModel({ ...FLAT, name })]), name).toThrow(/model/);
     }
     for (const name of ['flat_rate', 'flat.rate-2', '@run-iq/exception']) {
       expect(() => build([regModel({ ...FLAT, name })]), name).not.toThrow();

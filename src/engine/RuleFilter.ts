@@ -17,7 +17,7 @@ import {
 import type { DimensionSpec, Referential } from '@run-iq/spec';
 import { DSLEvaluationError } from '../errors/DSLEvaluationError.js';
 import { isRaisedLimit } from '../errors/EngineLimitError.js';
-import { defaultCrossing, readVerdict } from './pluginBoundary.js';
+import { PER_VALUE_LIMITS, defaultCrossing, readVerdict } from './pluginBoundary.js';
 import type { Crossing } from './pluginBoundary.js';
 import { ruleLabel } from '../utils/values.js';
 import { buildContext } from '../context/buildContext.js';
@@ -255,7 +255,9 @@ export class RuleFilter {
           return { reason: 'CONDITION_FALSE', detail: 'condition evaluated to false' };
         }
       } catch (error) {
-        if (isRaisedLimit(error)) throw error;
+        // A verdict past a bound of one value is that rule's fault; every other bound is the
+        // evaluation's (B68).
+        if (isRaisedLimit(error) && !PER_VALUE_LIMITS.has(error.limit)) throw error;
         const cause = error instanceof DSLEvaluationError ? error.originalError : error;
         // The text of a fault is cut on a code point here too: a verdict that cannot be read gives
         // a failure that joins the reason of every property, and none of it is longer than this.

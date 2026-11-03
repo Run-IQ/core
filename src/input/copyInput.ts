@@ -97,7 +97,7 @@ export class InputCopier {
 
   /**
    * Holds a string (a value or a key) to `maxStringLength` and returns the nodes its characters
-   * add: one per `CHARS_PER_NODE` of its exact serialized length (escapes included), so that a
+   * add: `ceil(w / 64) - 1` for its exact serialized length `w` (escapes included), so that a
    * text costs what the checksum and the record will write for it.
    */
   text(value: string, pointer: () => string): number {
@@ -111,7 +111,9 @@ export class InputCopier {
     }
     const written = serializedLength(value);
     this.chars += written;
-    const extra = Math.floor(written / CHARS_PER_NODE);
+    // A string or a key counts `max(1, ceil(w / 64))` nodes in all: its own node, which the caller
+    // of this method has already counted, and what its weight adds past the first 64.
+    const extra = Math.ceil(written / CHARS_PER_NODE) - 1;
     this.textNodes += extra;
     return extra;
   }

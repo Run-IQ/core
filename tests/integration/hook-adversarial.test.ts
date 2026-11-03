@@ -424,8 +424,10 @@ describe('N6: maxRules bounds the rules a hook returns', () => {
     );
     const error = (await failure(built)) as PluginHookError;
     expect(error).toBeInstanceOf(PluginHookError);
-    expect(error.cause).toBeInstanceOf(EngineLimitError);
-    expect(error.cause).toMatchObject({ limit: 'maxRules', max: 3, actual: 6 });
+    expect(error.cause).toMatchObject({ name: 'EngineLimitError' });
+    expect(error.cause).toMatchObject({
+      message: expect.stringContaining('engine limit maxRules exceeded: 6 > 3'),
+    });
   });
 
   it('a list of the limit passes', async () => {

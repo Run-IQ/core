@@ -350,16 +350,32 @@ describe('afterEvaluate returns annotations, not a result', () => {
     expect((error as PluginHookError).cause).toMatchObject({ message });
   }
 
-  it('accepts nothing, an empty object, or annotations, and the decision is untouched', async () => {
+  it('accepts nothing, and the decision is untouched', async () => {
     const plain = await engineWith([]).evaluate(rules1(), makeInput());
-    for (const returned of [undefined, {}, { annotations: undefined }]) {
-      const result = await engineWith([
-        pluginWith('fiscal', { afterEvaluate: () => returned as never }),
-      ]).evaluate(rules1(), makeInput({ requestId: `r-${JSON.stringify(returned)}` }));
-      expect(result.meta).toBeUndefined();
-      expect(result.value).toBe(plain.value);
-      expect(result.appliedRules).toEqual(plain.appliedRules);
-    }
+    const result = await engineWith([
+      pluginWith('fiscal', { afterEvaluate: () => undefined }),
+    ]).evaluate(rules1(), makeInput({ requestId: 'r-undefined' }));
+    expect(result.meta).toBeUndefined();
+    expect(result.value).toBe(plain.value);
+    expect(result.appliedRules).toEqual(plain.appliedRules);
+  });
+
+  it.each([
+    ['an empty object', {}],
+    ['annotations that are undefined', { annotations: undefined }],
+    ['empty annotations', { annotations: {} }],
+  ])('B57, AD6: %s is a plugin fault naming /annotations', async (_name, returned) => {
+    const error = await engineWith([
+      pluginWith('fiscal', { afterEvaluate: () => returned as never }),
+    ])
+      .evaluate(rules1(), makeInput({ requestId: `r-${_name}` }))
+      .then(
+        () => undefined,
+        (thrown: unknown) => thrown,
+      );
+    expect(error).toBeInstanceOf(PluginHookError);
+    expect((error as PluginHookError).hook).toBe('afterEvaluate');
+    expect(((error as PluginHookError).cause as Error).message).toMatch(/\/annotations/);
   });
 
   it('merges annotations into meta under the name of the plugin, and keeps those of the others', async () => {

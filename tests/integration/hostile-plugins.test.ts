@@ -4,7 +4,7 @@ import type { PPEPlugin, PluginContext, BeforeEvaluateResult } from '../../src/t
 import type { UnsealedResult } from '../../src/types/result.js';
 import type { DSLEvaluator } from '../../src/types/dsl.js';
 import type { PPEEngineConfig } from '../../src/engine/PPEEngine.js';
-import { PipelineTimeoutError, PluginHookError } from '../../src/index.js';
+import { PipelineTimeoutError, PluginHookError, ValidationError } from '../../src/index.js';
 import {
   makeRule,
   makeInput,
@@ -398,12 +398,21 @@ describe('rules removed without a skip', () => {
 });
 
 describe('rules removed or added by beforeEvaluate (multisets)', () => {
-  it('fails the evaluation for a dropped duplicate, and names it', async () => {
+  it('B24: two given rules with one id@version are refused at the source, identical copies included', async () => {
     const p = pluginWith('p', {
       beforeEvaluate: (input, rules) => ({ input, rules: rules.slice(1) }),
     });
     const d = makeRule({ id: 'd', model: 'm' });
     const error = await failure(engineWith([p]), [d, { ...d }]);
+    expect(error).toBeInstanceOf(ValidationError);
+    expect((error as ValidationError).reasons).toEqual(['rules/0 and rules/1 are both d@1']);
+  });
+
+  it('fails the evaluation for a dropped rule, and names it', async () => {
+    const p = pluginWith('p', {
+      beforeEvaluate: (input, rules) => ({ input, rules: rules.slice(1) }),
+    });
+    const error = await failure(engineWith([p]), [makeRule({ id: 'd', model: 'm' })]);
     expect(error).toBeInstanceOf(PluginHookError);
     expect((error as PluginHookError).cause).toMatchObject({
       message: 'plugin p removed rules without a skip: d@1',

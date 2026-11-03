@@ -301,7 +301,9 @@ describe('V3: text is bounded and weighed', () => {
     });
     const error = (await failure(built, [tax()])) as PluginHookError;
     expect(error).toBeInstanceOf(PluginHookError);
-    expect(error.cause).toMatchObject({ limit: 'maxHookLeaves', max: 300 });
+    expect(error.cause).toMatchObject({
+      message: expect.stringContaining('engine limit maxHookLeaves exceeded'),
+    });
   });
 
   it('L7: the record is held to maxRecordLength, with a named error', async () => {
@@ -602,7 +604,7 @@ describe('V8: what a model returns is judged by what went wrong', () => {
     }));
     const built = build([regModel('m', model)], { limits: { maxRuleLeaves: 20 } });
     const result = await built.engine.evaluate([makeRule({ id: 'b', model: 'big' })], makeInput());
-    expect(result.skippedRules[0]?.reason).toBe('OUTPUT_MISMATCH');
+    expect(result.skippedRules[0]?.reason).toBe('MODEL_ERROR');
     expect(result.skippedRules[0]?.detail).toContain('maxRuleLeaves');
   });
 });

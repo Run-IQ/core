@@ -125,7 +125,9 @@ describe('T1: what a plugin receives as an error is a deep copy', () => {
     const error = (await failure(build([adder, meddler], { limits: { maxRules: 3 } }), [
       tax(),
     ])) as PluginHookError;
-    expect(error.cause).toMatchObject({ limit: 'maxRules', max: 3, actual: 4 });
+    expect(error.cause).toMatchObject({
+      message: expect.stringContaining('engine limit maxRules exceeded: 4 > 3'),
+    });
   });
 });
 
@@ -434,7 +436,7 @@ describe('S12 survivors of round 5', () => {
       { limits: { maxHookLeaves: 100 } },
     );
     expect(((await failure(built, [tax()])) as PluginHookError).cause).toMatchObject({
-      limit: 'maxHookLeaves',
+      message: expect.stringContaining('engine limit maxHookLeaves exceeded'),
     });
   });
   it("N48: a skip's rule, when it is a copy, counts against maxHookLeaves", async () => {
@@ -451,7 +453,7 @@ describe('S12 survivors of round 5', () => {
       { limits: { maxHookLeaves: 5 } },
     );
     expect(((await failure(built, [tax()])) as PluginHookError).cause).toMatchObject({
-      limit: 'maxHookLeaves',
+      message: expect.stringContaining('engine limit maxHookLeaves exceeded'),
     });
   });
 });
@@ -472,7 +474,9 @@ describe('more survivors of round 5', () => {
     );
     const error = (await failure(built, [tax()])) as PluginHookError;
     expect(error).toMatchObject({ plugin: 'b' });
-    expect(error.cause).toMatchObject({ limit: 'maxHookLeaves', max: 100 });
+    expect(error.cause).toMatchObject({
+      message: expect.stringContaining('engine limit maxHookLeaves exceeded'),
+    });
   });
 
   it("S7a for a DSL: replacing an evaluator's method during an evaluation changes nothing", async () => {

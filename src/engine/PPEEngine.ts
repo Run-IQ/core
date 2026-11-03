@@ -14,6 +14,7 @@ import type { DSLEvaluator } from '../types/dsl.js';
 import type { ISnapshotAdapter } from '../types/snapshot.js';
 import type { Diagnostic } from '../types/diagnostic.js';
 import { ValidationError } from '../errors/ValidationError.js';
+import { clip } from '../utils/frozenCopy.js';
 import { DuplicateRequestError } from '../errors/DuplicateRequestError.js';
 import { PipelineTimeoutError } from '../errors/PipelineTimeoutError.js';
 import { UnexpectedEngineError } from '../errors/UnexpectedEngineError.js';
@@ -279,7 +280,8 @@ export class PPEEngine {
           // `onError` is synchronous: a promise it returns is a fault, and its rejection handled.
           callSync(plugin.onError, plugin.source, [told, shown]);
         } catch {
-          // Contract of PPEPlugin.onError: the evaluation's own error reaches the caller.
+          // Contract of PPEPlugin.onError (B59): a failing `onError` is dropped, and the
+          // evaluation's own error reaches the caller.
         }
       }
       throw error;
@@ -295,14 +297,31 @@ export class PPEEngine {
   private copySourceRules(rules: ReadonlyArray<Rule>, owned: WeakSet<object>): Rule[] {
     try {
       // justification: each item is a copy of a rule; the validator checks it as one.
-      return readItems(
+      const copies = readItems(
         rules,
         this.limits,
         'rules',
         new Budget('maxRuleSetNodes', this.limits.maxRuleSetNodes),
         owned,
       ) as Rule[];
+      // Two given rules with one `id@version` are refused, identical copies included: the engine
+      // never guesses which of them is meant (B24).
+      const slots = new Map<string, number>();
+      copies.forEach((rule, slot) => {
+        const { id, version } = rule as { id?: unknown; version?: unknown };
+        if (typeof id !== 'string' || typeof version !== 'number') return;
+        const label = `${id}@${version}`;
+        const first = slots.get(label);
+        if (first !== undefined) {
+          throw new ValidationError('Invalid rules', [
+            `rules/${first} and rules/${slot} are both ${clip(label)}`,
+          ]);
+        }
+        slots.set(label, slot);
+      });
+      return copies;
     } catch (error) {
+      if (error instanceof ValidationError) throw error;
       if (isRaisedLimit(error)) throw error;
       throw new ValidationError('Invalid rules', [describeThrown(error)]);
     }

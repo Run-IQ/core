@@ -24,17 +24,14 @@ import { CHARS_PER_NODE, hasLoneSurrogate, serializedLength } from '../utils/wei
 // and checked against a ledger of the rules that were given, before any of it is used.
 
 /**
- * The reasons a plugin may give a skip. They belong to plugins: `PLUGIN` (the plugin's words are
- * in `detail`) and the deprecated values plugins have used (`INHIBITED_BY_META_RULE`,
- * `COUNTRY_MISMATCH`, `MODEL_NOT_FOUND`). The reasons of the engine's own stages are not here: a
- * plugin cannot record a skip as an integrity failure, a dominance or a mismatch of the engine.
+ * The reasons a plugin may give a skip: exactly `PLUGIN` (the plugin's words are in `detail`).
+ * Every other `SkipReason` (an integrity failure, a dominance, a mismatch, `MODEL_NOT_FOUND`) is
+ * the engine's alone: a plugin skip with any other reason is a plugin fault.
  */
-export const PLUGIN_SKIP_REASONS: ReadonlySet<string> = new Set([
-  'PLUGIN',
-  'INHIBITED_BY_META_RULE',
-  'COUNTRY_MISMATCH',
-  'MODEL_NOT_FOUND',
-]);
+/** The limits of one value a plugin returns: passing one excludes that rule, not the evaluation. */
+export const PER_VALUE_LIMITS: ReadonlySet<string> = new Set(['maxRuleLeaves', 'maxStringLength']);
+
+export const PLUGIN_SKIP_REASONS: ReadonlySet<string> = new Set(['PLUGIN']);
 
 /**
  * The rule objects one evaluation of one engine holds (a set per evaluation, never shared: an
@@ -147,7 +144,7 @@ export class Budget {
 
   /** Counts a text the engine kept from plugin code: its weight, and its place in the record. */
   addText(text: string): void {
-    this.add(1 + Math.floor(serializedLength(text) / CHARS_PER_NODE));
+    this.add(Math.max(1, Math.ceil(serializedLength(text) / CHARS_PER_NODE)));
     this.record(serializedLength(text));
   }
 

@@ -161,8 +161,10 @@ const harness: Harness = {
         engine([bad], { maxStringLength: 100 }).evaluate([], makeInput()),
       )) as PluginHookError;
       expect(error).toBeInstanceOf(PluginHookError);
-      expect(error.cause).toBeInstanceOf(EngineLimitError);
-      expect(error.cause).toMatchObject({ limit: 'maxStringLength', max: 100 });
+      expect(error.cause).toMatchObject({ name: 'EngineLimitError' });
+      expect(error.cause).toMatchObject({
+        message: expect.stringContaining('engine limit maxStringLength exceeded'),
+      });
     },
     forged: async () => {
       const fake = forged();
@@ -200,7 +202,9 @@ const harness: Harness = {
         engine([bad], { maxStringLength: 100 }).evaluate([], makeInput()),
       )) as PluginHookError;
       expect(error).toBeInstanceOf(PluginHookError);
-      expect(error.cause).toMatchObject({ limit: 'maxStringLength', max: 100 });
+      expect(error.cause).toMatchObject({
+        message: expect.stringContaining('engine limit maxStringLength exceeded'),
+      });
     },
     forged: async () => {
       const fake = forged();
@@ -369,13 +373,14 @@ const harness: Harness = {
         model: 'one',
         condition: { dsl: 'w', value: {} },
       });
-      const error = await outcome(() =>
-        engine([plugin('m', { onInit: registering(model('one', {})) })], { maxStringLength: 100 }, [
-          wordy,
-        ]).evaluate([withCondition], makeInput()),
-      );
-      expect(error).toBeInstanceOf(EngineLimitError);
-      expect(error).toMatchObject({ limit: 'maxStringLength' });
+      // A verdict past a bound of one value is that rule's fault (B68): DSL_ERROR naming the bound.
+      const result = await engine(
+        [plugin('m', { onInit: registering(model('one', {})) })],
+        { maxStringLength: 100 },
+        [wordy],
+      ).evaluate([withCondition], makeInput());
+      expect(result.skippedRules[0]?.reason).toBe('DSL_ERROR');
+      expect(result.skippedRules[0]?.detail).toContain('maxStringLength');
     },
     forged: async () => {
       const fake = forged();

@@ -10,11 +10,18 @@ import { describeThrown, isPlainObject, ruleLabel } from '../utils/values.js';
 import type { ShortCircuit } from './ExceptionProcessor.js';
 import type { TraceBuilder } from './TraceBuilder.js';
 import { OutputCombiner } from './OutputCombiner.js';
-import { causesOf, defaultCrossing, isReadFailure, readBounded } from './pluginBoundary.js';
+import {
+  PER_VALUE_LIMITS,
+  causesOf,
+  defaultCrossing,
+  isReadFailure,
+  readBounded,
+} from './pluginBoundary.js';
 import type { Budget } from './pluginBoundary.js';
 import { clip } from '../utils/frozenCopy.js';
 import { isRaisedLimit, raiseLimit } from '../errors/EngineLimitError.js';
 import { ViewScope } from './frozenView.js';
+import { clipFault } from './pluginPort.js';
 import { UnexpectedEngineError } from '../errors/UnexpectedEngineError.js';
 import type { EngineLimits } from '../limits.js';
 import type { Contribution } from './OutputCombiner.js';
@@ -220,6 +227,12 @@ export class ExecutionPipeline {
         } catch (error) {
           // The budget of the evaluation is the engine's bound, not that rule's fault.
           if (isRaisedLimit(error) && error.limit === 'maxHookLeaves') throw error;
+          // An output past a bound of one value is that rule's fault (a fault stops at what it
+          // touches); the budget of the whole evaluation is the engine's (B68).
+          if (isRaisedLimit(error) && PER_VALUE_LIMITS.has(error.limit)) {
+            skipped.push({ rule, reason: 'MODEL_ERROR', detail: clipFault(error.message) });
+            continue;
+          }
           const causes = isReadFailure(error) ? causesOf(error) : [];
           if (views.wrote !== undefined) {
             skipped.push({ rule, reason: 'MODEL_ERROR', detail: views.wrote });

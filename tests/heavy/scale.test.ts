@@ -419,8 +419,10 @@ describe('the worst case: every limit at its default, on the costliest shape, at
       (caught: unknown) => caught,
     );
     expect(performance.now() - start).toBeLessThan(5_000);
-    expect((error as { cause?: unknown }).cause).toBeInstanceOf(EngineLimitError);
-    expect((error as { cause: unknown }).cause).toMatchObject({ limit: 'maxHookLeaves' });
+    expect((error as { cause?: unknown }).cause).toMatchObject({ name: 'EngineLimitError' });
+    expect((error as { cause: unknown }).cause).toMatchObject({
+      message: expect.stringContaining('engine limit maxHookLeaves exceeded'),
+    });
   }, 60_000);
 
   it('Xb5: 2 200 rules whose model answers with the same long error are refused by name, not a crash', async () => {
@@ -480,7 +482,7 @@ describe('the worst case: every limit at its default, on the costliest shape, at
       (caught: unknown) => caught,
     );
     expect(performance.now() - start).toBeLessThan(5_000);
-    expect((error as { cause?: unknown }).cause).toBeInstanceOf(EngineLimitError);
+    expect((error as { cause?: unknown }).cause).toMatchObject({ name: 'EngineLimitError' });
     // One meta of 20 such texts is already past the bound of one read; the budget of the
     // evaluation catches what several plugins add together.
     expect(['maxInputLeaves', 'maxHookLeaves']).toContain(

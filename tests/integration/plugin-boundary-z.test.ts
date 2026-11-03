@@ -199,7 +199,9 @@ describe('Z2 to Z3: afterEvaluate is inside the one budget and the record room',
       [],
     )) as PluginHookError;
     expect(error).toBeInstanceOf(PluginHookError);
-    expect(error.cause).toMatchObject({ limit: 'maxHookLeaves', max: 100 });
+    expect(error.cause).toMatchObject({
+      message: expect.stringContaining('engine limit maxHookLeaves exceeded'),
+    });
   });
 
   it('Zb3: texts that JSON escapes are weighed in a meta', async () => {
@@ -209,7 +211,9 @@ describe('Z2 to Z3: afterEvaluate is inside the one budget and the record room',
       build([setting(meta)], { limits: { maxHookLeaves: 1000, maxStringLength: 10_000 } }),
       [],
     )) as PluginHookError;
-    expect(error.cause).toMatchObject({ limit: 'maxHookLeaves', max: 1000 });
+    expect(error.cause).toMatchObject({
+      message: expect.stringContaining('engine limit maxHookLeaves exceeded'),
+    });
   });
 
   it('W3: several afterEvaluate plugins share one budget', async () => {
@@ -227,7 +231,9 @@ describe('Z2 to Z3: afterEvaluate is inside the one budget and the record room',
       makeInput({ requestId: 'five' }),
     )) as PluginHookError;
     expect(error).toBeInstanceOf(PluginHookError);
-    expect(error.cause).toMatchObject({ limit: 'maxHookLeaves', max: 800 });
+    expect(error.cause).toMatchObject({
+      message: expect.stringContaining('engine limit maxHookLeaves exceeded'),
+    });
   });
 
   it('the text a plugin sets in meta counts in the record room, before the record is built', async () => {

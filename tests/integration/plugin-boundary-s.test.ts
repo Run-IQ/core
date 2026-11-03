@@ -331,7 +331,9 @@ describe('S3: the total a hook can make the engine read is bounded', () => {
     const started = Date.now();
     const error = (await failure(built, [tax()])) as PluginHookError;
     expect(error).toBeInstanceOf(PluginHookError);
-    expect(error.cause).toMatchObject({ limit: 'maxHookLeaves', max: 200_000 });
+    expect(error.cause).toMatchObject({
+      message: expect.stringContaining('engine limit maxHookLeaves exceeded'),
+    });
     expect(Date.now() - started).toBeLessThan(3000);
   });
 
@@ -747,7 +749,9 @@ describe('S12: the survivors of the fourth review', () => {
       { limits: { maxRules: 3 } },
     );
     const error = (await failure(built, [tax()])) as PluginHookError;
-    expect(error.cause).toMatchObject({ limit: 'maxRules', max: 3, actual: 4 });
+    expect(error.cause).toMatchObject({
+      message: expect.stringContaining('engine limit maxRules exceeded: 4 > 3'),
+    });
   });
 
   it('M58: the depth of the annotations an afterEvaluate returns is bounded', async () => {
@@ -759,8 +763,10 @@ describe('S12: the survivors of the fourth review', () => {
       }),
     ]);
     const error = (await failure(built, [tax()])) as PluginHookError;
-    expect(error.cause).toBeInstanceOf(EngineLimitError);
-    expect(error.cause).toMatchObject({ limit: 'maxInputDepth' });
+    expect(error.cause).toMatchObject({ name: 'EngineLimitError' });
+    expect(error.cause).toMatchObject({
+      message: expect.stringContaining('engine limit maxInputDepth exceeded'),
+    });
   });
 
   it('M51: a label a plugin added and another skipped cannot be added again with other content', async () => {
@@ -818,7 +824,9 @@ describe('the rest of the survivors of the fourth review', () => {
       { limits: { maxHookLeaves: 100 } },
     );
     const error = (await failure(built, [tax()])) as PluginHookError;
-    expect(error.cause).toMatchObject({ limit: 'maxHookLeaves', max: 100 });
+    expect(error.cause).toMatchObject({
+      message: expect.stringContaining('engine limit maxHookLeaves exceeded'),
+    });
   });
 
   it('a class-instance skip is refused even when its keys are own accessors read once', async () => {

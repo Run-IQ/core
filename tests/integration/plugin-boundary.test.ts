@@ -261,19 +261,22 @@ describe('R4: a label that left the evaluation cannot come back with other conte
   });
 });
 
-describe('R5: given rules sharing a label cannot be swapped', () => {
-  it('two contents under one id@version, one returned twice', async () => {
+describe('R5, B24: given rules sharing a label are refused at the source', () => {
+  it('two contents under one id@version, with a hook that returns one twice', async () => {
     const built = build([
       pluginWith('h', {
         beforeEvaluate: (input, rules) => ({ input, rules: [rules[0]!, rules[0]!] }),
       }),
     ]);
-    await expectHookFailure(built, await failure(built, [tax(100), tax(5)]));
+    const error = await failure(built, [tax(100), tax(5)]);
+    expect(error).toBeInstanceOf(ValidationError);
+    expect((error as ValidationError).reasons).toEqual(['rules/0 and rules/1 are both tax@1']);
   });
-  it('without a hook the two contents are both evaluated (control)', async () => {
+  it('without a hook the two contents are refused as well', async () => {
     const built = build([]);
-    const result = await built.engine.evaluate([tax(100), tax(5)], makeInput());
-    expect(result.value).toBe(105);
+    await expect(built.engine.evaluate([tax(100), tax(5)], makeInput())).rejects.toBeInstanceOf(
+      ValidationError,
+    );
   });
 });
 
@@ -303,7 +306,9 @@ describe('R6: what a hook returns is read once and bounded', () => {
       limits: { maxRules: 3 },
     });
     const error = await expectHookFailure(built, await failure(built, [rules[0]!]));
-    expect(error.cause).toMatchObject({ limit: 'maxRules', max: 3, actual: 4 });
+    expect(error.cause).toMatchObject({
+      message: expect.stringContaining('engine limit maxRules exceeded: 4 > 3'),
+    });
   });
 
   it('a Proxy whose length keeps growing is stopped, quickly', async () => {
@@ -646,8 +651,10 @@ describe('R18: what a hook returns is bounded in size and depth', () => {
       }),
     ]);
     const error = await expectHookFailure(built, await failure(built));
-    expect(error.cause).toBeInstanceOf(EngineLimitError);
-    expect(error.cause).toMatchObject({ limit: 'maxHookLeaves' });
+    expect(error.cause).toMatchObject({ name: 'EngineLimitError' });
+    expect(error.cause).toMatchObject({
+      message: expect.stringContaining('engine limit maxHookLeaves exceeded'),
+    });
   });
 
   it('a state 20 000 levels deep is refused with the limit, not a stack overflow', async () => {
@@ -659,8 +666,10 @@ describe('R18: what a hook returns is bounded in size and depth', () => {
       }),
     ]);
     const error = await expectHookFailure(built, await failure(built));
-    expect(error.cause).toBeInstanceOf(EngineLimitError);
-    expect(error.cause).toMatchObject({ limit: 'maxInputDepth' });
+    expect(error.cause).toMatchObject({ name: 'EngineLimitError' });
+    expect(error.cause).toMatchObject({
+      message: expect.stringContaining('engine limit maxInputDepth exceeded'),
+    });
   });
 
   it('a source rule 20 000 levels deep is refused with the limit', async () => {
@@ -705,8 +714,10 @@ describe('survivors of the third review (R16) and the views', () => {
       }),
     ]);
     const error = await expectHookFailure(built, await failure(built));
-    expect(error.cause).toBeInstanceOf(EngineLimitError);
-    expect(error.cause).toMatchObject({ limit: 'maxHookLeaves' });
+    expect(error.cause).toMatchObject({ name: 'EngineLimitError' });
+    expect(error.cause).toMatchObject({
+      message: expect.stringContaining('engine limit maxHookLeaves exceeded'),
+    });
   });
 
   it('the forbidden keys of data are looked for on the copy, not on a later listing', () => {
@@ -773,7 +784,9 @@ describe('maxRuleLeaves: the leaves of one rule', () => {
     );
     const error = (await failure(built2, [rule])) as PluginHookError;
     expect(error).toBeInstanceOf(PluginHookError);
-    expect(error.cause).toMatchObject({ limit: 'maxRuleLeaves', max: leaves });
+    expect(error.cause).toMatchObject({
+      message: expect.stringContaining('engine limit maxRuleLeaves exceeded'),
+    });
   });
 
   it('is refused at construction when it is not a positive integer', () => {

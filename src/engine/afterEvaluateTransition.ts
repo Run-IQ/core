@@ -59,12 +59,16 @@ function accept(
   }
   // Read once, here: a getter answers once and the answer is the one that is kept.
   const given: unknown = (returned as { annotations?: unknown }).annotations;
-  if (given === undefined) return { result: before };
+  // `undefined` alone means "nothing to annotate"; `{}` and `{ annotations: undefined }` do not.
+  if (given === undefined) throw refuse('no annotations at /annotations');
   if (!isObject(given) || Array.isArray(given)) throw refuse('annotations that are not an object');
   const charsBefore = joint.readChars;
   const annotations = readBounded(given, limits, 'annotations', { budget: joint });
   // Their text is certain to be in the record.
   joint.record(joint.readChars - charsBefore);
+  if (Reflect.ownKeys(annotations as object).length === 0) {
+    throw refuse('empty annotations at /annotations');
+  }
   const notJson = findNonJson(annotations);
   if (notJson !== undefined) throw refuse(`annotations that are not JSON at ${notJson}`);
   const meta: Record<string, unknown> = { ...(before.meta ?? {}) };

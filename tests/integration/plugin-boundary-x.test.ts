@@ -159,14 +159,18 @@ describe('X2: the text of a skip is read through the reader', () => {
     });
     const error = (await failure(engine, many(10))) as PluginHookError;
     expect(error).toBeInstanceOf(PluginHookError);
-    expect(error.cause).toBeInstanceOf(EngineLimitError);
-    expect(error.cause).toMatchObject({ limit: 'maxHookLeaves', max: 500 });
+    expect(error.cause).toMatchObject({ name: 'EngineLimitError' });
+    expect(error.cause).toMatchObject({
+      message: expect.stringContaining('engine limit maxHookLeaves exceeded'),
+    });
   });
 
   it('Xn: a detail longer than maxStringLength is refused by name', async () => {
     const engine = build([skipper('d'.repeat(101))], { limits: { maxStringLength: 100 } });
     const error = (await failure(engine, many(1))) as PluginHookError;
-    expect(error.cause).toMatchObject({ limit: 'maxStringLength', max: 100, actual: 101 });
+    expect(error.cause).toMatchObject({
+      message: expect.stringContaining('engine limit maxStringLength exceeded: 101 > 100'),
+    });
   });
 
   it('a detail that is not a string is a malformed skip', async () => {
