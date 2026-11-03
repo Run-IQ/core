@@ -289,6 +289,29 @@ describe('AB4: promises are adopted through the captured intrinsics', () => {
     expect(unhandled).toEqual([]);
   });
 
+  it('a Proxy over a rejected promise, returned by calculate, leaves no unhandled rejection', async () => {
+    const target = Promise.reject(new Error('late'));
+    const proxy = new Proxy(target, {
+      get(t, key) {
+        const value = Reflect.get(t, key, t) as unknown;
+        return typeof value === 'function'
+          ? (value as (...a: unknown[]) => unknown).bind(t)
+          : value;
+      },
+    });
+    const model: CalculationModel = {
+      name: 'PRX',
+      version: '1.0.0',
+      validateParams: () => ({ valid: true }),
+      calculate: () => proxy as never,
+    };
+    const error = await failure(build([regModel(model)]), [makeRule({ id: 'p', model: 'PRX' })]);
+    expect(error).toBeInstanceOf(UnexpectedEngineError);
+    expect((error as Error).message).toContain('returned a promise');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(unhandled).toEqual([]);
+  });
+
   it('a hook thenable that resolves with a rejected promise is refused and the promise handled', async () => {
     const hook = pluginWith('hook', {
       beforeEvaluate: (() => ({
