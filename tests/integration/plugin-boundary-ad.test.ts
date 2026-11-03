@@ -6,6 +6,8 @@ import { PluginHookError } from '../../src/errors/PluginHookError.js';
 import { EngineLimitError } from '../../src/errors/EngineLimitError.js';
 import { ModelRegistry } from '../../src/registry/ModelRegistry.js';
 import { readsOf } from '../../src/context/reads.js';
+import { Budget, readBounded } from '../../src/engine/pluginBoundary.js';
+import { DEFAULT_LIMITS } from '../../src/limits.js';
 import { clipText, hasLoneSurrogate } from '../../src/utils/weight.js';
 import type { PPEPlugin } from '../../src/types/plugin.js';
 import type { CalculationModel } from '../../src/types/model.js';
@@ -587,5 +589,25 @@ describe('B23: a plugin skip has the reason PLUGIN and no other', () => {
     ]);
     const result = await engine.evaluate([tax()], makeInput());
     expect(result.skippedRules[0]).toMatchObject({ reason: 'PLUGIN', detail: 'plugin p: no' });
+  });
+});
+
+describe('B39: a string or a key counts max(1, ceil(w / 64)) nodes', () => {
+  const nodesOf = (text: string): number => {
+    const budget = new Budget('maxHookLeaves', 1_000_000);
+    readBounded(text, DEFAULT_LIMITS, 'v', { budget });
+    return budget.leaves;
+  };
+  it.each([
+    ['', 1], // w = 2
+    ['x', 1], // w = 3
+    ['x'.repeat(62), 1], // w = 64
+    ['x'.repeat(63), 2], // w = 65
+    ['x'.repeat(126), 2], // w = 128
+    ['x'.repeat(127), 3], // w = 129
+    ['\n'.repeat(31), 1], // w = 64: each newline is written as two characters
+    ['\n'.repeat(32), 2], // w = 66
+  ])('%j weighs %i', (text, expected) => {
+    expect(nodesOf(text)).toBe(expected);
   });
 });

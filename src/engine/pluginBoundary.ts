@@ -118,7 +118,7 @@ export class Budget {
   leaves = 0;
   /**
    * The exact serialized length of the text that plugin code handed the engine and that the record
-   * is certain to hold (a skip detail, a `meta` or a `pluginState` of `afterEvaluate`): a lower
+   * is certain to hold (a skip detail, the annotations of `afterEvaluate`, a `pluginState`): a lower
    * bound of the record, known before it is built.
    */
   recordChars = 0;
@@ -805,7 +805,7 @@ export const CROSSING_POINTS: Readonly<Record<PluginCallback, CrossingPoint>> = 
     called: true,
     contract: 'async',
     reads:
-      'acceptAfterEvaluate: each changed field through readBounded against the one budget of the evaluation (the text of meta and pluginState is also in the record room); a throw or a rejection becomes a PluginHookError holding its text',
+      'acceptAfterEvaluate: undefined, or exactly { annotations } (a non-empty plain JSON object) read once through readBounded against the joint budget of the evaluation, its text also in the record room; the engine merges it into meta[plugin name]; any other shape or a throw or a rejection becomes a PluginHookError holding its text',
   },
   'PPEPlugin.onError': {
     called: true,
