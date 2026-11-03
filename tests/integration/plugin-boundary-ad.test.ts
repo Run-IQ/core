@@ -211,7 +211,7 @@ describe('AD1, B71, B75: an engine error raised for plugin code is a plugin faul
         version: '1.0.0',
         evaluate: () => true,
         listVariables: () =>
-          new Proxy([] as unknown[], {
+          new Proxy([] as string[], {
             get(target, key, receiver) {
               if (key === 'length') {
                 stolen = source({

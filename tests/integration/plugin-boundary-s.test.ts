@@ -570,10 +570,13 @@ describe('S7: the registries are fixed for the evaluation', () => {
       pluginWith('h', {
         beforeEvaluate: (input, rules) => {
           try {
-            (context.modelRegistry.getAll() as Map<string, CalculationModel>).set('FLAT', {
-              ...FLAT,
-              calculate: () => 123456,
-            });
+            (context.modelRegistry.getAll() as unknown as Map<string, CalculationModel>).set(
+              'FLAT',
+              {
+                ...FLAT,
+                calculate: () => 123456,
+              },
+            );
           } catch {
             // a frozen view refuses the write
           }
