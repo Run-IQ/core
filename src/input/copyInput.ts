@@ -1,6 +1,7 @@
 import { raiseLimit } from '../errors/EngineLimitError.js';
 import type { EngineLimits } from '../limits.js';
 import { describeFault, faultOf } from '../engine/pluginPort.js';
+import { clip } from '../utils/frozenCopy.js';
 import { NotPlain, isDateObject, isPlainPrototype } from '../utils/plain.js';
 import { toReferenceDate } from '@run-iq/spec';
 import { CHARS_PER_NODE, hasLoneSurrogate, serializedLength } from '../utils/weight.js';
@@ -124,7 +125,9 @@ export class InputCopier {
     for (let f = frame; f !== undefined; f = f.parent) {
       if (f.key !== undefined) segments.unshift(escapeSegment(String(f.key)));
     }
-    return `${rootPointer}/${segments.join('/')}`;
+    // Quoted as a pointer, well-formed and cut: a plugin key with a lone surrogate never reaches
+    // a message raw (B94).
+    return clip(`${rootPointer}/${segments.join('/')}`);
   }
 
   /** Counts one node: a key of an object the caller walks itself (the members of `meta`). */

@@ -107,7 +107,7 @@ function computeReads(
       // The answer crosses once, through the one reader: copied, bounded, its text weighed.
       const raw = ask();
       // The length is read once and capped before one item is read.
-      const length = reading(() => (Array.isArray(raw) ? raw.length : 0));
+      const length = guarded(() => (Array.isArray(raw) ? raw.length : 0));
       if (length > MAX_LISTED_POINTERS) {
         throw new RangeError(`${length} pointers, more than the ${MAX_LISTED_POINTERS} allowed`);
       }
@@ -119,7 +119,7 @@ function computeReads(
       // The contract is an array: an iterable, an array-like or a Set is not a list, and a lazy
       // one is never run. The length is read once and capped before any item is read.
       if (!Array.isArray(answer))
-        throw new TypeError(`${reading(() => describeValue(raw))} is not a list`);
+        throw new TypeError(`${guarded(() => describeValue(raw))} is not a list`);
       items = [];
       for (let index = 0; index < answer.length; index += 1) items.push(answer[index]);
     } catch (error) {

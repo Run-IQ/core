@@ -445,6 +445,56 @@ describe('a plugin made only of Proxies, in every role', () => {
   });
 });
 
+const ALL_TRAPS = [
+  'apply',
+  'construct',
+  'defineProperty',
+  'deleteProperty',
+  'get',
+  'getOwnPropertyDescriptor',
+  'getPrototypeOf',
+  'has',
+  'isExtensible',
+  'ownKeys',
+  'preventExtensions',
+  'set',
+  'setPrototypeOf',
+];
+
+describe('MC1, MC6, M2b: the recorder itself', () => {
+  it('records each of the 13 traps, so that none can be dropped unnoticed', () => {
+    const seen = new Set<string>();
+    const run = (operate: (proxy: Record<string, unknown> & (() => unknown)) => void): void => {
+      log.length = 0;
+      const target = Object.assign(
+        function () {
+          return undefined;
+        },
+        { a: 1 },
+      ) as unknown as Record<string, unknown> & (() => unknown);
+      operate(hostile(target, 'recorder') as never);
+      for (const access of log) seen.add(access.trap);
+      log.length = 0;
+    };
+    run((p) => void p['a']);
+    run((p) => void ('a' in p));
+    run((p) => void Reflect.ownKeys(p));
+    run((p) => void Object.getOwnPropertyDescriptor(p, 'a'));
+    run((p) => void Object.getPrototypeOf(p));
+    run((p) => void Object.setPrototypeOf(p, null));
+    run((p) => void Object.isExtensible(p));
+    run((p) => void Object.preventExtensions(p));
+    run((p) => void Object.defineProperty(p, 'b', { value: 1, configurable: true }));
+    run((p) => void delete p['a']);
+    run((p) => {
+      p['c'] = 1;
+    });
+    run((p) => void p());
+    run((p) => void new (p as unknown as new () => object)());
+    expect([...seen].sort()).toEqual(ALL_TRAPS);
+  });
+});
+
 describe('what the log shows', () => {
   it('reaches every callback of the inventory the engine calls, and no other', () => {
     const called = Object.entries(CROSSING_POINTS)

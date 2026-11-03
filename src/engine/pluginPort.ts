@@ -5,7 +5,6 @@
 // them.
 
 import { types } from 'node:util';
-import { markEngineError } from '../errors/engineError.js';
 import { raised } from './trust.js';
 import { clipText } from '../utils/weight.js';
 
@@ -75,7 +74,6 @@ export class PluginFaultError extends Error {
     this.name = 'PluginFaultError';
   }
 }
-markEngineError(PluginFaultError);
 
 /** A fault of plugin code, as text, raised by the engine in this call. */
 export function faultError(fault: PluginFault): PluginFaultError {
@@ -140,11 +138,11 @@ export function faultFrom(thrown: unknown): PluginFaultError {
  * a field it may not change). Recorded as raised by the engine in this call.
  */
 export class BoundaryError extends TypeError {}
-markEngineError(BoundaryError);
 
 /** A refusal raised by the engine, in this call. */
 export function refusal(message: string): BoundaryError {
-  return Object.freeze(raised(new BoundaryError(message)));
+  // A text the engine writes is well-formed and bounded, whatever plugin key it quotes (B94).
+  return Object.freeze(raised(new BoundaryError(clipFault(message))));
 }
 
 /** A fault that is not a throw: the contract of a callback was broken. */

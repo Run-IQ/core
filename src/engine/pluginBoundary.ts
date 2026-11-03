@@ -7,7 +7,6 @@ import type { PPEPlugin } from '../types/plugin.js';
 import type { CalculationModel } from '../types/model.js';
 import type { DSLEvaluator } from '../types/dsl.js';
 import { isRaisedLimit, raiseLimit } from '../errors/EngineLimitError.js';
-import { markEngineError } from '../errors/engineError.js';
 import { InputCopier } from '../input/copyInput.js';
 import type { RuleValidator } from '../security/RuleValidator.js';
 import { compareRuleIdentity } from './resolveTie.js';
@@ -15,7 +14,7 @@ import { ruleLabel } from '../utils/values.js';
 import { isPlainPrototype } from '../utils/plain.js';
 import { ViewScope } from './frozenView.js';
 import { clip } from '../utils/frozenCopy.js';
-import { faultFrom, reading, refusal } from './pluginPort.js';
+import { clipFault, faultFrom, reading, refusal } from './pluginPort.js';
 import { ownRead, raised } from './trust.js';
 import { CHARS_PER_NODE, hasLoneSurrogate, serializedLength } from '../utils/weight.js';
 
@@ -70,11 +69,10 @@ export class ReadFailure extends Error {
  * failure and keeps none of them.
  */
 const CAUSES = new WeakMap<object, readonly unknown[]>();
-markEngineError(ReadFailure);
 
 /** A failed read, raised by the engine in this call, with what the properties threw. */
 function readFailure(message: string, causes: readonly unknown[]): ReadFailure {
-  const failure = Object.freeze(raised(new ReadFailure(message)));
+  const failure = Object.freeze(raised(new ReadFailure(clipFault(message))));
   CAUSES.set(failure, causes);
   return failure;
 }
@@ -607,11 +605,10 @@ export class MalformedResult extends Error {
     this.name = 'MalformedResult';
   }
 }
-markEngineError(MalformedResult);
 
 /** A malformed result, raised by the engine in this call. */
 function malformed(message: string): MalformedResult {
-  return Object.freeze(raised(new MalformedResult(message)));
+  return Object.freeze(raised(new MalformedResult(clipFault(message))));
 }
 
 /** True for a malformed result the engine raised in this call. */
