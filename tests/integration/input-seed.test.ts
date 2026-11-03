@@ -11,7 +11,7 @@ function plugin(calls: string[] = []): PPEPlugin {
     name: 'p',
     version: '1.0.0',
     onInit(context: PluginContext): void {
-      context.modelRegistry.register(new StubModel('M', 10));
+      context.modelRegistry.register(new StubModel('m', 10));
     },
     beforeEvaluate(input, rules) {
       calls.push('beforeEvaluate');
@@ -38,7 +38,7 @@ const reasonsOf = async (run: () => unknown): Promise<[string, readonly string[]
   return expect.unreachable('should have thrown');
 };
 
-const rules = [makeRule({ id: 'r1', model: 'M' })];
+const rules = [makeRule({ id: 'r1', model: 'm' })];
 
 describe('inputSeed', () => {
   describe('derive(requestId): exactly 32 bytes, checked at each evaluation', () => {

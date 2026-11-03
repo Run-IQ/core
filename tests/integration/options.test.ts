@@ -6,12 +6,12 @@ import { makeRule, makeInput, StubModel, StubPlugin } from '../helpers.js';
 
 const engine = (): PPEEngine =>
   new PPEEngine({
-    plugins: [new StubPlugin('test', [new StubModel('M', 10)])],
+    plugins: [new StubPlugin('test', [new StubModel('m', 10)])],
     dsls: [],
     strict: false,
   });
 
-const rules = [makeRule({ id: 'r1', model: 'M' })];
+const rules = [makeRule({ id: 'r1', model: 'm' })];
 
 const refusal = async (options: unknown): Promise<ValidationError> => {
   try {

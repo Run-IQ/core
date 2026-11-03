@@ -1,7 +1,7 @@
 import { PPEError } from './PPEError.js';
 import type { EngineLimits } from '../limits.js';
 import { markEngineError } from './engineError.js';
-import { isRaised, raised } from '../engine/trust.js';
+import { raised } from '../engine/trust.js';
 
 /** Characters of a pointer shown in a message (spec cuts its issue text at 1 024). */
 const MAX_POINTER_TEXT = 1024;
@@ -38,9 +38,9 @@ export class EngineLimitError extends PPEError {
 markEngineError(EngineLimitError);
 
 /**
- * Raises a limit error. The engine tells the errors it raised itself, in this call, from an
- * `EngineLimitError` a plugin built (the class is exported) by the record of this call, never by
- * class.
+ * Raises a limit error, frozen at creation. A limit is the engine's own only where the engine
+ * itself checks it, after a plugin's call has returned, on what the reader read; an
+ * `EngineLimitError` that comes out of a plugin frame is a fault of the plugin, whatever it says.
  */
 export function raiseLimit(
   limit: keyof EngineLimits,
@@ -48,10 +48,10 @@ export function raiseLimit(
   actual: number,
   pointer?: string,
 ): EngineLimitError {
-  return raised(new EngineLimitError(limit, max, actual, pointer));
+  return Object.freeze(raised(new EngineLimitError(limit, max, actual, pointer)));
 }
 
-/** True for a limit error the engine raised itself, in this call. */
+/** True for a limit error. Only code that no plugin frame sits under asks. */
 export function isRaisedLimit(value: unknown): value is EngineLimitError {
-  return value instanceof EngineLimitError && isRaised(value);
+  return value instanceof EngineLimitError;
 }

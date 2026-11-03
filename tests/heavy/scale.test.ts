@@ -20,10 +20,10 @@ const failureOf = async (run: () => Promise<unknown>): Promise<unknown> =>
 describe('maxRules (100 000): the rules of one evaluation', () => {
   it('evaluates maxRules simple rules on a small input in under 10 s', async () => {
     const rules = Array.from({ length: DEFAULT_LIMITS.maxRules }, (_, i) =>
-      makeRule({ id: `r${i}`, model: 'M', priority: i }),
+      makeRule({ id: `r${i}`, model: 'm', priority: i }),
     );
     const engine = new PPEEngine({
-      plugins: [new StubPlugin('p', [new StubModel('M', 1)])],
+      plugins: [new StubPlugin('p', [new StubModel('m', 1)])],
       dsls: [],
       strict: false,
     });
@@ -36,10 +36,10 @@ describe('maxRules (100 000): the rules of one evaluation', () => {
   }, 120_000);
 
   it('refuses one rule more at once, without reading any of them', async () => {
-    const rule = makeRule({ id: 'r', model: 'M' });
+    const rule = makeRule({ id: 'r', model: 'm' });
     const rules = new Array<typeof rule>(DEFAULT_LIMITS.maxRules + 1).fill(rule);
     const engine = new PPEEngine({
-      plugins: [new StubPlugin('p', [new StubModel('M', 1)])],
+      plugins: [new StubPlugin('p', [new StubModel('m', 1)])],
       dsls: [],
       strict: false,
     });
@@ -110,12 +110,12 @@ describe('maxRuleLeaves (100 000): the nodes of one rule', () => {
     return copier.leaves;
   };
   const padded = (items: number): Rule =>
-    makeRule({ id: 'big', model: 'M', params: { pad: new Array<number>(items).fill(1) } });
+    makeRule({ id: 'big', model: 'm', params: { pad: new Array<number>(items).fill(1) } });
   /** The rule with exactly `nodes` nodes (a list of scalars: 1 node each). */
   const withNodes = (nodes: number): Rule => padded(nodes - nodesOf(padded(0)));
   const engine = (): PPEEngine =>
     new PPEEngine({
-      plugins: [new StubPlugin('p', [new StubModel('M', 1)])],
+      plugins: [new StubPlugin('p', [new StubModel('m', 1)])],
       dsls: [],
       strict: false,
     });
@@ -148,7 +148,7 @@ describe('maxRules (100 000) with plugins: three beforeEvaluate hooks and one af
 
   it('evaluates maxRules simple rules in under 10 s', async () => {
     const rules = Array.from({ length: DEFAULT_LIMITS.maxRules }, (_, i) =>
-      makeRule({ id: `r${i}`, model: 'M', priority: i }),
+      makeRule({ id: `r${i}`, model: 'm', priority: i }),
     );
     const after: PPEPlugin = {
       name: 'after',
@@ -158,7 +158,7 @@ describe('maxRules (100 000) with plugins: three beforeEvaluate hooks and one af
     };
     const engine = new PPEEngine({
       plugins: [
-        new StubPlugin('p', [new StubModel('M', 1)]),
+        new StubPlugin('p', [new StubModel('m', 1)]),
         identity('one'),
         identity('two'),
         identity('three'),
@@ -180,7 +180,7 @@ describe('the costliest shape: wide objects (about 48 000 keys per rule)', () =>
   const wide = (id: string, keys: number): Rule => {
     const params: Record<string, number> = {};
     for (let i = 0; i < keys; i += 1) params[`k${i}`] = i;
-    return makeRule({ id, model: 'M', params });
+    return makeRule({ id, model: 'm', params });
   };
   const nodesOf = (rule: Rule): number => {
     const copier = new InputCopier(
@@ -195,7 +195,7 @@ describe('the costliest shape: wide objects (about 48 000 keys per rule)', () =>
   const engineWith = (adder?: PPEPlugin): PPEEngine =>
     new PPEEngine({
       plugins: [
-        new StubPlugin('p', [new StubModel('M', 1)]),
+        new StubPlugin('p', [new StubModel('m', 1)]),
         ...(adder === undefined ? [] : [adder]),
       ],
       dsls: [],
@@ -235,7 +235,7 @@ describe('the costliest shape: wide objects (about 48 000 keys per rule)', () =>
     };
     const start = performance.now();
     const result = await engineWith(adder).evaluate(
-      [makeRule({ id: 'one', model: 'M' })],
+      [makeRule({ id: 'one', model: 'm' })],
       makeInput(),
     );
     expect(performance.now() - start).toBeLessThan(8_000);
@@ -258,13 +258,13 @@ describe('the worst case: every limit at its default, on the costliest shape, at
   const wide = (id: string, keys: number): Rule => {
     const params: Record<string, number> = {};
     for (let i = 0; i < keys; i += 1) params[`k${i}`] = i;
-    return makeRule({ id, model: 'M', params });
+    return makeRule({ id, model: 'm', params });
   };
   /** Text that JSON escapes six-fold: it weighs what it costs, not what it counts. */
   const escaped = '\u0001'.repeat(100_000);
-  const escapedRule = (id: string): Rule => makeRule({ id, model: 'M', params: { escaped } });
+  const escapedRule = (id: string): Rule => makeRule({ id, model: 'm', params: { escaped } });
   /** A rule carrying one string of `maxStringLength` characters (the same string in all of them). */
-  const texty = (id: string): Rule => makeRule({ id, model: 'M', params: { text } });
+  const texty = (id: string): Rule => makeRule({ id, model: 'm', params: { text } });
   it('pins the calibrated defaults by value', () => {
     expect(DEFAULT_LIMITS.maxRuleSetNodes).toBe(2_000_000);
     expect(DEFAULT_LIMITS.maxHookLeaves).toBe(400_000);
@@ -325,7 +325,7 @@ describe('the worst case: every limit at its default, on the costliest shape, at
       afterEvaluate: () => undefined,
     };
     const engine = new PPEEngine({
-      plugins: [new StubPlugin('p', [new StubModel('M', 1)]), adder, after],
+      plugins: [new StubPlugin('p', [new StubModel('m', 1)]), adder, after],
       dsls: [],
       strict: false,
     });
@@ -339,9 +339,9 @@ describe('the worst case: every limit at its default, on the costliest shape, at
   it('an input of maxInputLeaves nodes with a hundred rules is refused by maxTraceNodes, quickly', async () => {
     const data: Record<string, unknown> = {};
     for (let i = 0; i < (DEFAULT_LIMITS.maxInputLeaves - 2) / 2; i += 1) data[`k${i}`] = i;
-    const rules = Array.from({ length: 100 }, (_, i) => makeRule({ id: `r${i}`, model: 'M' }));
+    const rules = Array.from({ length: 100 }, (_, i) => makeRule({ id: `r${i}`, model: 'm' }));
     const engine = new PPEEngine({
-      plugins: [new StubPlugin('p', [new StubModel('M', 1)])],
+      plugins: [new StubPlugin('p', [new StubModel('m', 1)])],
       dsls: [],
       strict: false,
     });
@@ -358,14 +358,14 @@ describe('the worst case: every limit at its default, on the costliest shape, at
   it('every limit is reachable on its own: an input of maxInputLeaves nodes with 20 rules is evaluated in under 10 s', async () => {
     const data: Record<string, unknown> = {};
     for (let i = 0; i < (DEFAULT_LIMITS.maxInputLeaves - 2) / 2; i += 1) data[`k${i}`] = i;
-    const rules = Array.from({ length: 20 }, (_, i) => makeRule({ id: `r${i}`, model: 'M' }));
+    const rules = Array.from({ length: 20 }, (_, i) => makeRule({ id: `r${i}`, model: 'm' }));
     // 20 steps of the trace, each recording an input of 500 000 nodes: the product stays under
     // maxTraceNodes, so that the input limit decides before the trace limit does.
     expect(DEFAULT_LIMITS.maxInputLeaves * rules.length).toBeLessThanOrEqual(
       DEFAULT_LIMITS.maxTraceNodes,
     );
     const engine = new PPEEngine({
-      plugins: [new StubPlugin('p', [new StubModel('M', 1)])],
+      plugins: [new StubPlugin('p', [new StubModel('m', 1)])],
       dsls: [],
       strict: false,
     });
@@ -378,10 +378,10 @@ describe('the worst case: every limit at its default, on the costliest shape, at
   it('T5: rules sharing a string of control characters are refused by name long before the budget of time', async () => {
     const hostile = '\u0001'.repeat(DEFAULT_LIMITS.maxStringLength);
     const rules = Array.from({ length: 100 }, (_, i) =>
-      makeRule({ id: `t${i}`, model: 'M', params: { hostile } }),
+      makeRule({ id: `t${i}`, model: 'm', params: { hostile } }),
     );
     const engine = new PPEEngine({
-      plugins: [new StubPlugin('p', [new StubModel('M', 1)])],
+      plugins: [new StubPlugin('p', [new StubModel('m', 1)])],
       dsls: [],
       strict: false,
     });
@@ -397,7 +397,7 @@ describe('the worst case: every limit at its default, on the costliest shape, at
 
   it('Xs: 2 200 skips sharing a text of maxStringLength characters are refused by name, not a crash', async () => {
     const detail = 'd'.repeat(DEFAULT_LIMITS.maxStringLength);
-    const rules = Array.from({ length: 2_200 }, (_, i) => makeRule({ id: `s${i}`, model: 'M' }));
+    const rules = Array.from({ length: 2_200 }, (_, i) => makeRule({ id: `s${i}`, model: 'm' }));
     const skipper: PPEPlugin = {
       name: 'skipper',
       version: '1.0.0',
@@ -409,7 +409,7 @@ describe('the worst case: every limit at its default, on the costliest shape, at
       }),
     };
     const engine = new PPEEngine({
-      plugins: [new StubPlugin('p', [new StubModel('M', 1)]), skipper],
+      plugins: [new StubPlugin('p', [new StubModel('m', 1)]), skipper],
       dsls: [],
       strict: false,
     });
@@ -426,13 +426,13 @@ describe('the worst case: every limit at its default, on the costliest shape, at
   it('Xb5: 2 200 rules whose model answers with the same long error are refused by name, not a crash', async () => {
     const errors = ['e'.repeat(DEFAULT_LIMITS.maxStringLength)];
     const wordy = {
-      name: 'WORDY',
+      name: 'wordy',
       version: '1.0.0',
       validateParams: () => ({ valid: false, errors }),
       calculate: () => 1,
     };
     const rules = Array.from({ length: 2_200 }, (_, i) =>
-      makeRule({ id: `v${i}`, model: 'WORDY' }),
+      makeRule({ id: `v${i}`, model: 'wordy' }),
     );
     const engine = new PPEEngine({
       plugins: [
@@ -465,7 +465,7 @@ describe('the worst case: every limit at its default, on the costliest shape, at
     });
     const engine = new PPEEngine({
       plugins: [
-        new StubPlugin('p', [new StubModel('M', 1)]),
+        new StubPlugin('p', [new StubModel('m', 1)]),
         annotating('one'),
         annotating('two'),
         annotating('three'),
@@ -473,7 +473,7 @@ describe('the worst case: every limit at its default, on the costliest shape, at
       dsls: [],
       strict: false,
     });
-    const rules = Array.from({ length: 8 }, (_, i) => makeRule({ id: `a${i}`, model: 'M' }));
+    const rules = Array.from({ length: 8 }, (_, i) => makeRule({ id: `a${i}`, model: 'm' }));
     const start = performance.now();
     const error = await engine.evaluate(rules, makeInput()).then(
       () => undefined,
@@ -491,7 +491,7 @@ describe('the worst case: every limit at its default, on the costliest shape, at
   it('AB3: an input of maxInputLeaves nodes with 20 rules and five annotators is evaluated in under 10 s', async () => {
     const data: Record<string, unknown> = {};
     for (let i = 0; i < (DEFAULT_LIMITS.maxInputLeaves - 2) / 2; i += 1) data[`k${i}`] = i;
-    const rules = Array.from({ length: 20 }, (_, i) => makeRule({ id: `r${i}`, model: 'M' }));
+    const rules = Array.from({ length: 20 }, (_, i) => makeRule({ id: `r${i}`, model: 'm' }));
     const annotating = (name: string): PPEPlugin => ({
       name,
       version: '1.0.0',
@@ -500,7 +500,7 @@ describe('the worst case: every limit at its default, on the costliest shape, at
     });
     const engine = new PPEEngine({
       plugins: [
-        new StubPlugin('p', [new StubModel('M', 1)]),
+        new StubPlugin('p', [new StubModel('m', 1)]),
         ...['one', 'two', 'three', 'four', 'five'].map(annotating),
       ],
       dsls: [],
@@ -515,7 +515,7 @@ describe('the worst case: every limit at its default, on the costliest shape, at
   it('many rules sharing one string of maxStringLength characters: finishes or is refused by name, under 10 s', async () => {
     const rules = Array.from({ length: 100 }, (_, i) => texty(`s${i}`));
     const engine = new PPEEngine({
-      plugins: [new StubPlugin('p', [new StubModel('M', 1)])],
+      plugins: [new StubPlugin('p', [new StubModel('m', 1)])],
       dsls: [],
       strict: false,
     });

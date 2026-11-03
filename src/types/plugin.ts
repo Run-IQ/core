@@ -6,23 +6,38 @@ import type { CalculationModel } from './model.js';
 import type { OutputValue } from './output.js';
 import type { PPEError } from '../errors/PPEError.js';
 import type { DSLEvaluator } from './dsl.js';
+import type { OutputDeclaration } from '@run-iq/spec';
 
-/** What a plugin can do with the models: register, look up and list. Nothing else of the engine. */
-export interface ModelRegistryApi {
-  register(model: CalculationModel<OutputValue>): void;
-  get(name: string): CalculationModel<OutputValue>;
-  has(name: string): boolean;
-  /** A copy: writing to it changes nothing. */
-  getAll(): ReadonlyMap<string, CalculationModel<OutputValue>>;
+/** What the engine tells a plugin about a registered model: data only, frozen. */
+export interface ModelDescriptor {
+  readonly name: string;
+  readonly version: string;
+  readonly output?: OutputDeclaration;
 }
 
-/** What a plugin can do with the DSL evaluators: register, look up and list. */
+/** What the engine tells a plugin about a registered DSL evaluator: data only, frozen. */
+export interface DslDescriptor {
+  readonly dsl: string;
+  readonly version: string;
+}
+
+/**
+ * What a plugin can do with the models: register, ask about and list. It is handed frozen
+ * descriptors, never a registered object or a function.
+ */
+export interface ModelRegistryApi {
+  register(model: CalculationModel<OutputValue>): void;
+  get(name: string): ModelDescriptor;
+  has(name: string): boolean;
+  getAll(): ReadonlyArray<ModelDescriptor>;
+}
+
+/** What a plugin can do with the DSL evaluators: register, ask about and list. */
 export interface DslRegistryApi {
   register(evaluator: DSLEvaluator): void;
-  get(dsl: string): DSLEvaluator | undefined;
+  get(dsl: string): DslDescriptor | undefined;
   has(dsl: string): boolean;
-  /** A copy: writing to it changes nothing. */
-  getAll(): ReadonlyMap<string, DSLEvaluator>;
+  getAll(): ReadonlyArray<DslDescriptor>;
 }
 
 export interface PluginContext {

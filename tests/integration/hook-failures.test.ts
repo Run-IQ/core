@@ -32,7 +32,7 @@ const host: PPEPlugin = {
   name: 'host',
   version: '1.0.0',
   onInit(context: PluginContext): void {
-    context.modelRegistry.register(new StubModel('M', 10));
+    context.modelRegistry.register(new StubModel('m', 10));
   },
 };
 
@@ -68,7 +68,7 @@ function setup(hooks: Partial<PPEPlugin>, config: Partial<PPEEngineConfig> = {})
   return { engine, adapter, told };
 }
 
-const rules = [makeRule({ id: 'r1', model: 'M' }), makeRule({ id: 'r2', model: 'M' })];
+const rules = [makeRule({ id: 'r1', model: 'm' }), makeRule({ id: 'r2', model: 'm' })];
 
 /** Evaluates and returns what it rejected with. */
 async function failure(setupResult: Setup, input = makeInput()): Promise<unknown> {
@@ -392,7 +392,7 @@ describe('a rule a beforeEvaluate hook returns is the rule it was given, or a ve
     const s = setup({
       beforeEvaluate: (input, given) => ({
         input,
-        rules: [...given, { ...makeRule({ id: 'extra', model: 'M' }), checksum: 'f'.repeat(64) }],
+        rules: [...given, { ...makeRule({ id: 'extra', model: 'm' }), checksum: 'f'.repeat(64) }],
       }),
     });
     await expectHookFailure(s, 'beforeEvaluate', (cause) => {
@@ -406,7 +406,7 @@ describe('a rule a beforeEvaluate hook returns is the rule it was given, or a ve
     const s = setup({
       beforeEvaluate: (input, given) => ({
         input,
-        rules: [...given, { ...makeRule({ id: 'extra', model: 'M' }), version: 1.5 }],
+        rules: [...given, { ...makeRule({ id: 'extra', model: 'm' }), version: 1.5 }],
       }),
     });
     await expectHookFailure(s, 'beforeEvaluate', (cause) => {
@@ -418,7 +418,7 @@ describe('a rule a beforeEvaluate hook returns is the rule it was given, or a ve
     const s = setup({
       beforeEvaluate: (input, given) => ({
         input,
-        rules: [...given, makeRule({ id: 'extra', model: 'M' })],
+        rules: [...given, makeRule({ id: 'extra', model: 'm' })],
       }),
     });
     const result = await s.engine.evaluate(rules, makeInput());
@@ -439,7 +439,7 @@ describe('a rule a beforeEvaluate hook returns is the rule it was given, or a ve
 
 describe('what a hook does that the engine accepts as it is stays a diagnostic', () => {
   it('rules a hook adds are evaluated and named', async () => {
-    const extra = makeRule({ id: 'extra', model: 'M' });
+    const extra = makeRule({ id: 'extra', model: 'm' });
     const s = setup({
       beforeEvaluate: (input, given) => ({ input, rules: [...given, extra] }),
     });

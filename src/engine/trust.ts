@@ -1,27 +1,60 @@
-import { AsyncLocalStorage } from 'node:async_hooks';
+// There is no trust set. An error is never the engine's own because it was recorded somewhere, or
+// because of its class: whatever comes out of a plugin frame is a fault of the plugin, whoever
+// caused the engine to raise it (an engine function the plugin called included).
+//
+// The one place that lets an engine error through a plugin frame is `guarded`, and it decides by
+// a set that lives only for that read, in a closure: the walker it runs raises its own refusals
+// and limits into it, and nothing else can. A function the engine exports (`readsOf`, a registry,
+// a nested engine) runs `isolated`: what it raises goes to no read in progress, so a plugin that
+// calls it from a getter and throws the error again throws a fault.
 
-// Whether an error is the engine's own is decided by one thing: the engine raised it, during this
-// call, and recorded it here. Class, brand, symbol and `instanceof` confer no trust: a constructor
-// can make any of them, and a plugin can reach a constructor (from an error it was handed, from
-// another engine of its own). The set belongs to one evaluation (or one construction), so an error
-// raised by a nested engine, or in another evaluation, is not in it.
+let active: WeakSet<object> | null = null;
 
-const calls = new AsyncLocalStorage<WeakSet<object>>();
-/** For the code run outside an evaluation (a direct call of a reader). */
-const outside = new WeakSet<object>();
-
-/** Runs `fn` as one call of the engine: the errors it raises are its own and no one else's. */
-export function inCall<T>(fn: () => T): T {
-  return calls.run(new WeakSet<object>(), fn);
-}
-
-/** Records an error the engine raised itself, in this call, and returns it. */
+/** Notes an error the engine raises for the read in progress (a no-op outside one). */
 export function raised<T extends object>(error: T): T {
-  (calls.getStore() ?? outside).add(error);
+  active?.add(error);
   return error;
 }
 
-/** True only for an error the engine raised in this call. */
-export function isRaised(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && (calls.getStore() ?? outside).has(error);
+/**
+ * Runs `fn` as a read: the errors it raises through `raised` pass, anything else that is thrown is
+ * given to `foreign`, which makes the fault of it. The set is dropped when the read ends; an error
+ * that passes is noted for the read around this one.
+ */
+export function ownRead<T>(fn: () => T, foreign: (thrown: unknown) => never): T {
+  const outer = active;
+  const mine = new WeakSet<object>();
+  active = mine;
+  try {
+    return fn();
+  } catch (thrown) {
+    active = outer;
+    if (typeof thrown === 'object' && thrown !== null && mine.has(thrown)) {
+      outer?.add(thrown);
+      throw thrown;
+    }
+    return foreign(thrown);
+  } finally {
+    active = outer;
+  }
+}
+
+/** Starts an isolated stretch of code; the function it returns ends it. */
+export function isolate(): () => void {
+  const outer = active;
+  active = null;
+  return () => {
+    active = outer;
+  };
+}
+
+/** Runs `fn` so that what it raises is noted for no read in progress. */
+export function isolated<T>(fn: () => T): T {
+  const outer = active;
+  active = null;
+  try {
+    return fn();
+  } finally {
+    active = outer;
+  }
 }

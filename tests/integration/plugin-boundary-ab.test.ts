@@ -29,7 +29,7 @@ afterEach(() => {
 });
 
 const FLAT: CalculationModel = {
-  name: 'FLAT',
+  name: 'flat',
   version: '1.0.0',
   validateParams: (params) =>
     typeof (params as { rate?: unknown }).rate === 'number'
@@ -42,7 +42,7 @@ const host: PPEPlugin = {
   version: '1.0.0',
   onInit(context): void {
     context.modelRegistry.register(FLAT);
-    context.modelRegistry.register(new StubModel('M', 10));
+    context.modelRegistry.register(new StubModel('m', 10));
   },
 };
 const pluginWith = (name: string, hooks: Partial<PPEPlugin>): PPEPlugin => ({
@@ -66,7 +66,7 @@ function build(
     ...config,
   });
 }
-const tax = (rate = 100, id = 'tax'): Rule => makeRule({ id, model: 'FLAT', params: { rate } });
+const tax = (rate = 100, id = 'tax'): Rule => makeRule({ id, model: 'flat', params: { rate } });
 async function failure(engine: PPEEngine, rules: unknown, input?: unknown): Promise<unknown> {
   return engine.evaluate(rules as Rule[], (input ?? makeInput()) as EvaluationInput).then(
     () => undefined,
@@ -92,7 +92,7 @@ describe('AB1: the fault brand is not made by a constructor, and no field of an 
     for (const where of ['calculate', 'validateParams', 'beforeEvaluate'] as const) {
       const forged = Object.assign(new PluginFaultError('forged'), { fault: huge() });
       const model: CalculationModel = {
-        name: 'EVIL',
+        name: 'evil',
         version: '1.0.0',
         validateParams: () => {
           if (where === 'validateParams') throw forged;
@@ -111,7 +111,7 @@ describe('AB1: the fault brand is not made by a constructor, and no field of an 
       });
       const error = (await failure(
         build([regModel(model), hook]),
-        [makeRule({ id: 'e', model: 'EVIL' })],
+        [makeRule({ id: 'e', model: 'evil' })],
         makeInput({ requestId: `ab1-${where}` }),
       )) as Error & { cause: { name: string; message: string; code?: unknown } };
       expect(error).not.toBe(forged);
@@ -277,12 +277,12 @@ describe('AB4: promises are adopted through the captured intrinsics', () => {
       }
     }
     const model: CalculationModel = {
-      name: 'SUB',
+      name: 'sub',
       version: '1.0.0',
       validateParams: () => ({ valid: true }),
       calculate: () => Sub.reject(new Error('late')) as never,
     };
-    const error = await failure(build([regModel(model)]), [makeRule({ id: 's', model: 'SUB' })]);
+    const error = await failure(build([regModel(model)]), [makeRule({ id: 's', model: 'sub' })]);
     expect(error).toBeInstanceOf(UnexpectedEngineError);
     expect((error as Error).message).toContain('returned a promise');
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -300,12 +300,12 @@ describe('AB4: promises are adopted through the captured intrinsics', () => {
       },
     });
     const model: CalculationModel = {
-      name: 'PRX',
+      name: 'prx',
       version: '1.0.0',
       validateParams: () => ({ valid: true }),
       calculate: () => proxy as never,
     };
-    const error = await failure(build([regModel(model)]), [makeRule({ id: 'p', model: 'PRX' })]);
+    const error = await failure(build([regModel(model)]), [makeRule({ id: 'p', model: 'prx' })]);
     expect(error).toBeInstanceOf(UnexpectedEngineError);
     expect((error as Error).message).toContain('returned a promise');
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -349,7 +349,7 @@ describe('AB6: the text the record holds is well-formed', () => {
       [
         makeRule({
           id: 'p',
-          model: 'FLAT',
+          model: 'flat',
           params: { rate: 1 },
           condition: { dsl: 'pairs', value: {} },
         }),
@@ -407,13 +407,13 @@ describe('AB6: the text the record holds is well-formed', () => {
 
   it('a validateParams error with a lone surrogate makes the answer malformed', async () => {
     const evil: CalculationModel = {
-      name: 'EVIL',
+      name: 'evil',
       version: '1.0.0',
       validateParams: () => ({ valid: false, errors: ['x\uDC00'] }),
       calculate: () => 1,
     };
     const result = await build([regModel(evil)]).evaluate(
-      [makeRule({ id: 'e', model: 'EVIL' })],
+      [makeRule({ id: 'e', model: 'evil' })],
       makeInput(),
     );
     expect(result.skippedRules[0]?.reason).toBe('MODEL_ERROR');
@@ -426,7 +426,7 @@ describe('AB7: the shape of a name and of a version', () => {
     expect(() => build([plugin])).toThrow(what);
   };
   it('a plugin name is lower case words joined by single . _ or -', () => {
-    for (const name of ['A', '..', 'a..b', 'a/b', '@scope/x', '@', '@@@', 'then!', 'a b']) {
+    for (const name of ['a', '..', 'a..b', 'a/b', '@scope/x', '@', '@@@', 'then!', 'a b']) {
       refuses({ ...pluginWith('p', {}), name } as PPEPlugin, /name/);
     }
     for (const name of ['then', 'constructor', 'tostring', 'a.b-c_d']) {
@@ -453,7 +453,7 @@ describe('AB7: the shape of a name and of a version', () => {
     for (const name of ['', 'a..b', 'a b', '@x', 'a/b']) {
       expect(() => build([regModel({ ...FLAT, name })])).toThrow(/model/);
     }
-    for (const name of ['FLAT_RATE', 'Flat.Rate-2', '@run-iq/exception']) {
+    for (const name of ['flat_rate', 'flat.rate-2', '@run-iq/exception']) {
       expect(() => build([regModel({ ...FLAT, name })]), name).not.toThrow();
     }
   });

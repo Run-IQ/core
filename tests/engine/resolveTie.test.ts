@@ -5,9 +5,9 @@ import { makeRule } from '../helpers.js';
 
 describe('resolveTie', () => {
   const tied = [
-    makeRule({ id: 'b', model: 'M', priority: 500, version: 2 }),
-    makeRule({ id: 'a', model: 'M', priority: 500, version: 1 }),
-    makeRule({ id: 'c', model: 'M', priority: 500 }),
+    makeRule({ id: 'b', model: 'm', priority: 500, version: 2 }),
+    makeRule({ id: 'a', model: 'm', priority: 500, version: 1 }),
+    makeRule({ id: 'c', model: 'm', priority: 500 }),
   ];
 
   it("throws RuleConflictError naming every tied id in 'throw' mode", () => {
@@ -31,10 +31,10 @@ describe('resolveTie', () => {
 
   it('orders identities by id (code units) then version ascending', () => {
     const rules = [
-      makeRule({ id: 'b', model: 'M', version: 1 }),
-      makeRule({ id: 'a', model: 'M', version: 2 }),
-      makeRule({ id: 'B', model: 'M', version: 1 }),
-      makeRule({ id: 'a', model: 'M', version: 1 }),
+      makeRule({ id: 'b', model: 'm', version: 1 }),
+      makeRule({ id: 'a', model: 'm', version: 2 }),
+      makeRule({ id: 'B', model: 'm', version: 1 }),
+      makeRule({ id: 'a', model: 'm', version: 1 }),
     ];
     expect([...rules].sort(compareRuleIdentity).map((r) => `${r.id}@${r.version}`)).toEqual([
       'B@1',
@@ -45,8 +45,8 @@ describe('resolveTie', () => {
   });
 
   it('picks the lowest version of the same id, whatever the input order', () => {
-    const v2 = makeRule({ id: 'a', model: 'M', priority: 7, version: 2 });
-    const v1 = makeRule({ id: 'a', model: 'M', priority: 7, version: 1 });
+    const v2 = makeRule({ id: 'a', model: 'm', priority: 7, version: 2 });
+    const v1 = makeRule({ id: 'a', model: 'm', priority: 7, version: 1 });
     for (const input of [
       [v2, v1],
       [v1, v2],
@@ -61,8 +61,8 @@ describe('resolveTie', () => {
 
   it('throws a plain Error naming the ids when priorities differ', () => {
     const mixed = [
-      makeRule({ id: 'x', model: 'M', priority: 1 }),
-      makeRule({ id: 'y', model: 'M', priority: 2 }),
+      makeRule({ id: 'x', model: 'm', priority: 1 }),
+      makeRule({ id: 'y', model: 'm', priority: 2 }),
     ];
     expect(() => resolveTie(mixed, 'first')).toThrow(
       'resolveTie requires rules sharing one priority: x, y',

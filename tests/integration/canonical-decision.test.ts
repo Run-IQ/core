@@ -74,7 +74,7 @@ function sum(value: unknown): number {
 }
 
 const SUMS: CalculationModel = {
-  name: 'SUMS',
+  name: 'sums',
   version: '1.0.0',
   validateParams: () => ({ valid: true }),
   calculate: (input) => sum(input),
@@ -90,9 +90,9 @@ function engine(): PPEEngine {
 }
 
 const rules = [
-  makeRule({ id: 'plain', model: 'SUMS' }),
-  makeRule({ id: 'tagged', model: 'SUMS', tags: ['a'], priority: 90 }),
-  makeRule({ id: 'dim', model: 'SUMS', dimensions: { region: 'TG' }, priority: 80 }),
+  makeRule({ id: 'plain', model: 'sums' }),
+  makeRule({ id: 'tagged', model: 'sums', tags: ['a'], priority: 90 }),
+  makeRule({ id: 'dim', model: 'sums', dimensions: { region: 'TG' }, priority: 80 }),
 ];
 
 const summary = async (input: EvaluationInput): Promise<unknown> => {

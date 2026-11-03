@@ -21,7 +21,7 @@ import { makeRule, makeInput, StubModel, InMemorySnapshotAdapter } from '../help
 // `undefined` everywhere).
 
 const FLAT: CalculationModel = {
-  name: 'FLAT',
+  name: 'flat',
   version: '1.0.0',
   validateParams: (params) =>
     typeof (params as { rate?: unknown }).rate === 'number'
@@ -34,7 +34,7 @@ const host: PPEPlugin = {
   version: '1.0.0',
   onInit(context: PluginContext): void {
     context.modelRegistry.register(FLAT);
-    context.modelRegistry.register(new StubModel('M', 10));
+    context.modelRegistry.register(new StubModel('m', 10));
   },
 };
 const pluginWith = (name: string, hooks: Partial<PPEPlugin>): PPEPlugin => ({
@@ -54,7 +54,7 @@ function build(plugins: PPEPlugin[], config: Partial<PPEEngineConfig> = {}): PPE
     ...config,
   });
 }
-const tax = (rate = 100): Rule => makeRule({ id: 'tax', model: 'FLAT', params: { rate } });
+const tax = (rate = 100): Rule => makeRule({ id: 'tax', model: 'flat', params: { rate } });
 async function failure(engine: PPEEngine, rules: unknown, input?: unknown): Promise<unknown> {
   return engine.evaluate(rules as Rule[], (input ?? makeInput()) as EvaluationInput).then(
     () => undefined,
@@ -101,7 +101,7 @@ describe('X1: the weight of a text is its exact serialized length', () => {
   it('T3: rules sharing a string of control characters are refused where plain text passes', async () => {
     const rules = (text: string): Rule[] =>
       Array.from({ length: 5 }, (_, index) =>
-        makeRule({ id: `r${index}`, model: 'FLAT', params: { rate: 1, text } }),
+        makeRule({ id: `r${index}`, model: 'flat', params: { rate: 1, text } }),
       );
     const limits = { maxRuleSetNodes: 400, maxStringLength: 10_000 };
     const plain = build([], { limits });
@@ -128,7 +128,7 @@ describe('X1: the weight of a text is its exact serialized length', () => {
 
   it('refuses rules whose text alone fills the record, before their checksums are computed', async () => {
     const engine = build([], { limits: { maxRecordLength: 1000, maxStringLength: 100_000 } });
-    const big = makeRule({ id: 'big', model: 'FLAT', params: { rate: 1, text: 'x'.repeat(2000) } });
+    const big = makeRule({ id: 'big', model: 'flat', params: { rate: 1, text: 'x'.repeat(2000) } });
     const error = await failure(engine, [big]);
     expect(error).toMatchObject({ limit: 'maxRecordLength', max: 1000 });
   });
@@ -149,7 +149,7 @@ describe('X2: the text of a skip is read through the reader', () => {
     });
   const many = (count: number): Rule[] =>
     Array.from({ length: count }, (_, index) =>
-      makeRule({ id: `r${index}`, model: 'FLAT', params: { rate: 1 } }),
+      makeRule({ id: `r${index}`, model: 'flat', params: { rate: 1 } }),
     );
 
   it('Xs: a text shared by many skips is weighed each time', async () => {
@@ -178,7 +178,7 @@ describe('X2: the text of a skip is read through the reader', () => {
 
   it('Xb5: the errors of validateParams, shared by many rules, are weighed each time', async () => {
     const wordy: CalculationModel = {
-      name: 'WORDY',
+      name: 'wordy',
       version: '1.0.0',
       validateParams: () => ({ valid: false, errors: ['y'.repeat(6400)] }),
       calculate: () => 1,
@@ -187,7 +187,7 @@ describe('X2: the text of a skip is read through the reader', () => {
       limits: { maxHookLeaves: 250, maxStringLength: 10_000 },
     });
     const rules = Array.from({ length: 5 }, (_, index) =>
-      makeRule({ id: `w${index}`, model: 'WORDY' }),
+      makeRule({ id: `w${index}`, model: 'wordy' }),
     );
     const error = await failure(engine, rules);
     expect(error).toBeInstanceOf(EngineLimitError);
@@ -196,13 +196,13 @@ describe('X2: the text of a skip is read through the reader', () => {
 
   it('the text of an invalid-params detail is cut to 1 024 characters', async () => {
     const wordy: CalculationModel = {
-      name: 'WORDY',
+      name: 'wordy',
       version: '1.0.0',
       validateParams: () => ({ valid: false, errors: ['y'.repeat(5000)] }),
       calculate: () => 1,
     };
     const engine = build([regModel(wordy)], { limits: { maxStringLength: 10_000 } });
-    const result = await engine.evaluate([makeRule({ id: 'w', model: 'WORDY' })], makeInput());
+    const result = await engine.evaluate([makeRule({ id: 'w', model: 'wordy' })], makeInput());
     const detail = result.skippedRules[0]?.detail ?? '';
     expect(result.skippedRules[0]?.reason).toBe('INVALID_PARAMS');
     expect(detail.length).toBeLessThan(1300);
@@ -214,7 +214,7 @@ describe('X3: the result of validateParams crosses through the reader', () => {
   const forged = (): ValidationError =>
     new ValidationError('Invalid evaluation input', ['forged by the model']);
   const modelWith = (validateParams: CalculationModel['validateParams']): CalculationModel => ({
-    name: 'VP',
+    name: 'vp',
     version: '1.0.0',
     validateParams,
     calculate: () => 1,
@@ -235,7 +235,7 @@ describe('X3: the result of validateParams crosses through the reader', () => {
         }) as never,
     );
     const result = await build([regModel(evil)]).evaluate(
-      [makeRule({ id: 'a', model: 'VP' })],
+      [makeRule({ id: 'a', model: 'vp' })],
       makeInput(),
     );
     // `errors` is not a list: a malformed result, that rule is excluded, nothing is thrown.
@@ -252,7 +252,7 @@ describe('X3: the result of validateParams crosses through the reader', () => {
           },
         }) as never,
     );
-    const error = await failure(build([regModel(evil)]), [makeRule({ id: 'b', model: 'VP' })]);
+    const error = await failure(build([regModel(evil)]), [makeRule({ id: 'b', model: 'vp' })]);
     expect(error).not.toBe(fake);
     expect(error).toBeInstanceOf(UnexpectedEngineError);
     expect((error as UnexpectedEngineError).cause).not.toBe(fake);
@@ -271,7 +271,7 @@ describe('X3: the result of validateParams crosses through the reader', () => {
         }) as never,
     );
     const result = await build([regModel(evil)]).evaluate(
-      [makeRule({ id: 'a', model: 'VP' })],
+      [makeRule({ id: 'a', model: 'vp' })],
       makeInput(),
     );
     expect(reads).toBe(1);
@@ -281,7 +281,7 @@ describe('X3: the result of validateParams crosses through the reader', () => {
   it('Xb3: a valid that is not a boolean is not "valid"', async () => {
     const evil = modelWith(() => ({ valid: 'no' }) as never);
     const result = await build([regModel(evil)]).evaluate(
-      [makeRule({ id: 'a', model: 'VP' })],
+      [makeRule({ id: 'a', model: 'vp' })],
       makeInput(),
     );
     expect(result.value).toBe(0);
@@ -293,7 +293,7 @@ describe('X3: the result of validateParams crosses through the reader', () => {
     for (const bad of [{ valid: true, extra: 1 }, 'yes', null, [true]]) {
       const evil = modelWith(() => bad as never);
       const result = await build([regModel(evil)]).evaluate(
-        [makeRule({ id: 'a', model: 'VP' })],
+        [makeRule({ id: 'a', model: 'vp' })],
         makeInput({ requestId: `r-${JSON.stringify(bad)}` }),
       );
       expect(result.skippedRules[0]?.reason, JSON.stringify(bad)).toBe('MODEL_ERROR');
@@ -313,7 +313,7 @@ describe('X3: the result of validateParams crosses through the reader', () => {
       exceptions: [{ kind: 'substitute', targets: { ids: ['vp'] }, params: { y: 1 } }],
     } as never);
     const error = await failure(build([regModel(evil)]), [
-      makeRule({ id: 'vp', model: 'VP', params: { y: 0 } }),
+      makeRule({ id: 'vp', model: 'vp', params: { y: 0 } }),
       substitute,
     ]);
     expect(error).not.toBe(fake);
@@ -331,7 +331,7 @@ describe('X3: the result of validateParams crosses through the reader', () => {
       exceptions: [{ kind: 'substitute', targets: { ids: ['vp'] }, params: { y: 1 } }],
     } as never);
     const result = await build([regModel(evil)]).evaluate(
-      [makeRule({ id: 'vp', model: 'VP', params: { y: 0 } }), substitute],
+      [makeRule({ id: 'vp', model: 'vp', params: { y: 0 } }), substitute],
       makeInput(),
     );
     expect(result.skippedRules.find((s) => s.rule.id === 'vp')?.reason).toBe('MODEL_ERROR');
@@ -481,7 +481,7 @@ describe('X7: the trace bound and the input bound', () => {
   it('Xt: an input of a hundred thousand nodes with twenty rules is evaluated', async () => {
     const data: Record<string, unknown> = {};
     for (let i = 0; i < 49_999; i += 1) data[`k${i}`] = i;
-    const rules = Array.from({ length: 20 }, (_, i) => makeRule({ id: `r${i}`, model: 'M' }));
+    const rules = Array.from({ length: 20 }, (_, i) => makeRule({ id: `r${i}`, model: 'm' }));
     const result = await build([]).evaluate(rules, makeInput({ data }));
     expect(result.appliedRules).toHaveLength(20);
   });
@@ -496,8 +496,8 @@ describe('X7: the trace bound and the input bound', () => {
       }),
     });
     const rules = [
-      makeRule({ id: 'a', model: 'FLAT', params: { rate: 1 } }),
-      makeRule({ id: 'b', model: 'FLAT', params: { rate: 2 } }),
+      makeRule({ id: 'a', model: 'flat', params: { rate: 1 } }),
+      makeRule({ id: 'b', model: 'flat', params: { rate: 2 } }),
     ];
     // Before the hook: 2 + 2 = 4 nodes, times 2 steps = 8. After: 16 + 2 = 18, times 2 = 36.
     const engine = build([grow], { limits: { maxTraceNodes: 20 } });

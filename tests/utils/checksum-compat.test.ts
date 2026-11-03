@@ -8,7 +8,7 @@ function sealedRule(): Rule {
   const definition = {
     id: 'vat',
     version: 1,
-    model: 'M',
+    model: 'm',
     params: { rate: 0.18 },
     priority: 100,
     effectiveFrom: new Date('2025-01-01'),
@@ -21,7 +21,7 @@ function sealedRule(): Rule {
 
 function engine(): PPEEngine {
   return new PPEEngine({
-    plugins: [new StubPlugin('test', [new StubModel('M', 42)])],
+    plugins: [new StubPlugin('test', [new StubModel('m', 42)])],
     dsls: [],
     strict: false,
   });

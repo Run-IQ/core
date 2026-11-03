@@ -1,6 +1,7 @@
 import type { DSLEvaluator } from '../types/dsl.js';
 import { copyDeclaration } from './ModelRegistry.js';
-import { isAnyViewError } from '../engine/frozenView.js';
+import { isolated } from '../engine/trust.js';
+import type { DslDescriptor } from '../types/plugin.js';
 import { callSync, readIdentity, registering } from '../engine/pluginPort.js';
 
 type Fn = (...args: never[]) => unknown;
@@ -24,6 +25,10 @@ export class DSLRegistry {
   private readonly declared = new Map<string, Declared>();
 
   register(evaluator: DSLEvaluator): void {
+    isolated(() => this.add(evaluator));
+  }
+
+  private add(evaluator: DSLEvaluator): void {
     registering(() => {
       const { name: dsl, version } = readIdentity(evaluator, 'DSL', 'dsl');
       if (this.evaluators.has(dsl)) {
@@ -51,6 +56,25 @@ export class DSLRegistry {
         compute: functionOf('compute', false),
       });
     });
+  }
+
+  /** What a plugin may know of a registered evaluator: frozen data, no object, no function. */
+  describe(dsl: string): DslDescriptor | undefined {
+    return isolated(() => {
+      const declared = this.declared.get(dsl);
+      return declared === undefined ? undefined : Object.freeze({ dsl, version: declared.version });
+    });
+  }
+
+  /** The descriptors of every registered evaluator, frozen. */
+  describeAll(): ReadonlyArray<DslDescriptor> {
+    return isolated(() =>
+      Object.freeze(
+        [...this.declared].map(([dsl, declared]) =>
+          Object.freeze({ dsl, version: declared.version }),
+        ),
+      ),
+    );
   }
 
   get(dsl: string): DSLEvaluator | undefined {
@@ -98,18 +122,18 @@ function fixEvaluator(dsl: string, evaluator: DSLEvaluator, declared: Declared):
     dsl,
     version: declared.version,
     evaluate: (expression: unknown, context: Record<string, unknown>) =>
-      callSync(declared.evaluate, evaluator, [expression, context], isAnyViewError) as boolean,
+      callSync(declared.evaluate, evaluator, [expression, context]) as boolean,
     ...(listVariables === undefined
       ? {}
       : {
           listVariables: (expression: unknown) =>
-            callSync(listVariables, evaluator, [expression], isAnyViewError) as never,
+            callSync(listVariables, evaluator, [expression]) as never,
         }),
     ...(compute === undefined
       ? {}
       : {
           compute: (expression: unknown, context: Record<string, unknown>) =>
-            callSync(compute, evaluator, [expression, context], isAnyViewError) as never,
+            callSync(compute, evaluator, [expression, context]) as never,
         }),
     ...(declared.capabilities === undefined ? {} : { capabilities: declared.capabilities }),
   });

@@ -273,26 +273,26 @@ const harness: Harness = {
   'CalculationModel.validateParams': {
     oversized: async () => {
       // Five rules whose model answers with the same 100-node text: the one budget refuses it.
-      const wordy = model('WORDY', {
+      const wordy = model('wordy', {
         validateParams: () => ({ valid: false, errors: ['y'.repeat(6400)] }),
       });
       const error = await outcome(() =>
         engine([plugin('m', { onInit: registering(wordy) })], {
           maxHookLeaves: 250,
           maxStringLength: 10_000,
-        }).evaluate(rules(5, 'WORDY'), makeInput()),
+        }).evaluate(rules(5, 'wordy'), makeInput()),
       );
       expect(error).toBeInstanceOf(EngineLimitError);
       expect(error).toMatchObject({ limit: 'maxHookLeaves', max: 250 });
     },
     forged: async () => {
       const fake = forged();
-      const throwing = model('THROW', {
+      const throwing = model('throw', {
         validateParams: () => {
           throw fake;
         },
       });
-      const getter = model('GETTER', {
+      const getter = model('getter', {
         validateParams: () => ({
           get valid(): boolean {
             throw fake;
@@ -300,8 +300,8 @@ const harness: Harness = {
         }),
       });
       for (const [name, one] of [
-        ['THROW', throwing],
-        ['GETTER', getter],
+        ['throw', throwing],
+        ['getter', getter],
       ] as const) {
         const error = await outcome(() =>
           engine([plugin('m', { onInit: registering(one) })]).evaluate(rules(1, name), makeInput()),
@@ -311,11 +311,11 @@ const harness: Harness = {
       }
     },
     hidden: async () => {
-      const holey = model('HOLEY', {
+      const holey = model('holey', {
         validateParams: () => ({ valid: true, errors: [undefined] }) as never,
       });
       const result = await engine([plugin('m', { onInit: registering(holey) })]).evaluate(
-        rules(1, 'HOLEY'),
+        rules(1, 'holey'),
         makeInput(),
       );
       expect(result.skippedRules[0]?.reason).toBe('MODEL_ERROR');
@@ -327,23 +327,23 @@ const harness: Harness = {
     oversized: async () => {
       // Ten rules whose outputs are one node each: the one budget refuses the eleventh node.
       const error = await outcome(() =>
-        engine([plugin('m', { onInit: registering(model('ONE', {})) })], {
+        engine([plugin('m', { onInit: registering(model('one', {})) })], {
           maxHookLeaves: 5,
-        }).evaluate(rules(10, 'ONE'), makeInput()),
+        }).evaluate(rules(10, 'one'), makeInput()),
       );
       expect(error).toBeInstanceOf(EngineLimitError);
       expect(error).toMatchObject({ limit: 'maxHookLeaves', max: 5 });
     },
     forged: async () => {
       const fake = forged();
-      const throwing = model('THROW', {
+      const throwing = model('throw', {
         calculate: () => {
           throw fake;
         },
       });
       const error = await outcome(() =>
         engine([plugin('m', { onInit: registering(throwing) })]).evaluate(
-          rules(1, 'THROW'),
+          rules(1, 'throw'),
           makeInput(),
         ),
       );
@@ -351,9 +351,9 @@ const harness: Harness = {
       expect(error).toBeInstanceOf(UnexpectedEngineError);
     },
     hidden: async () => {
-      const holey = model('HOLEY', { calculate: () => ({ value: [1, undefined] }) as never });
+      const holey = model('holey', { calculate: () => ({ value: [1, undefined] }) as never });
       const result = await engine([plugin('m', { onInit: registering(holey) })]).evaluate(
-        rules(1, 'HOLEY'),
+        rules(1, 'holey'),
         makeInput(),
       );
       expect(result.skippedRules[0]?.reason).toBe('OUTPUT_MISMATCH');
@@ -366,11 +366,11 @@ const harness: Harness = {
       const wordy: DSLEvaluator = { dsl: 'w', version: '1.0.0', evaluate: () => BIG as never };
       const withCondition = makeRule({
         id: 'c',
-        model: 'ONE',
+        model: 'one',
         condition: { dsl: 'w', value: {} },
       });
       const error = await outcome(() =>
-        engine([plugin('m', { onInit: registering(model('ONE', {})) })], { maxStringLength: 100 }, [
+        engine([plugin('m', { onInit: registering(model('one', {})) })], { maxStringLength: 100 }, [
           wordy,
         ]).evaluate([withCondition], makeInput()),
       );
@@ -386,8 +386,8 @@ const harness: Harness = {
           throw fake;
         },
       };
-      const rule = makeRule({ id: 'c', model: 'ONE', condition: { dsl: 't', value: {} } });
-      const result = await engine([plugin('m', { onInit: registering(model('ONE', {})) })], {}, [
+      const rule = makeRule({ id: 'c', model: 'one', condition: { dsl: 't', value: {} } });
+      const result = await engine([plugin('m', { onInit: registering(model('one', {})) })], {}, [
         throwing,
       ]).evaluate([rule], makeInput());
       expect(result.skippedRules[0]?.reason).toBe('DSL_ERROR');
@@ -398,8 +398,8 @@ const harness: Harness = {
         version: '1.0.0',
         evaluate: () => [1, undefined] as never,
       };
-      const rule = makeRule({ id: 'c', model: 'ONE', condition: { dsl: 'h', value: {} } });
-      const result = await engine([plugin('m', { onInit: registering(model('ONE', {})) })], {}, [
+      const rule = makeRule({ id: 'c', model: 'one', condition: { dsl: 'h', value: {} } });
+      const result = await engine([plugin('m', { onInit: registering(model('one', {})) })], {}, [
         holey,
       ]).evaluate([rule], makeInput());
       expect(result.skippedRules[0]?.reason).toBe('DSL_ERROR');
@@ -419,7 +419,7 @@ const harness: Harness = {
         limits: resolveLimits({ maxStringLength: 100 }),
         budget: new Budget('maxHookLeaves', 1_000_000),
       };
-      const rule = makeRule({ id: 'c', model: 'ONE', condition: { dsl: 'l', value: {} } });
+      const rule = makeRule({ id: 'c', model: 'one', condition: { dsl: 'l', value: {} } });
       const error = await outcome(() => readsOf(rule, dsl, undefined, crossing));
       expect(error).toBeInstanceOf(EngineLimitError);
       expect(error).toMatchObject({ limit: 'maxStringLength' });
@@ -434,7 +434,7 @@ const harness: Harness = {
           throw fake;
         },
       };
-      const rule = makeRule({ id: 'c', model: 'ONE', condition: { dsl: 'l', value: {} } });
+      const rule = makeRule({ id: 'c', model: 'one', condition: { dsl: 'l', value: {} } });
       const reads = readsOf(rule, dsl, undefined);
       expect(reads.problems[0]?.kind).toBe('failed');
     },
@@ -445,7 +445,7 @@ const harness: Harness = {
         evaluate: () => true,
         listVariables: () => ['/a', undefined] as never,
       };
-      const rule = makeRule({ id: 'c', model: 'ONE', condition: { dsl: 'l', value: {} } });
+      const rule = makeRule({ id: 'c', model: 'one', condition: { dsl: 'l', value: {} } });
       const reads = readsOf(rule, dsl, undefined);
       expect(reads.problems[0]?.kind).toBe('failed');
       expect(reads.problems[0]?.message).toContain('/1');
@@ -496,10 +496,10 @@ const thenables: Partial<Record<PluginCallback, () => Promise<void>>> = {
     expect(error).toBeInstanceOf(PluginHookError);
   },
   'CalculationModel.validateParams': async () => {
-    const promising = model('PROMISING', { validateParams: rejecting as never });
+    const promising = model('promising', { validateParams: rejecting as never });
     const error = await outcome(() =>
       engine([plugin('m', { onInit: registering(promising) })]).evaluate(
-        rules(1, 'PROMISING'),
+        rules(1, 'promising'),
         makeInput(),
       ),
     );
@@ -507,10 +507,10 @@ const thenables: Partial<Record<PluginCallback, () => Promise<void>>> = {
     expect((error as Error).message).toContain('returned a promise');
   },
   'CalculationModel.calculate': async () => {
-    const promising = model('PROMISING', { calculate: rejecting as never });
+    const promising = model('promising', { calculate: rejecting as never });
     const error = await outcome(() =>
       engine([plugin('m', { onInit: registering(promising) })]).evaluate(
-        rules(1, 'PROMISING'),
+        rules(1, 'promising'),
         makeInput(),
       ),
     );
@@ -519,8 +519,8 @@ const thenables: Partial<Record<PluginCallback, () => Promise<void>>> = {
   },
   'DSLEvaluator.evaluate': async () => {
     const promising: DSLEvaluator = { dsl: 'p', version: '1.0.0', evaluate: rejecting as never };
-    const rule = makeRule({ id: 'c', model: 'ONE', condition: { dsl: 'p', value: {} } });
-    const result = await engine([plugin('m', { onInit: registering(model('ONE', {})) })], {}, [
+    const rule = makeRule({ id: 'c', model: 'one', condition: { dsl: 'p', value: {} } });
+    const result = await engine([plugin('m', { onInit: registering(model('one', {})) })], {}, [
       promising,
     ]).evaluate([rule], makeInput());
     expect(result.skippedRules[0]?.reason).toBe('DSL_ERROR');
@@ -533,8 +533,8 @@ const thenables: Partial<Record<PluginCallback, () => Promise<void>>> = {
       evaluate: () => true,
       listVariables: rejecting as never,
     };
-    const rule = makeRule({ id: 'c', model: 'ONE', condition: { dsl: 'p', value: {} } });
-    const result = await engine([plugin('m', { onInit: registering(model('ONE', {})) })], {}, [
+    const rule = makeRule({ id: 'c', model: 'one', condition: { dsl: 'p', value: {} } });
+    const result = await engine([plugin('m', { onInit: registering(model('one', {})) })], {}, [
       promising,
     ]).evaluate([rule], makeInput());
     expect(result.diagnostics.map((d) => d.message).join(' ')).toContain('returned a promise');
@@ -641,7 +641,7 @@ describe('the exported readsOf, asked of a model (the engine does not ask)', () 
     limits: resolveLimits({ maxStringLength: 100 }),
     budget: new Budget('maxHookLeaves', 1_000_000),
   });
-  const rule = makeRule({ id: 'a', model: 'X' });
+  const rule = makeRule({ id: 'a', model: 'x' });
 
   it('an oversized pointer is the named limit', () => {
     const long = model('LONG', { listVariables: () => ['/' + BIG] });
@@ -650,7 +650,7 @@ describe('the exported readsOf, asked of a model (the engine does not ask)', () 
 
   it('a throw is a problem naming it; the forged error is not received', () => {
     const fake = forged();
-    const throwing = model('THROW', {
+    const throwing = model('throw', {
       listVariables: () => {
         throw fake;
       },
@@ -660,7 +660,7 @@ describe('the exported readsOf, asked of a model (the engine does not ask)', () 
   });
 
   it('an undefined hidden in the list is a problem with its pointer', () => {
-    const holey = model('HOLEY', { listVariables: () => ['/a', undefined] as never });
+    const holey = model('holey', { listVariables: () => ['/a', undefined] as never });
     const reads = readsOf(rule, undefined, holey);
     expect(reads.problems[0]?.kind).toBe('failed');
     expect(reads.problems[0]?.message).toContain('/1');

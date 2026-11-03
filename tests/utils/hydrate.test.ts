@@ -7,7 +7,7 @@ function validRaw(): Record<string, unknown> {
   return {
     id: 'r1',
     version: 1,
-    model: 'FLAT_RATE',
+    model: 'flat_rate',
     params: {},
     priority: 100,
     effectiveFrom: '2024-01-01T00:00:00.000Z',
@@ -222,7 +222,7 @@ describe('hydrateRule', () => {
   it('throws for priority when id and model are valid but priority is missing', () => {
     const raw: Record<string, unknown> = {
       id: 'valid-id',
-      model: 'FLAT_RATE',
+      model: 'flat_rate',
       params: {},
       effectiveFrom: '2024-01-01T00:00:00.000Z',
       effectiveUntil: null,
@@ -235,7 +235,7 @@ describe('hydrateRule', () => {
   it('throws for version when id, model, and priority are valid but version is missing', () => {
     const raw: Record<string, unknown> = {
       id: 'valid-id',
-      model: 'FLAT_RATE',
+      model: 'flat_rate',
       priority: 100,
       params: {},
       effectiveFrom: '2024-01-01T00:00:00.000Z',
@@ -249,7 +249,7 @@ describe('hydrateRule', () => {
   it('throws for checksum when all other required fields are valid but checksum is missing', () => {
     const raw: Record<string, unknown> = {
       id: 'valid-id',
-      model: 'FLAT_RATE',
+      model: 'flat_rate',
       priority: 100,
       version: 1,
       params: {},
@@ -278,7 +278,7 @@ describe('hydrateRules', () => {
       {
         id: 'r1',
         version: 1,
-        model: 'A',
+        model: 'a',
         params: {},
         priority: 100,
         effectiveFrom: '2024-01-01T00:00:00.000Z',
@@ -289,7 +289,7 @@ describe('hydrateRules', () => {
       {
         id: 'r2',
         version: 1,
-        model: 'B',
+        model: 'b',
         params: {},
         priority: 100,
         effectiveFrom: '2024-06-01T00:00:00.000Z',
@@ -315,7 +315,7 @@ describe('hydrateRules', () => {
       {
         id: 'r1',
         version: 1,
-        model: 'A',
+        model: 'a',
         params: {},
         priority: 100,
         effectiveFrom: '2024-01-01T00:00:00.000Z',
@@ -326,7 +326,7 @@ describe('hydrateRules', () => {
       {
         // missing id → should throw
         version: 1,
-        model: 'B',
+        model: 'b',
         params: {},
         priority: 100,
         effectiveFrom: '2024-06-01T00:00:00.000Z',

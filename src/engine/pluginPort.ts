@@ -6,7 +6,7 @@
 
 import { types } from 'node:util';
 import { markEngineError } from '../errors/engineError.js';
-import { isRaised, raised } from './trust.js';
+import { raised } from './trust.js';
 import { clipText } from '../utils/weight.js';
 
 let readers = 0;
@@ -56,6 +56,11 @@ const MARKER = '... [clipped]';
 /** `text` cut to `max` characters on a code point, with the marker, and well-formed. */
 const clipped = (text: string, max: number): string => clipText(text, max, MARKER);
 
+/** A text that came from plugin code, as the record may hold it: 1 024 characters, well-formed. */
+export function clipFault(text: string): string {
+  return clipped(text, 1024);
+}
+
 /** The text of each fault the port made. Not a property of the error: nothing reads it back from one. */
 const FAULT_TEXT = new WeakMap<object, PluginFault>();
 
@@ -87,7 +92,7 @@ export function trustedFault(value: unknown): PluginFault | undefined {
 
 /** True only for a fault the engine raised in this call (never by class or by a field). */
 export function isPluginFault(value: unknown): value is PluginFaultError {
-  return isRaised(value) && FAULT_TEXT.has(value as object);
+  return typeof value === 'object' && value !== null && FAULT_TEXT.has(value);
 }
 
 function property(value: object, key: string, max: number): string | undefined {
@@ -139,7 +144,7 @@ markEngineError(BoundaryError);
 
 /** A refusal raised by the engine, in this call. */
 export function refusal(message: string): BoundaryError {
-  return raised(new BoundaryError(message));
+  return Object.freeze(raised(new BoundaryError(message)));
 }
 
 /** A fault that is not a throw: the contract of a callback was broken. */
@@ -190,22 +195,16 @@ export function neutralize(value: unknown): void {
 
 /**
  * Calls a function whose contract is synchronous. A throw is a plugin fault; so is a thenable
- * (`returned a promise`), which is never awaited and whose rejection is handled. `keep` names the
- * errors the engine raised itself during the call (a refused write into a view): they pass
- * through as they are.
+ * (`returned a promise`), which is never awaited and whose rejection is handled. Whatever it
+ * throws, an engine error included, is a fault: the engine tells a refused write by the slot of
+ * the view scope, never by what was thrown.
  */
-export function callSync(
-  fn: Fn,
-  thisArg: unknown,
-  args: unknown[],
-  keep?: (error: unknown) => boolean,
-): unknown {
+export function callSync(fn: Fn, thisArg: unknown, args: unknown[]): unknown {
   return reading(() => {
     let result: unknown;
     try {
       result = Reflect.apply(fn, thisArg, args);
     } catch (error) {
-      if (keep?.(error) === true) throw error;
       throw faultFrom(error);
     }
     let promising: boolean;
@@ -271,12 +270,11 @@ export function callAsync(fn: Fn, thisArg: unknown, args: unknown[]): Promise<{ 
  */
 export const NAME_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
 /**
- * A name the engine will keep for a model: the rules of a rule pack name it, in the case the pack
- * uses (`FLAT_RATE`); the one reserved name of spec (`@run-iq/exception`) is allowed.
+ * A name the engine will keep for a model: an optional scope `@scope/`, then the name of a plugin,
+ * in lower case only (`flat-rate`, `@run-iq/exception`).
  */
-export const MODEL_NAME_PATTERN = /^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$/;
-/** The reserved name of the model of an exception (`EXCEPTION_MODEL` of `@run-iq/spec`). */
-export const RESERVED_MODEL_NAME = '@run-iq/exception';
+export const MODEL_NAME_PATTERN =
+  /^(?:@[a-z0-9]+(?:[._-][a-z0-9]+)*\/)?[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
 /** The official SemVer 2.0.0 expression. */
 export const VERSION_PATTERN =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
@@ -297,9 +295,7 @@ export function readIdentity(
   const fits =
     typeof name === 'string' &&
     name.length <= 128 &&
-    (kind === 'model'
-      ? name === RESERVED_MODEL_NAME || MODEL_NAME_PATTERN.test(name)
-      : NAME_PATTERN.test(name));
+    (kind === 'model' ? MODEL_NAME_PATTERN.test(name) : NAME_PATTERN.test(name));
   if (!fits) {
     throw new TypeError(
       kind === 'model'

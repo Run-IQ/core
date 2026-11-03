@@ -33,7 +33,7 @@ afterEach(() => {
 });
 
 const FLAT: CalculationModel = {
-  name: 'FLAT',
+  name: 'flat',
   version: '1.0.0',
   validateParams: (params) =>
     typeof (params as { rate?: unknown }).rate === 'number'
@@ -46,7 +46,7 @@ const host: PPEPlugin = {
   version: '1.0.0',
   onInit(context): void {
     context.modelRegistry.register(FLAT);
-    context.modelRegistry.register(new StubModel('M', 10));
+    context.modelRegistry.register(new StubModel('m', 10));
   },
 };
 const pluginWith = (name: string, hooks: Partial<PPEPlugin>): PPEPlugin => ({
@@ -70,7 +70,7 @@ function build(
     ...config,
   });
 }
-const tax = (rate = 100, id = 'tax'): Rule => makeRule({ id, model: 'FLAT', params: { rate } });
+const tax = (rate = 100, id = 'tax'): Rule => makeRule({ id, model: 'flat', params: { rate } });
 async function failure(engine: PPEEngine, rules: unknown, input?: unknown): Promise<unknown> {
   return engine.evaluate(rules as Rule[], (input ?? makeInput()) as EvaluationInput).then(
     () => undefined,
@@ -87,7 +87,7 @@ describe('Z1: an engine error a plugin built is a plugin fault', () => {
   });
   const conditioned = makeRule({
     id: 'c',
-    model: 'FLAT',
+    model: 'flat',
     params: { rate: 1 },
     condition: { dsl: 'forgedsl', value: {} },
   });
@@ -104,14 +104,14 @@ describe('Z1: an engine error a plugin built is a plugin fault', () => {
   it('Za3: validateParams throwing an EngineLimitError of the budget fails with an engine error', async () => {
     const fake = new EngineLimitError('maxHookLeaves', 1, 2);
     const evil: CalculationModel = {
-      name: 'EVIL',
+      name: 'evil',
       version: '1.0.0',
       validateParams: () => {
         throw fake;
       },
       calculate: () => 1,
     };
-    const error = await failure(build([regModel(evil)]), [makeRule({ id: 'e', model: 'EVIL' })]);
+    const error = await failure(build([regModel(evil)]), [makeRule({ id: 'e', model: 'evil' })]);
     expect(error).not.toBe(fake);
     expect(error).toBeInstanceOf(UnexpectedEngineError);
     expect((error as UnexpectedEngineError).cause).toMatchObject({ name: 'EngineLimitError' });
@@ -119,7 +119,7 @@ describe('Z1: an engine error a plugin built is a plugin fault', () => {
 
   it('Za4: validateParams throwing another EngineLimitError is the model own throw: the evaluation fails', async () => {
     const evil: CalculationModel = {
-      name: 'EVIL',
+      name: 'evil',
       version: '1.0.0',
       validateParams: () => {
         throw new EngineLimitError('maxRules', 1, 2);
@@ -127,7 +127,7 @@ describe('Z1: an engine error a plugin built is a plugin fault', () => {
       calculate: () => 1,
     };
     const error = await failure(build([regModel(evil)]), [
-      makeRule({ id: 'e', model: 'EVIL' }),
+      makeRule({ id: 'e', model: 'evil' }),
       tax(),
     ]);
     expect(error).toBeInstanceOf(UnexpectedEngineError);
@@ -152,7 +152,7 @@ describe('Z1: an engine error a plugin built is a plugin fault', () => {
       conditioned,
       makeRule({
         id: 'h',
-        model: 'FLAT',
+        model: 'flat',
         params: { rate: 1 },
         condition: { dsl: 'hugedsl', value: {} },
       }),
@@ -174,7 +174,7 @@ describe('Z1: an engine error a plugin built is a plugin fault', () => {
     const many = Array.from({ length: 6 }, (_, i) =>
       makeRule({
         id: `c${i}`,
-        model: 'FLAT',
+        model: 'flat',
         params: { rate: 1 },
         condition: { dsl: 'forgedsl', value: {} },
       }),
@@ -262,8 +262,8 @@ describe('Z4: the identity of a plugin, a model and a DSL is read once, at regis
   });
 
   it('a model version that is an object is refused', () => {
-    const model = { ...FLAT, name: 'OBJ', version: {} } as unknown as CalculationModel;
-    expect(() => build([regModel(model)])).toThrow(/model OBJ: version/);
+    const model = { ...FLAT, name: 'obj', version: {} } as unknown as CalculationModel;
+    expect(() => build([regModel(model)])).toThrow(/model obj: version/);
   });
 
   it('Zc5: a name is read once: the attribution is the plugin own first answer, whatever it answers later', async () => {
@@ -442,11 +442,11 @@ describe('Z8: promises', () => {
 
   it('Ze2, Ze3, Ze4: validateParams, calculate and onError that reject are handled', async () => {
     const reject = (): Promise<never> => Promise.reject(new Error('late'));
-    const m1: CalculationModel = { ...FLAT, name: 'V1', validateParams: reject as never };
-    const m2: CalculationModel = { ...FLAT, name: 'C1', calculate: reject as never };
+    const m1: CalculationModel = { ...FLAT, name: 'v1', validateParams: reject as never };
+    const m2: CalculationModel = { ...FLAT, name: 'c1', calculate: reject as never };
     for (const [model, id] of [
-      [m1, 'V1'],
-      [m2, 'C1'],
+      [m1, 'v1'],
+      [m2, 'c1'],
     ] as const) {
       const failing = pluginWith('failing', {
         onError: reject as never,
@@ -493,13 +493,13 @@ describe('Z10: survivors and the rest of the table', () => {
   it('R11: errors that are not strings make the answer malformed', async () => {
     for (const errors of [[5], [{}], [null]]) {
       const evil: CalculationModel = {
-        name: 'EVIL',
+        name: 'evil',
         version: '1.0.0',
         validateParams: () => ({ valid: false, errors }) as never,
         calculate: () => 1,
       };
       const result = await build([regModel(evil)]).evaluate(
-        [makeRule({ id: 'e', model: 'EVIL' })],
+        [makeRule({ id: 'e', model: 'evil' })],
         makeInput({ requestId: `r-${JSON.stringify(errors)}` }),
       );
       expect(result.skippedRules[0]?.reason, JSON.stringify(errors)).toBe('MODEL_ERROR');
@@ -511,7 +511,7 @@ describe('Z10: survivors and the rest of the table', () => {
     try {
       const big = makeRule({
         id: 'big',
-        model: 'FLAT',
+        model: 'flat',
         params: { rate: 1, text: 'x'.repeat(2000) },
       });
       const error = await failure(
@@ -535,7 +535,7 @@ describe('Z10: survivors and the rest of the table', () => {
     const many = Array.from({ length: 6 }, (_, i) =>
       makeRule({
         id: `l${i}`,
-        model: 'FLAT',
+        model: 'flat',
         params: { rate: 1 },
         condition: { dsl: 'ld', value: {} },
       }),
@@ -560,7 +560,7 @@ describe('Z10: survivors and the rest of the table', () => {
       [
         makeRule({
           id: 'w',
-          model: 'FLAT',
+          model: 'flat',
           params: { rate: 1 },
           condition: { dsl: 'wordy', value: {} },
         }),

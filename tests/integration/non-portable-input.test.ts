@@ -32,7 +32,7 @@ function setup() {
   const adapter = new InMemorySnapshotAdapter();
   const beforeEvaluate = vi.fn((input, rules) => ({ input, rules }));
   const afterEvaluate = vi.fn((_input, result) => result);
-  const model = new StubModel('M', 10);
+  const model = new StubModel('m', 10);
   const calculate = vi.spyOn(model, 'calculate');
   const plugin: PPEPlugin = {
     name: 'p',
@@ -53,7 +53,7 @@ async function refused(
   meta: Record<string, unknown> = {},
 ): Promise<ValidationError> {
   const input = makeInput({ data, meta: { tenantId: 't', ...meta } as never });
-  const error = await s.engine.evaluate([makeRule({ id: 'r1', model: 'M' })], input).then(
+  const error = await s.engine.evaluate([makeRule({ id: 'r1', model: 'm' })], input).then(
     () => undefined,
     (e: unknown) => e,
   );

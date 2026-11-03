@@ -17,7 +17,7 @@ import { makeRule, makeInput, StubModel, InMemorySnapshotAdapter } from '../help
 // and what it records is what it evaluated.
 
 const FLAT = (rate: number): CalculationModel => ({
-  name: 'FLAT',
+  name: 'flat',
   version: '1.0.0',
   validateParams: (params) =>
     typeof (params as { rate?: unknown }).rate === 'number'
@@ -31,7 +31,7 @@ const host: PPEPlugin = {
   version: '1.0.0',
   onInit(context: PluginContext): void {
     context.modelRegistry.register(FLAT(0));
-    context.modelRegistry.register(new StubModel('M', 10));
+    context.modelRegistry.register(new StubModel('m', 10));
   },
 };
 
@@ -60,7 +60,7 @@ function build(
   return { engine, adapter };
 }
 
-const tax = (rate = 100): Rule => makeRule({ id: 'tax', model: 'FLAT', params: { rate } });
+const tax = (rate = 100): Rule => makeRule({ id: 'tax', model: 'flat', params: { rate } });
 
 async function failure(
   built: Built,
@@ -140,7 +140,7 @@ describe('N1: a hook cannot rewrite a given rule in place', () => {
   });
 
   it('the rules a hook returned are frozen for the next hook, which cannot rewrite them in place', async () => {
-    const added = makeRule({ id: 'extra', model: 'FLAT', params: { rate: 5 } });
+    const added = makeRule({ id: 'extra', model: 'flat', params: { rate: 5 } });
     const built = build([
       pluginWith('first', {
         beforeEvaluate: (input, rules) => ({ input, rules: [...rules, added] }),
@@ -358,7 +358,7 @@ describe('N5: the evaluation copy is frozen and private', () => {
     };
     const built = build([], {}, [writer]);
     const result = await built.engine.evaluate(
-      [tax(), makeRule({ id: 'bad', model: 'M', condition: { dsl: 'writer', value: null } })],
+      [tax(), makeRule({ id: 'bad', model: 'm', condition: { dsl: 'writer', value: null } })],
       makeInput({ data: { nest: { v: 1 } } }),
     );
     expect(result.appliedRules.map((r) => r.id)).toEqual(['tax']);
@@ -370,7 +370,7 @@ describe('N5: the evaluation copy is frozen and private', () => {
   it('a model writing into the input data cannot change what the next model reads', async () => {
     const seen: unknown[] = [];
     const writer: CalculationModel = {
-      name: 'W',
+      name: 'w',
       version: '1.0.0',
       validateParams: () => ({ valid: true }),
       calculate: (input) => {
@@ -383,7 +383,7 @@ describe('N5: the evaluation copy is frozen and private', () => {
       },
     };
     const reader: CalculationModel = {
-      name: 'R',
+      name: 'r',
       version: '1.0.0',
       validateParams: () => ({ valid: true }),
       calculate: (input) => {
@@ -400,8 +400,8 @@ describe('N5: the evaluation copy is frozen and private', () => {
     const built = build([reg]);
     await built.engine.evaluate(
       [
-        makeRule({ id: 'a', model: 'W', priority: 200 }),
-        makeRule({ id: 'b', model: 'R', priority: 100 }),
+        makeRule({ id: 'a', model: 'w', priority: 200 }),
+        makeRule({ id: 'b', model: 'r', priority: 100 }),
       ],
       makeInput({ data: { nest: { v: 1 } } }),
     );
@@ -416,7 +416,7 @@ describe('N6: maxRules bounds the rules a hook returns', () => {
         pluginWith('h', {
           beforeEvaluate: (input, rules) => ({
             input,
-            rules: [...rules, ...[1, 2, 3, 4, 5].map((i) => makeRule({ id: `x${i}`, model: 'M' }))],
+            rules: [...rules, ...[1, 2, 3, 4, 5].map((i) => makeRule({ id: `x${i}`, model: 'm' }))],
           }),
         }),
       ],
@@ -434,7 +434,7 @@ describe('N6: maxRules bounds the rules a hook returns', () => {
         pluginWith('h', {
           beforeEvaluate: (input, rules) => ({
             input,
-            rules: [...rules, makeRule({ id: 'x', model: 'M' })],
+            rules: [...rules, makeRule({ id: 'x', model: 'm' })],
           }),
         }),
       ],
@@ -446,13 +446,13 @@ describe('N6: maxRules bounds the rules a hook returns', () => {
 
 describe('N7: a rule a hook adds is validated like a source rule', () => {
   it('params its model refuses', async () => {
-    const bad = makeRule({ id: 'extra', model: 'FLAT', params: { rate: 'x' } });
+    const bad = makeRule({ id: 'extra', model: 'flat', params: { rate: 'x' } });
     const built = build([
       pluginWith('h', { beforeEvaluate: (input, rules) => ({ input, rules: [...rules, bad] }) }),
     ]);
     await expectHookFailure(
       await failure(built),
-      'plugin h added rule extra@1: Invalid params for rule extra@1 (model FLAT): rate must be a number',
+      'plugin h added rule extra@1: Invalid params for rule extra@1 (model flat): rate must be a number',
     );
   });
 });
@@ -471,7 +471,7 @@ describe('N8 and N9: the rules and the skips of a hook are the given ones', () =
   });
 
   it('a skip of a rule it was never given', async () => {
-    const ghost = makeRule({ id: 'ghost', model: 'M' });
+    const ghost = makeRule({ id: 'ghost', model: 'm' });
     const built = build([
       pluginWith('h', {
         beforeEvaluate: (input, rules) => ({

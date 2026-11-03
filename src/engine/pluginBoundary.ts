@@ -16,7 +16,7 @@ import { isPlainPrototype } from '../utils/plain.js';
 import { ViewScope } from './frozenView.js';
 import { clip } from '../utils/frozenCopy.js';
 import { faultFrom, reading, refusal } from './pluginPort.js';
-import { isRaised, raised } from './trust.js';
+import { ownRead, raised } from './trust.js';
 import { CHARS_PER_NODE, hasLoneSurrogate, serializedLength } from '../utils/weight.js';
 
 // The plugin trust boundary, in one place. The engine owns its state; a plugin is handed views of
@@ -77,14 +77,14 @@ markEngineError(ReadFailure);
 
 /** A failed read, raised by the engine in this call, with what the properties threw. */
 function readFailure(message: string, causes: readonly unknown[]): ReadFailure {
-  const failure = raised(new ReadFailure(message));
+  const failure = Object.freeze(raised(new ReadFailure(message)));
   CAUSES.set(failure, causes);
   return failure;
 }
 
 /** True for a failed read the engine raised in this call. */
 export function isReadFailure(value: unknown): value is ReadFailure {
-  return value instanceof ReadFailure && isRaised(value);
+  return value instanceof ReadFailure;
 }
 
 /** What the properties threw while the failed value was read, in order (empty if nothing threw). */
@@ -109,16 +109,13 @@ export function charsOfRule(rule: object): number {
  * is thrown while a plugin's getter or trap runs inside it is a fault of the plugin, held as text.
  */
 export function guarded<T>(fn: () => T): T {
-  return reading(() => {
-    try {
-      return fn();
-    } catch (error) {
-      // What the engine raised itself in this call passes; anything else, a forged engine error
-      // included, is a fault of the plugin whose getter or trap threw it.
-      if (isRaised(error)) throw error;
-      throw faultFrom(error);
-    }
-  });
+  // What the walker raises itself in this read passes; anything else, an engine error a plugin
+  // threw again included, is a fault of the plugin whose getter or trap threw it.
+  return reading(() =>
+    ownRead(fn, (thrown) => {
+      throw faultFrom(thrown);
+    }),
+  );
 }
 
 /** The leaves read from one list or one return, against one declared limit. */
@@ -617,12 +614,12 @@ markEngineError(MalformedResult);
 
 /** A malformed result, raised by the engine in this call. */
 function malformed(message: string): MalformedResult {
-  return raised(new MalformedResult(message));
+  return Object.freeze(raised(new MalformedResult(message)));
 }
 
 /** True for a malformed result the engine raised in this call. */
 export function isMalformed(value: unknown): value is MalformedResult {
-  return value instanceof MalformedResult && isRaised(value);
+  return value instanceof MalformedResult;
 }
 
 /** What the engine took from a `validateParams`. */
@@ -674,10 +671,7 @@ export function askValidateParams(
     }
     if (isMalformed(error)) return errorVerdict(crossing, clip(error.message));
     const causes = isReadFailure(error) ? causesOf(error) : [error];
-    const written = causes.find((cause) => scope.isWriteError(cause));
-    if (written !== undefined) {
-      return errorVerdict(crossing, clip((written as Error).message));
-    }
+    if (scope.wrote !== undefined) return errorVerdict(crossing, clip(scope.wrote));
     if (isReadFailure(error) && causes.length === 0) {
       return errorVerdict(
         crossing,

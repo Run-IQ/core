@@ -18,7 +18,7 @@ import { makeRule, makeInput, StubModel, InMemorySnapshotAdapter } from '../help
 // Round 5 of the 9L audit (T1 to T15 and the survivors of round 4).
 
 const FLAT: CalculationModel = {
-  name: 'FLAT',
+  name: 'flat',
   version: '1.0.0',
   validateParams: (params) =>
     typeof (params as { rate?: unknown }).rate === 'number'
@@ -31,7 +31,7 @@ const host: PPEPlugin = {
   version: '1.0.0',
   onInit(context: PluginContext): void {
     context.modelRegistry.register(FLAT);
-    context.modelRegistry.register(new StubModel('M', 10));
+    context.modelRegistry.register(new StubModel('m', 10));
   },
 };
 const pluginWith = (name: string, hooks: Partial<PPEPlugin>): PPEPlugin => ({
@@ -68,7 +68,7 @@ function build(
   });
   return { engine, saved };
 }
-const tax = (rate = 100): Rule => makeRule({ id: 'tax', model: 'FLAT', params: { rate } });
+const tax = (rate = 100): Rule => makeRule({ id: 'tax', model: 'flat', params: { rate } });
 async function failure(
   built: Built,
   rules: unknown,
@@ -119,7 +119,7 @@ describe('T1: what a plugin receives as an error is a deep copy', () => {
     const adder = pluginWith('adder', {
       beforeEvaluate: (input, rules) => ({
         input,
-        rules: [...rules, ...[1, 2, 3].map((i) => makeRule({ id: `x${i}`, model: 'M' }))],
+        rules: [...rules, ...[1, 2, 3].map((i) => makeRule({ id: `x${i}`, model: 'm' }))],
       }),
     });
     const error = (await failure(build([adder, meddler], { limits: { maxRules: 3 } }), [
@@ -144,7 +144,7 @@ describe('T3: ownership belongs to one evaluation', () => {
       [
         makeRule({
           id: 'big',
-          model: 'FLAT',
+          model: 'flat',
           params: { rate: 1, pad: new Array<number>(5000).fill(1) },
         }),
       ],
@@ -161,7 +161,7 @@ describe('T3: ownership belongs to one evaluation', () => {
       [
         makeRule({
           id: 'big',
-          model: 'FLAT',
+          model: 'flat',
           params: { rate: 1, pad: new Array<number>(5000).fill(1) },
         }),
       ],
@@ -173,47 +173,54 @@ describe('T3: ownership belongs to one evaluation', () => {
 });
 
 describe('T4: the models an evaluation runs are fixed with their functions', () => {
-  it("S7a: a plugin replacing another plugin's model method during an evaluation changes nothing", async () => {
-    let context!: PluginContext;
+  it("S7a: replacing a registered model's method during an evaluation changes nothing", async () => {
     const own: CalculationModel = {
-      name: 'OWN',
+      name: 'own',
       version: '1.0.0',
       validateParams: () => ({ valid: true }),
       calculate: () => 1,
     };
     const built = build([
-      pluginWith('grab', { onInit: (c) => void (context = c) }),
       regModel('a', own),
       pluginWith('b', {
         beforeEvaluate: (input, rules) => {
-          (context.modelRegistry.get('OWN') as unknown as { calculate: () => number }).calculate =
-            () => 424242;
+          (own as unknown as { calculate: () => number }).calculate = () => 424242;
           return { input, rules };
         },
       }),
     ]);
-    const result = await built.engine.evaluate([makeRule({ id: 'o', model: 'OWN' })], makeInput());
+    const result = await built.engine.evaluate([makeRule({ id: 'o', model: 'own' })], makeInput());
     expect(result.value).toBe(1);
   });
 
-  it('N30, N43: getAll() of both registries is a copy', () => {
+  it('AD5: the registries tell a plugin descriptors: frozen data, no object and no function', () => {
     let context!: PluginContext;
-    build([pluginWith('grab', { onInit: (c) => void (context = c) })]);
-    (context.modelRegistry.getAll() as Map<string, CalculationModel>).set('X', FLAT);
-    (context.dslRegistry.getAll() as Map<string, DSLEvaluator>).set('x', {
-      dsl: 'x',
+    const own: CalculationModel = {
+      name: 'own',
       version: '1.0.0',
-      evaluate: () => true,
-    });
-    expect(context.modelRegistry.has('X')).toBe(false);
-    expect(context.dslRegistry.has('x')).toBe(false);
+      validateParams: () => ({ valid: true }),
+      calculate: () => 1,
+    };
+    build([pluginWith('grab', { onInit: (c) => void (context = c) }), regModel('a', own)]);
+    const one = context.modelRegistry.get('own');
+    expect(one).toEqual({ name: 'own', version: '1.0.0' });
+    expect(Object.isFrozen(one)).toBe(true);
+    const all = context.modelRegistry.getAll();
+    expect(Object.isFrozen(all)).toBe(true);
+    expect(all.map((m) => m.name)).toContain('own');
+    for (const model of all) {
+      expect(Object.isFrozen(model)).toBe(true);
+      for (const value of Object.values(model)) expect(typeof value).not.toBe('function');
+    }
+    expect(() => (all as unknown as unknown[]).push({})).toThrow(TypeError);
+    expect(context.modelRegistry.has('x')).toBe(false);
   });
 });
 
 describe('T5, T6, T7: the views', () => {
   it('S5x: a validateParams write in the exception-substitution path excludes the target', async () => {
     const vp: CalculationModel = {
-      name: 'VP',
+      name: 'vp',
       version: '1.0.0',
       validateParams: (params) => {
         // Valid as given; it writes only once an exception has substituted `y: 1`.
@@ -230,7 +237,7 @@ describe('T5, T6, T7: the views', () => {
       exceptions: [{ kind: 'substitute', targets: { ids: ['vp'] }, params: { y: 1 } }],
     } as never);
     const result = await built.engine.evaluate(
-      [makeRule({ id: 'vp', model: 'VP', params: { y: 0 } }), substitute],
+      [makeRule({ id: 'vp', model: 'vp', params: { y: 0 } }), substitute],
       makeInput(),
     );
     expect(result.skippedRules.find((s) => s.rule.id === 'vp')?.reason).toBe('MODEL_ERROR');
@@ -238,7 +245,7 @@ describe('T5, T6, T7: the views', () => {
 
   it('T6: Object.freeze and preventExtensions on a view are not writes', async () => {
     const freezer: CalculationModel = {
-      name: 'FRZ',
+      name: 'frz',
       version: '1.0.0',
       validateParams: () => ({ valid: true }),
       calculate: (_input, _rule, params) => {
@@ -249,7 +256,7 @@ describe('T5, T6, T7: the views', () => {
     };
     const built = build([regModel('reg', freezer)]);
     const result = await built.engine.evaluate(
-      [makeRule({ id: 'f', model: 'FRZ', params: { rate: 4 } })],
+      [makeRule({ id: 'f', model: 'frz', params: { rate: 4 } })],
       makeInput(),
     );
     expect(result.value).toBe(4);
@@ -257,7 +264,7 @@ describe('T5, T6, T7: the views', () => {
 
   it('N18: setPrototypeOf on a view is a write', async () => {
     const proto: CalculationModel = {
-      name: 'PRO',
+      name: 'pro',
       version: '1.0.0',
       validateParams: () => ({ valid: true }),
       calculate: (_input, _rule, params) => {
@@ -266,13 +273,13 @@ describe('T5, T6, T7: the views', () => {
       },
     };
     const built = build([regModel('reg', proto)]);
-    const result = await built.engine.evaluate([makeRule({ id: 'p', model: 'PRO' })], makeInput());
+    const result = await built.engine.evaluate([makeRule({ id: 'p', model: 'pro' })], makeInput());
     expect(result.skippedRules[0]).toMatchObject({ reason: 'MODEL_ERROR' });
   });
 
   it('T7: a model throwing a forged FrozenViewWriteError fails the evaluation', async () => {
     const forger: CalculationModel = {
-      name: 'FOR',
+      name: 'for',
       version: '1.0.0',
       validateParams: () => ({ valid: true }),
       calculate: () => {
@@ -280,7 +287,7 @@ describe('T5, T6, T7: the views', () => {
       },
     };
     const built = build([regModel('reg', forger)]);
-    const error = await failure(built, [makeRule({ id: 'f', model: 'FOR' })]);
+    const error = await failure(built, [makeRule({ id: 'f', model: 'for' })]);
     expect(error).toBeInstanceOf(UnexpectedEngineError);
     expect((error as { cause: unknown }).cause).toMatchObject({ name: 'FrozenViewWriteError' });
   });
@@ -364,7 +371,7 @@ describe('T14: a model output that cannot be copied excludes that rule', () => {
   it('S1t: a cyclic output', async () => {
     const OBJ = { type: 'object', combine: 'highestPriority' } as const;
     const cyclic: CalculationModel = {
-      name: 'CYC',
+      name: 'cyc',
       version: '1.0.0',
       output: OBJ,
       validateParams: () => ({ valid: true }),
@@ -376,7 +383,7 @@ describe('T14: a model output that cannot be copied excludes that rule', () => {
     };
     const built = build([regModel('reg', cyclic)]);
     const result = await built.engine.evaluate(
-      [makeRule({ id: 'c', model: 'CYC', output: 'thing' })],
+      [makeRule({ id: 'c', model: 'cyc', output: 'thing' })],
       makeInput(),
     );
     expect(result.skippedRules[0]).toMatchObject({ reason: 'OUTPUT_MISMATCH' });
@@ -469,15 +476,12 @@ describe('more survivors of round 5', () => {
   });
 
   it("S7a for a DSL: replacing an evaluator's method during an evaluation changes nothing", async () => {
-    let context!: PluginContext;
     const dsl: DSLEvaluator = { dsl: 'slow', version: '1.0.0', evaluate: () => true };
     const built = build(
       [
-        pluginWith('grab', { onInit: (c) => void (context = c) }),
         pluginWith('b', {
           beforeEvaluate: (input, rules) => {
-            (context.dslRegistry.get('slow') as unknown as { evaluate: () => boolean }).evaluate =
-              () => false;
+            (dsl as unknown as { evaluate: () => boolean }).evaluate = () => false;
             return { input, rules };
           },
         }),
@@ -486,7 +490,7 @@ describe('more survivors of round 5', () => {
       [dsl],
     );
     const result = await built.engine.evaluate(
-      [makeRule({ id: 'd', model: 'M', condition: { dsl: 'slow', value: null } })],
+      [makeRule({ id: 'd', model: 'm', condition: { dsl: 'slow', value: null } })],
       makeInput(),
     );
     expect(result.appliedRules.map((r) => r.id)).toEqual(['d']);

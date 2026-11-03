@@ -1,4 +1,5 @@
 import { ViewScope } from './frozenView.js';
+import { clipFault } from './pluginPort.js';
 import type { Rule } from '../types/rule.js';
 import type { EvaluationInput } from '../types/input.js';
 import type { Diagnostic } from '../types/diagnostic.js';
@@ -242,8 +243,8 @@ export class RuleFilter {
         if (isMissing(scope.context, pointer)) missing.add(pointer);
       }
 
+      const views = new ViewScope();
       try {
-        const views = new ViewScope();
         const { answer: result } = await this.sandbox.runDSL(
           evaluator,
           views.trapped(rule.condition.value),
@@ -256,8 +257,12 @@ export class RuleFilter {
       } catch (error) {
         if (isRaisedLimit(error)) throw error;
         const cause = error instanceof DSLEvaluationError ? error.originalError : error;
-        // The port has already cut the text of a fault of the plugin.
-        const detail = cause instanceof Error ? cause.message : String(cause);
+        // The text of a fault is cut on a code point here too: a verdict that cannot be read gives
+        // a failure that joins the reason of every property, and none of it is longer than this.
+        // A refused write into a view is told by the slot of this call, not by what was thrown.
+        const detail = clipFault(
+          views.wrote ?? (cause instanceof Error ? cause.message : String(cause)),
+        );
         // The text of a plugin's fault is in the record: it is weighed like the rest.
         this.crossing.budget.addText(detail);
         return { reason: 'DSL_ERROR', detail };

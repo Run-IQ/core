@@ -28,8 +28,8 @@ function pipelineWith(...models: CalculationModel<OutputValue>[]): ExecutionPipe
 
 describe('ExecutionPipeline', () => {
   it('executes rules without output into value, a number combined by sum', () => {
-    const pipeline = pipelineWith(new StubModel('M1', 100), new StubModel('M2', 200));
-    const rules = [makeRule({ id: 'r1', model: 'M1' }), makeRule({ id: 'r2', model: 'M2' })];
+    const pipeline = pipelineWith(new StubModel('m1', 100), new StubModel('m2', 200));
+    const rules = [makeRule({ id: 'r1', model: 'm1' }), makeRule({ id: 'r2', model: 'm2' })];
 
     const result = pipeline.execute(rules, makeInput(), new TraceBuilder(), NONE, 1);
     expect(result.outputs).toEqual({
@@ -50,8 +50,8 @@ describe('ExecutionPipeline', () => {
   });
 
   it('aggregates decimal values without floating-point drift', () => {
-    const pipeline = pipelineWith(new StubModel('A', 0.1), new StubModel('B', 0.2));
-    const rules = [makeRule({ id: 'r1', model: 'A' }), makeRule({ id: 'r2', model: 'B' })];
+    const pipeline = pipelineWith(new StubModel('a', 0.1), new StubModel('b', 0.2));
+    const rules = [makeRule({ id: 'r1', model: 'a' }), makeRule({ id: 'r2', model: 'b' })];
     const result = pipeline.execute(rules, makeInput(), new TraceBuilder(), NONE, 1);
     expect(result.outputs['value']?.value).toBe(0.3);
   });
@@ -70,13 +70,13 @@ describe('ExecutionPipeline', () => {
 
   it('carries output, ruleVersion and sourceRef in the breakdown and the trace', () => {
     const pipeline = pipelineWith(
-      new StubModel('M', 50),
-      new ValueModel('RISK', RISK, { r2: { value: 'high', detail: 'scored' } }),
+      new StubModel('m', 50),
+      new ValueModel('risk', RISK, { r2: { value: 'high', detail: 'scored' } }),
     );
     const trace = new TraceBuilder();
     const rules = [
-      makeRule({ id: 'r1', model: 'M', version: 3, sourceRef: 'CGI art. 12' }),
-      makeRule({ id: 'r2', model: 'RISK', output: 'risk' }),
+      makeRule({ id: 'r1', model: 'm', version: 3, sourceRef: 'CGI art. 12' }),
+      makeRule({ id: 'r2', model: 'risk', output: 'risk' }),
     ];
     const result = pipeline.execute(rules, makeInput(), trace, NONE, 1);
 
@@ -87,7 +87,7 @@ describe('ExecutionPipeline', () => {
         sourceRef: 'CGI art. 12',
         output: 'value',
         contribution: 50,
-        modelUsed: 'M',
+        modelUsed: 'm',
         detail: undefined,
       },
       {
@@ -95,7 +95,7 @@ describe('ExecutionPipeline', () => {
         ruleVersion: 1,
         output: 'risk',
         contribution: 'high',
-        modelUsed: 'RISK',
+        modelUsed: 'risk',
         detail: 'scored',
       },
     ]);
@@ -122,13 +122,13 @@ describe('ExecutionPipeline', () => {
   });
 
   it('orders applied, breakdown and trace by priority descending then id@version', () => {
-    const pipeline = pipelineWith(new StubModel('M', 1));
+    const pipeline = pipelineWith(new StubModel('m', 1));
     const trace = new TraceBuilder();
     const rules = [
-      makeRule({ id: 'b', model: 'M', priority: 100 }),
-      makeRule({ id: 'a', model: 'M', priority: 100, version: 2 }),
-      makeRule({ id: 'z', model: 'M', priority: 900 }),
-      makeRule({ id: 'a', model: 'M', priority: 100, version: 1 }),
+      makeRule({ id: 'b', model: 'm', priority: 100 }),
+      makeRule({ id: 'a', model: 'm', priority: 100, version: 2 }),
+      makeRule({ id: 'z', model: 'm', priority: 900 }),
+      makeRule({ id: 'a', model: 'm', priority: 100, version: 1 }),
     ];
     const result = pipeline.execute(rules, makeInput(), trace, NONE, 1);
     const expected = ['z@1', 'a@1', 'a@2', 'b@1'];
@@ -140,17 +140,17 @@ describe('ExecutionPipeline', () => {
 
   describe('declarations', () => {
     it('excludes every rule feeding an output declared differently, without computing them', () => {
-      const scored = new ValueModel('SCORED', RISK, { a: 'high' });
+      const scored = new ValueModel('scored', RISK, { a: 'high' });
       const labelled = new ValueModel(
-        'LABELLED',
+        'labelled',
         { type: 'string', combine: 'highestPriority' },
         { b: 'high' },
       );
-      const pipeline = pipelineWith(scored, labelled, new StubModel('M', 10));
-      const a = makeRule({ id: 'a', model: 'SCORED', output: 'risk' });
-      const b = makeRule({ id: 'b', model: 'LABELLED', output: 'risk' });
+      const pipeline = pipelineWith(scored, labelled, new StubModel('m', 10));
+      const a = makeRule({ id: 'a', model: 'scored', output: 'risk' });
+      const b = makeRule({ id: 'b', model: 'labelled', output: 'risk' });
       const result = pipeline.execute(
-        [b, makeRule({ id: 'v', model: 'M' }), a],
+        [b, makeRule({ id: 'v', model: 'm' }), a],
         makeInput(),
         new TraceBuilder(),
         NONE,
@@ -170,13 +170,13 @@ describe('ExecutionPipeline', () => {
 
     it('treats enum declarations listing values in another order as different', () => {
       const pipeline = pipelineWith(
-        new ValueModel('A', RISK, { a: 'low' }),
-        new ValueModel('B', { ...RISK, values: ['high', 'low'] }, { b: 'low' }),
+        new ValueModel('a', RISK, { a: 'low' }),
+        new ValueModel('b', { ...RISK, values: ['high', 'low'] }, { b: 'low' }),
       );
       const result = pipeline.execute(
         [
-          makeRule({ id: 'a', model: 'A', output: 'risk' }),
-          makeRule({ id: 'b', model: 'B', output: 'risk' }),
+          makeRule({ id: 'a', model: 'a', output: 'risk' }),
+          makeRule({ id: 'b', model: 'b', output: 'risk' }),
         ],
         makeInput(),
         new TraceBuilder(),
@@ -188,11 +188,11 @@ describe('ExecutionPipeline', () => {
     });
 
     it('excludes a computed value out of the declared type with OUTPUT_MISMATCH', () => {
-      const pipeline = pipelineWith(new ValueModel('RISK', RISK, { a: 'low', b: 'unknown' }));
-      const b = makeRule({ id: 'b', model: 'RISK', output: 'risk' });
+      const pipeline = pipelineWith(new ValueModel('risk', RISK, { a: 'low', b: 'unknown' }));
+      const b = makeRule({ id: 'b', model: 'risk', output: 'risk' });
       const trace = new TraceBuilder();
       const result = pipeline.execute(
-        [makeRule({ id: 'a', model: 'RISK', output: 'risk', priority: 1 }), b],
+        [makeRule({ id: 'a', model: 'risk', output: 'risk', priority: 1 }), b],
         makeInput(),
         trace,
         NONE,
@@ -215,11 +215,11 @@ describe('ExecutionPipeline', () => {
       // A JavaScript model can return a Date; typed code cannot, hence Object.create.
       const withDate: OutputValue = Object.assign(Object.create(null), { at: new Date(0) });
       const pipeline = pipelineWith(
-        new ValueModel('OBJ', { type: 'object', combine: 'highestPriority' }, { a: withDate }),
-        new StubModel('NAN', NaN),
+        new ValueModel('obj', { type: 'object', combine: 'highestPriority' }, { a: withDate }),
+        new StubModel('nan', NaN),
       );
-      const a = makeRule({ id: 'a', model: 'OBJ', output: 'terms' });
-      const n = makeRule({ id: 'n', model: 'NAN' });
+      const a = makeRule({ id: 'a', model: 'obj', output: 'terms' });
+      const n = makeRule({ id: 'n', model: 'nan' });
       const result = pipeline.execute([a, n], makeInput(), new TraceBuilder(), NONE, 1);
       expect(result.skipped).toEqual([
         {
@@ -241,13 +241,13 @@ describe('ExecutionPipeline', () => {
     it('reads a plain object with only value and detail as a CalculationOutput', () => {
       const object: OutputDeclaration = { type: 'object', combine: 'highestPriority' };
       const pipeline = pipelineWith(
-        new ValueModel('WRAPPED', object, { a: { value: { rate: 1 }, detail: 'why' } }),
-        new ValueModel('BARE', object, { b: { value: 2, rate: 3 } }),
+        new ValueModel('wrapped', object, { a: { value: { rate: 1 }, detail: 'why' } }),
+        new ValueModel('bare', object, { b: { value: 2, rate: 3 } }),
       );
       const result = pipeline.execute(
         [
-          makeRule({ id: 'a', model: 'WRAPPED', output: 'x' }),
-          makeRule({ id: 'b', model: 'BARE', output: 'y' }),
+          makeRule({ id: 'a', model: 'wrapped', output: 'x' }),
+          makeRule({ id: 'b', model: 'bare', output: 'y' }),
         ],
         makeInput(),
         new TraceBuilder(),
@@ -262,7 +262,7 @@ describe('ExecutionPipeline', () => {
 
   describe('short-circuits', () => {
     it('gives a short-circuited output the imposed value, its carrier as only contributor', () => {
-      const pipeline = pipelineWith(new StubModel('M', 10));
+      const pipeline = pipelineWith(new StubModel('m', 10));
       const carrier = makeRule({
         id: 'X',
         model: EXCEPTION_MODEL,
@@ -277,7 +277,7 @@ describe('ExecutionPipeline', () => {
       ]);
       const trace = new TraceBuilder();
       const result = pipeline.execute(
-        [makeRule({ id: 'v', model: 'M' })],
+        [makeRule({ id: 'v', model: 'm' })],
         makeInput(),
         trace,
         shortCircuits,
@@ -309,7 +309,7 @@ describe('ExecutionPipeline', () => {
           ruleVersion: 1,
           output: 'value',
           contribution: 10,
-          modelUsed: 'M',
+          modelUsed: 'm',
           detail: undefined,
         },
       ]);
@@ -325,11 +325,11 @@ describe('ExecutionPipeline', () => {
     });
 
     it('drops the contribution of a computing carrier to its own short-circuited output', () => {
-      const risk = new ValueModel('RISK', RISK, { C: 'low' });
+      const risk = new ValueModel('risk', RISK, { C: 'low' });
       const pipeline = pipelineWith(risk);
       const carrier = makeRule({
         id: 'C',
-        model: 'RISK',
+        model: 'risk',
         output: 'risk',
         exceptions: [{ kind: 'shortCircuit', output: 'risk', value: 'high' }],
       });
@@ -355,7 +355,7 @@ describe('ExecutionPipeline', () => {
           ruleVersion: 1,
           output: 'risk',
           contribution: 'high',
-          modelUsed: 'RISK',
+          modelUsed: 'risk',
           detail: { shortCircuit: null },
         },
       ]);
@@ -363,10 +363,10 @@ describe('ExecutionPipeline', () => {
     });
 
     it('keeps a computing carrier contributing to its own output when it short-circuits another', () => {
-      const pipeline = pipelineWith(new StubModel('M', 10));
+      const pipeline = pipelineWith(new StubModel('m', 10));
       const carrier = makeRule({
         id: 'C',
-        model: 'M',
+        model: 'm',
         exceptions: [{ kind: 'shortCircuit', output: 'risk', value: 'low' }],
       });
       const result = pipeline.execute(
@@ -392,13 +392,13 @@ describe('ExecutionPipeline', () => {
     });
 
     it('skips another rule left feeding a short-circuited output with SHORT_CIRCUITED', () => {
-      const pipeline = pipelineWith(new StubModel('M', 10));
+      const pipeline = pipelineWith(new StubModel('m', 10));
       const carrier = makeRule({
         id: 'X',
         model: EXCEPTION_MODEL,
         exceptions: [{ kind: 'shortCircuit', output: 'value', value: 5 }],
       });
-      const stray = makeRule({ id: 's', model: 'M' });
+      const stray = makeRule({ id: 's', model: 'm' });
       const result = pipeline.execute(
         [stray],
         makeInput(),
@@ -431,12 +431,12 @@ describe('ExecutionPipeline', () => {
       ];
       for (const { value, detail } of cases) {
         const pipeline = pipelineWith(
-          new ValueModel('X', undefined, { x: value }),
-          new StubModel('Y', 2),
+          new ValueModel('x', undefined, { x: value }),
+          new StubModel('y', 2),
         );
-        const x = makeRule({ id: 'x', model: 'X' });
+        const x = makeRule({ id: 'x', model: 'x' });
         const result = pipeline.execute(
-          [x, makeRule({ id: 'y', model: 'Y' })],
+          [x, makeRule({ id: 'y', model: 'y' })],
           makeInput(),
           new TraceBuilder(),
           NONE,
@@ -449,13 +449,13 @@ describe('ExecutionPipeline', () => {
 
     it('names the path of a nested value that is not JSON', () => {
       const object: OutputDeclaration = { type: 'object', combine: 'highestPriority' };
-      const pipeline = pipelineWith(new ValueModel('O', object, { a: { a: { b: [1] } } }));
+      const pipeline = pipelineWith(new ValueModel('o', object, { a: { a: { b: [1] } } }));
       // A JavaScript model can return undefined deep inside; typed code cannot.
       const nested: OutputValue = Object.assign(Object.create(null), {
         a: { b: [1, undefined] },
       });
-      const holey = pipelineWith(new ValueModel('O', object, { a: nested }));
-      const rule = makeRule({ id: 'a', model: 'O', output: 'o' });
+      const holey = pipelineWith(new ValueModel('o', object, { a: nested }));
+      const rule = makeRule({ id: 'a', model: 'o', output: 'o' });
       expect(pipeline.execute([rule], makeInput(), new TraceBuilder(), NONE, 1).skipped).toEqual(
         [],
       );
@@ -471,11 +471,11 @@ describe('ExecutionPipeline', () => {
   });
 
   it('excludes, without computing it, a rule feeding value with a declaration other than number', () => {
-    const flag = new ValueModel('FLAG', { type: 'boolean', combine: 'all' }, { a: true, b: true });
-    const pipeline = pipelineWith(flag, new StubModel('M', 3));
-    const a = makeRule({ id: 'a', model: 'FLAG' });
+    const flag = new ValueModel('flag', { type: 'boolean', combine: 'all' }, { a: true, b: true });
+    const pipeline = pipelineWith(flag, new StubModel('m', 3));
+    const a = makeRule({ id: 'a', model: 'flag' });
     const result = pipeline.execute(
-      [a, makeRule({ id: 'b', model: 'FLAG', output: 'ok' }), makeRule({ id: 'm', model: 'M' })],
+      [a, makeRule({ id: 'b', model: 'flag', output: 'ok' }), makeRule({ id: 'm', model: 'm' })],
       makeInput(),
       new TraceBuilder(),
       NONE,
@@ -494,10 +494,10 @@ describe('ExecutionPipeline', () => {
   });
 
   it('throws OutputNotFiniteError when a sum overflows', () => {
-    const pipeline = pipelineWith(new StubModel('H', 1e308));
+    const pipeline = pipelineWith(new StubModel('h', 1e308));
     try {
       pipeline.execute(
-        [makeRule({ id: 'b', model: 'H' }), makeRule({ id: 'a', model: 'H', priority: 900 })],
+        [makeRule({ id: 'b', model: 'h' }), makeRule({ id: 'a', model: 'h', priority: 900 })],
         makeInput(),
         new TraceBuilder(),
         NONE,
@@ -520,13 +520,13 @@ describe('ExecutionPipeline', () => {
 
     it('records canonical, rounded contributions and unrounded only when rounding changed them', () => {
       const pipeline = pipelineWith(
-        new ValueModel('TAX', TAX, { a: '1.005', b: { value: '0002.50', detail: 'flat' } }),
+        new ValueModel('tax', TAX, { a: '1.005', b: { value: '0002.50', detail: 'flat' } }),
       );
       const trace = new TraceBuilder();
       const result = pipeline.execute(
         [
-          makeRule({ id: 'a', model: 'TAX', output: 'tax', priority: 200 }),
-          makeRule({ id: 'b', model: 'TAX', output: 'tax' }),
+          makeRule({ id: 'a', model: 'tax', output: 'tax', priority: 200 }),
+          makeRule({ id: 'b', model: 'tax', output: 'tax' }),
         ],
         makeInput(),
         trace,
@@ -547,7 +547,7 @@ describe('ExecutionPipeline', () => {
           output: 'tax',
           contribution: '1.01',
           unrounded: '1.005',
-          modelUsed: 'TAX',
+          modelUsed: 'tax',
           detail: undefined,
         },
         {
@@ -555,7 +555,7 @@ describe('ExecutionPipeline', () => {
           ruleVersion: 1,
           output: 'tax',
           contribution: '2.5',
-          modelUsed: 'TAX',
+          modelUsed: 'tax',
           detail: 'flat',
         },
       ]);
@@ -570,15 +570,15 @@ describe('ExecutionPipeline', () => {
     it("rounds the combined value only at 'output', recording no unrounded", () => {
       const pipeline = pipelineWith(
         new ValueModel(
-          'TAX',
+          'tax',
           { type: 'decimal', combine: 'sum', rounding: { scale: 2, mode: 'halfUp' } },
           { a: '1.005', b: '1.005' },
         ),
       );
       const result = pipeline.execute(
         [
-          makeRule({ id: 'a', model: 'TAX', output: 'tax' }),
-          makeRule({ id: 'b', model: 'TAX', output: 'tax' }),
+          makeRule({ id: 'a', model: 'tax', output: 'tax' }),
+          makeRule({ id: 'b', model: 'tax', output: 'tax' }),
         ],
         makeInput(),
         new TraceBuilder(),
@@ -594,12 +594,12 @@ describe('ExecutionPipeline', () => {
 
     it('excludes rules declaring different roundings for one output, without computing them', () => {
       const two = new ValueModel(
-        'TWO',
+        'two',
         { type: 'decimal', combine: 'sum', rounding: { scale: 2, mode: 'halfUp' } },
         { a: '1' },
       );
       const zero = new ValueModel(
-        'ZERO',
+        'zero',
         {
           type: 'decimal',
           combine: 'sum',
@@ -609,8 +609,8 @@ describe('ExecutionPipeline', () => {
       );
       const result = pipelineWith(two, zero).execute(
         [
-          makeRule({ id: 'a', model: 'TWO', output: 'tax' }),
-          makeRule({ id: 'b', model: 'ZERO', output: 'tax' }),
+          makeRule({ id: 'a', model: 'two', output: 'tax' }),
+          makeRule({ id: 'b', model: 'zero', output: 'tax' }),
         ],
         makeInput(),
         new TraceBuilder(),
@@ -630,19 +630,19 @@ describe('ExecutionPipeline', () => {
 
     it("treats rounding.at 'output' and an absent at as the same declaration", () => {
       const absent = new ValueModel(
-        'ABSENT',
+        'absent',
         { type: 'decimal', combine: 'sum', rounding: { scale: 2, mode: 'halfUp' } },
         { a: '1.005' },
       );
       const output = new ValueModel(
-        'OUTPUT',
+        'output',
         { type: 'decimal', combine: 'sum', rounding: { scale: 2, mode: 'halfUp', at: 'output' } },
         { b: '1.005' },
       );
       const result = pipelineWith(absent, output).execute(
         [
-          makeRule({ id: 'a', model: 'ABSENT', output: 'tax' }),
-          makeRule({ id: 'b', model: 'OUTPUT', output: 'tax' }),
+          makeRule({ id: 'a', model: 'absent', output: 'tax' }),
+          makeRule({ id: 'b', model: 'output', output: 'tax' }),
         ],
         makeInput(),
         new TraceBuilder(),
@@ -654,8 +654,8 @@ describe('ExecutionPipeline', () => {
     });
 
     it('excludes a rule feeding value with a decimal declaration', () => {
-      const amount = new ValueModel('AMOUNT', { type: 'decimal', combine: 'sum' }, { a: '1' });
-      const a = makeRule({ id: 'a', model: 'AMOUNT' });
+      const amount = new ValueModel('amount', { type: 'decimal', combine: 'sum' }, { a: '1' });
+      const a = makeRule({ id: 'a', model: 'amount' });
       const result = pipelineWith(amount).execute([a], makeInput(), new TraceBuilder(), NONE, 1);
       expect(result.skipped).toEqual([
         {
@@ -671,7 +671,7 @@ describe('ExecutionPipeline', () => {
     it('throws DecimalPrecisionError when an exact sum exceeds a span of 1000 digits', () => {
       const pipeline = pipelineWith(
         new ValueModel(
-          'BIG',
+          'big',
           { type: 'decimal', combine: 'sum' },
           { a: `1${'0'.repeat(999)}`, b: '0.1' },
         ),
@@ -679,8 +679,8 @@ describe('ExecutionPipeline', () => {
       try {
         pipeline.execute(
           [
-            makeRule({ id: 'a', model: 'BIG', output: 'amount' }),
-            makeRule({ id: 'b', model: 'BIG', output: 'amount' }),
+            makeRule({ id: 'a', model: 'big', output: 'amount' }),
+            makeRule({ id: 'b', model: 'big', output: 'amount' }),
           ],
           makeInput(),
           new TraceBuilder(),

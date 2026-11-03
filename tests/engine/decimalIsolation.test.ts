@@ -27,7 +27,7 @@ describe('decimal.js isolation', () => {
       OutputCombiner.combine(
         'o',
         declaration,
-        values.map((v, i) => ({ rule: makeRule({ id: `r${i}`, model: 'M' }), value: v })),
+        values.map((v, i) => ({ rule: makeRule({ id: `r${i}`, model: 'm' }), value: v })),
         'throw',
       ).output?.value;
 

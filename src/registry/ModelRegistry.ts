@@ -7,7 +7,8 @@ import { ModelNotFoundError } from '../errors/ModelNotFoundError.js';
 import { InvalidModelError } from '../errors/InvalidModelError.js';
 import { InputCopier } from '../input/copyInput.js';
 import { DEFAULT_LIMITS } from '../limits.js';
-import { isAnyViewError } from '../engine/frozenView.js';
+import { isolated } from '../engine/trust.js';
+import type { ModelDescriptor } from '../types/plugin.js';
 import { callSync, readIdentity, registering } from '../engine/pluginPort.js';
 
 /**
@@ -46,6 +47,10 @@ export class ModelRegistry {
   private readonly declared = new Map<string, Declared>();
 
   register(model: CalculationModel<OutputValue>): void {
+    isolated(() => this.add(model));
+  }
+
+  private add(model: CalculationModel<OutputValue>): void {
     registering(() => {
       const { name, version } = readIdentity(model, 'model', 'name');
       if (this.models.has(name)) {
@@ -84,6 +89,30 @@ export class ModelRegistry {
       this.models.set(name, model);
       this.declared.set(name, declared);
     });
+  }
+
+  /** What a plugin may know of a registered model: frozen data, no object and no function. */
+  describe(name: string): ModelDescriptor {
+    return isolated(() => {
+      if (!this.models.has(name)) throw new ModelNotFoundError(name);
+      return this.descriptor(name);
+    });
+  }
+
+  /** The descriptors of every registered model, frozen. */
+  describeAll(): ReadonlyArray<ModelDescriptor> {
+    return isolated(() =>
+      Object.freeze([...this.models.keys()].map((name) => this.descriptor(name))),
+    );
+  }
+
+  private descriptor(name: string): ModelDescriptor {
+    const declared = this.declared.get(name) as Declared;
+    return Object.freeze(
+      declared.output === undefined
+        ? { name, version: declared.version }
+        : { name, version: declared.version, output: declared.output },
+    );
   }
 
   get(name: string): CalculationModel<OutputValue> {
@@ -141,7 +170,7 @@ function fixModel(
   const call =
     (fn: Fn) =>
     (...args: unknown[]): unknown =>
-      callSync(fn, model, args, isAnyViewError);
+      callSync(fn, model, args);
   const { listVariables, describeParams } = declared;
   return Object.freeze({
     name,
@@ -153,7 +182,7 @@ function fixModel(
       rule: Readonly<Rule>,
       params: unknown,
     ): ReturnType<CalculationModel<OutputValue>['calculate']> =>
-      callSync(declared.calculate, model, [input, rule, params], isAnyViewError) as ReturnType<
+      callSync(declared.calculate, model, [input, rule, params]) as ReturnType<
         CalculationModel<OutputValue>['calculate']
       >,
     ...(listVariables === undefined

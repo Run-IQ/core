@@ -14,7 +14,7 @@ function dslReading(read: unknown, name = 'test'): DSLEvaluator {
   };
 }
 
-function modelReading(read: unknown, name = 'M'): CalculationModel {
+function modelReading(read: unknown, name = 'm'): CalculationModel {
   return {
     name,
     version: '1.0.0',
@@ -24,8 +24,8 @@ function modelReading(read: unknown, name = 'M'): CalculationModel {
   };
 }
 
-const withCondition = makeRule({ id: 'R1', model: 'M', condition: { dsl: 'test', value: ['x'] } });
-const noCondition = makeRule({ id: 'R1', model: 'M' });
+const withCondition = makeRule({ id: 'R1', model: 'm', condition: { dsl: 'test', value: ['x'] } });
+const noCondition = makeRule({ id: 'R1', model: 'm' });
 
 describe('readsOf', () => {
   it('lists the pointers read and the outputs among them, in order of appearance', () => {
@@ -95,7 +95,7 @@ describe('readsOf', () => {
     const modelRead = vi.fn(() => []);
     const rule = makeRule({
       id: 'R1',
-      model: 'M',
+      model: 'm',
       params: { rate: 0.2 },
       condition: { dsl: 'test', value: { var: 'x' } },
     });
@@ -132,7 +132,7 @@ describe('readsOf', () => {
 
     it('a model without listVariables leaves the reads undeclared, with no problem', () => {
       const model: CalculationModel = {
-        name: 'M',
+        name: 'm',
         version: '1.0.0',
         validateParams: () => ({ valid: true }),
         calculate: () => 0,
@@ -247,6 +247,8 @@ describe('readsOf', () => {
       const huge = new Proxy([] as unknown[], {
         get(target, key, receiver) {
           if (key === 'length') return MAX_LISTED_POINTERS + 1;
+          // The port asks every answer whether it is a promise: that one read of `then` is its.
+          if (key === 'then') return undefined;
           reads += 1;
           return Reflect.get(target, key, receiver);
         },

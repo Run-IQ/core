@@ -18,7 +18,7 @@ import { makeRule, makeInput, StubModel, InMemorySnapshotAdapter } from '../help
 // asserts the exact failure, or that the decision and the record are untouched.
 
 const FLAT: CalculationModel = {
-  name: 'FLAT',
+  name: 'flat',
   version: '1.0.0',
   validateParams: (params) =>
     typeof (params as { rate?: unknown }).rate === 'number'
@@ -32,7 +32,7 @@ const host: PPEPlugin = {
   version: '1.0.0',
   onInit(context: PluginContext): void {
     context.modelRegistry.register(FLAT);
-    context.modelRegistry.register(new StubModel('M', 10));
+    context.modelRegistry.register(new StubModel('m', 10));
   },
 };
 
@@ -74,7 +74,7 @@ function build(
   return { engine, adapter: inner, saved };
 }
 
-const tax = (rate = 100): Rule => makeRule({ id: 'tax', model: 'FLAT', params: { rate } });
+const tax = (rate = 100): Rule => makeRule({ id: 'tax', model: 'flat', params: { rate } });
 
 async function failure(
   built: Built,
@@ -107,11 +107,11 @@ describe('R1: the array of given rules is not writable and is not read back', ()
     ['replace a rule', (rules) => void (rules[0] = tax(0))],
     [
       'push a valid rule',
-      (rules) => void rules.push(makeRule({ id: 'sneak', model: 'FLAT', params: { rate: 7 } })),
+      (rules) => void rules.push(makeRule({ id: 'sneak', model: 'flat', params: { rate: 7 } })),
     ],
     [
       'push a rule with refused params',
-      (rules) => void rules.push(makeRule({ id: 'bad', model: 'FLAT', params: { rate: 'x' } })),
+      (rules) => void rules.push(makeRule({ id: 'bad', model: 'flat', params: { rate: 'x' } })),
     ],
     ['push a duplicate', (rules) => void rules.push(rules[0]!)],
     ['truncate the list', (rules) => void (rules.length = 0)],
@@ -162,7 +162,7 @@ describe('R1: the array of given rules is not writable and is not read back', ()
 describe('R2: the dates of a rule cannot be moved by a model or a hook', () => {
   it('a model writing the bound of its rule is excluded, and the record keeps the bound', async () => {
     const mover: CalculationModel = {
-      name: 'MOVER',
+      name: 'mover',
       version: '1.0.0',
       validateParams: () => ({ valid: true }),
       calculate: (_input, rule) => {
@@ -172,7 +172,7 @@ describe('R2: the dates of a rule cannot be moved by a model or a hook', () => {
     };
     const built = build([pluginWith('reg', { onInit: (c) => c.modelRegistry.register(mover) })]);
     const result = await built.engine.evaluate(
-      [makeRule({ id: 'm', model: 'MOVER' }), makeRule({ id: 'ok', model: 'M' })],
+      [makeRule({ id: 'm', model: 'mover' }), makeRule({ id: 'ok', model: 'm' })],
       makeInput({ meta: { tenantId: 't', effectiveDate: new Date('2024-06-01T00:00:00Z') } }),
     );
     expect(result.appliedRules.map((r) => r.id)).toEqual(['ok']);
@@ -212,8 +212,8 @@ describe('R3: $dimensions cannot be rewritten by a DSL', () => {
     const built = build([], {}, [writer]);
     const result = await built.engine.evaluate(
       [
-        makeRule({ id: 'a', model: 'M', priority: 300, condition: { dsl: 'writer', value: null } }),
-        makeRule({ id: 'b', model: 'M', priority: 100, dimensions: { region: 'TG' } }),
+        makeRule({ id: 'a', model: 'm', priority: 300, condition: { dsl: 'writer', value: null } }),
+        makeRule({ id: 'b', model: 'm', priority: 100, dimensions: { region: 'TG' } }),
       ],
       makeInput({ meta: { tenantId: 't', dimensions: { region: ['TG', 'BJ'] } } }),
     );
@@ -243,12 +243,12 @@ describe('R4: a label that left the evaluation cannot come back with other conte
       pluginWith('h', {
         beforeEvaluate: (input, rules) => ({
           input,
-          rules: [...rules, makeRule({ id: 'x', model: 'FLAT', params: { rate: 5 } })],
+          rules: [...rules, makeRule({ id: 'x', model: 'flat', params: { rate: 5 } })],
         }),
       }),
     ]);
     const error = await failure(built, [
-      makeRule({ id: 'x', model: 'FLAT', params: { rate: 'bad' } }),
+      makeRule({ id: 'x', model: 'flat', params: { rate: 'bad' } }),
     ]);
     await expectHookFailure(built, error);
   });
@@ -279,7 +279,7 @@ describe('R5: given rules sharing a label cannot be swapped', () => {
 
 describe('R6: what a hook returns is read once and bounded', () => {
   it('a Proxy whose length shrinks after the first read cannot pass maxRules', async () => {
-    const rules = [1, 2, 3, 4, 5, 6].map((i) => makeRule({ id: `r${i}`, model: 'M' }));
+    const rules = [1, 2, 3, 4, 5, 6].map((i) => makeRule({ id: `r${i}`, model: 'm' }));
     let reads = 0;
     const proxy = new Proxy(rules, {
       get(target, key, receiver) {
@@ -292,13 +292,13 @@ describe('R6: what a hook returns is read once and bounded', () => {
       { limits: { maxRules: 3 } },
     );
     // The length is read once: the engine sees one rule and no more, never the six.
-    const result = await built.engine.evaluate([makeRule({ id: 'r1', model: 'M' })], makeInput());
+    const result = await built.engine.evaluate([makeRule({ id: 'r1', model: 'm' })], makeInput());
     expect(result.appliedRules.map((r) => r.id)).toEqual(['r1']);
     expect(reads).toBe(1);
   });
 
   it('a list longer than maxRules is refused with the limit', async () => {
-    const rules = [1, 2, 3, 4].map((i) => makeRule({ id: `r${i}`, model: 'M' }));
+    const rules = [1, 2, 3, 4].map((i) => makeRule({ id: `r${i}`, model: 'm' }));
     const built = build([pluginWith('h', { beforeEvaluate: (input) => ({ input, rules }) })], {
       limits: { maxRules: 3 },
     });
@@ -493,7 +493,7 @@ describe('R11: an object that cannot be read is named, not a raw TypeError', () 
 describe("R12: a model that writes into its arguments is that rule's error", () => {
   it('is an exclusion with a named reason, and the other rules go on', async () => {
     const writer: CalculationModel = {
-      name: 'W',
+      name: 'w',
       version: '1.0.0',
       validateParams: () => ({ valid: true }),
       calculate: (_input, rule) => {
@@ -503,7 +503,7 @@ describe("R12: a model that writes into its arguments is that rule's error", () 
     };
     const built = build([pluginWith('reg', { onInit: (c) => c.modelRegistry.register(writer) })]);
     const result = await built.engine.evaluate(
-      [makeRule({ id: 'w', model: 'W' }), makeRule({ id: 'ok', model: 'M' })],
+      [makeRule({ id: 'w', model: 'w' }), makeRule({ id: 'ok', model: 'm' })],
       makeInput(),
     );
     expect(result.appliedRules.map((r) => r.id)).toEqual(['ok']);

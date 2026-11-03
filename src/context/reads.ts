@@ -7,10 +7,11 @@ import type { OutputValue } from '../types/output.js';
 import type { Rule } from '../types/rule.js';
 import { describeValue } from '../utils/json.js';
 import { describeThrown } from '../utils/values.js';
+import { isolated } from '../engine/trust.js';
 import { isRaisedLimit } from '../errors/EngineLimitError.js';
 import { clip } from '../utils/frozenCopy.js';
-import { defaultCrossing, readBounded } from '../engine/pluginBoundary.js';
-import { reading } from '../engine/pluginPort.js';
+import { defaultCrossing, guarded, readBounded } from '../engine/pluginBoundary.js';
+import { callSync, reading } from '../engine/pluginPort.js';
 import type { Crossing } from '../engine/pluginBoundary.js';
 
 /** Why a `listVariables` is not taken as it is (D-39, D-1). */
@@ -67,6 +68,27 @@ export function readsOf(
   dsl: DSLEvaluator | undefined,
   model: CalculationModel<OutputValue> | undefined,
   crossing: Crossing = defaultCrossing(),
+): Reads {
+  // Exported, so a plugin can call it from a getter: what it raises is noted for no read in progress.
+  return isolated(() => computeReads(rule, dsl, model, crossing));
+}
+
+/**
+ * Calls `listVariables` of a plugin through the port: whatever it throws, an engine class
+ * included, is a fault of the plugin, and a promise is a breach.
+ */
+function askListVariables(owner: { readonly listVariables?: unknown }, argument: unknown): unknown {
+  const fn = guarded(() => owner.listVariables);
+  if (fn === undefined) return undefined;
+  if (typeof fn !== 'function') throw new TypeError('listVariables is not a function');
+  return callSync(fn as (...args: never[]) => unknown, owner, [argument]);
+}
+
+function computeReads(
+  rule: Rule,
+  dsl: DSLEvaluator | undefined,
+  model: CalculationModel<OutputValue> | undefined,
+  crossing: Crossing,
 ): Reads {
   const label = `${rule.id}@${rule.version}`;
   const pointers = new Set<JsonPointer>();
@@ -152,13 +174,13 @@ export function readsOf(
     if (dsl?.listVariables === undefined) declared = false;
     else {
       const value = rule.condition.value;
-      collect(rule.condition.dsl, () => dsl.listVariables?.(new ViewScope().trapped(value)));
+      collect(rule.condition.dsl, () => askListVariables(dsl, new ViewScope().trapped(value)));
     }
   }
   if (model?.listVariables === undefined) declared = false;
   else {
     const params = rule.params;
-    collect(model.name, () => model.listVariables?.(new ViewScope().trapped(params)));
+    collect(model.name, () => askListVariables(model, new ViewScope().trapped(params)));
   }
 
   return { pointers: [...pointers], outputs: [...outputs], declared, problems };

@@ -19,7 +19,7 @@ const host: PPEPlugin = {
   name: 'model-host',
   version: '1.0.0',
   onInit(context: PluginContext): void {
-    context.modelRegistry.register(new StubModel('M', 100));
+    context.modelRegistry.register(new StubModel('m', 100));
   },
 };
 
@@ -41,7 +41,7 @@ function untyped<T>(value: unknown): T {
   return value as T;
 }
 
-const rule = () => makeRule({ id: 'r1', model: 'M' });
+const rule = () => makeRule({ id: 'r1', model: 'm' });
 
 /** What `evaluate` rejects with, or `undefined` when it resolves. */
 async function failure(engine: PPEEngine, rules = [rule()]): Promise<unknown> {
@@ -121,7 +121,7 @@ describe('hostile beforeEvaluate results', () => {
     ['skipped: 5', (r) => ({ ...r, skipped: 5 }), 'returned a malformed skipped'],
     [
       'a skip without a rule object',
-      (r) => ({ ...r, skipped: [{ rule: 5, reason: 'X' }] }),
+      (r) => ({ ...r, skipped: [{ rule: 5, reason: 'x' }] }),
       'returned a malformed skipped',
     ],
     [
@@ -383,11 +383,11 @@ describe('rules removed without a skip', () => {
       }),
     });
     const error = await failure(engineWith([p]), [
-      makeRule({ id: 'b', model: 'M', version: 2 }),
-      makeRule({ id: 'keep', model: 'M' }),
-      makeRule({ id: 'listed', model: 'M' }),
-      makeRule({ id: 'b', model: 'M', version: 1 }),
-      makeRule({ id: 'a', model: 'M' }),
+      makeRule({ id: 'b', model: 'm', version: 2 }),
+      makeRule({ id: 'keep', model: 'm' }),
+      makeRule({ id: 'listed', model: 'm' }),
+      makeRule({ id: 'b', model: 'm', version: 1 }),
+      makeRule({ id: 'a', model: 'm' }),
     ]);
     expect(error).toBeInstanceOf(PluginHookError);
     expect(error).toMatchObject({ plugin: 'p', hook: 'beforeEvaluate' });
@@ -402,7 +402,7 @@ describe('rules removed or added by beforeEvaluate (multisets)', () => {
     const p = pluginWith('p', {
       beforeEvaluate: (input, rules) => ({ input, rules: rules.slice(1) }),
     });
-    const d = makeRule({ id: 'd', model: 'M' });
+    const d = makeRule({ id: 'd', model: 'm' });
     const error = await failure(engineWith([p]), [d, { ...d }]);
     expect(error).toBeInstanceOf(PluginHookError);
     expect((error as PluginHookError).cause).toMatchObject({
@@ -414,10 +414,10 @@ describe('rules removed or added by beforeEvaluate (multisets)', () => {
     const p = pluginWith('p', {
       beforeEvaluate: (input, rules) => ({
         input,
-        rules: rules.map((r) => makeRule({ id: r.id, model: 'M', version: r.version + 1 })),
+        rules: rules.map((r) => makeRule({ id: r.id, model: 'm', version: r.version + 1 })),
       }),
     });
-    const error = await failure(engineWith([p]), [makeRule({ id: 'v', model: 'M' })]);
+    const error = await failure(engineWith([p]), [makeRule({ id: 'v', model: 'm' })]);
     expect(error).toBeInstanceOf(PluginHookError);
     expect((error as PluginHookError).cause).toMatchObject({
       message: 'plugin p removed rules without a skip: v@1',
@@ -441,8 +441,8 @@ describe('rules removed or added by beforeEvaluate (multisets)', () => {
         input,
         rules: [
           ...rules,
-          makeRule({ id: 'z', model: 'M' }),
-          makeRule({ id: 'a', model: 'M', version: 3 }),
+          makeRule({ id: 'z', model: 'm' }),
+          makeRule({ id: 'a', model: 'm', version: 3 }),
         ],
       }),
     });
@@ -451,7 +451,7 @@ describe('rules removed or added by beforeEvaluate (multisets)', () => {
   });
 
   it('fails the evaluation for a rule added twice', async () => {
-    const extra = makeRule({ id: 'z', model: 'M' });
+    const extra = makeRule({ id: 'z', model: 'm' });
     const p = pluginWith('p', {
       beforeEvaluate: (input, rules) => ({ input, rules: [...rules, extra, extra] }),
     });

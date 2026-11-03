@@ -20,7 +20,7 @@ describe('RuleFilter', () => {
     const filter = createFilter();
     const rule = makeRule({
       id: 'r1',
-      model: 'M',
+      model: 'm',
       effectiveFrom: new Date('2024-01-01'),
       effectiveUntil: new Date('2025-12-31'),
     });
@@ -33,7 +33,7 @@ describe('RuleFilter', () => {
     const filter = createFilter();
     const rule = makeRule({
       id: 'r1',
-      model: 'M',
+      model: 'm',
       effectiveFrom: new Date('2025-01-01'),
     });
     const result = await filter.filter([rule], makeInput(), new Date('2024-06-01'));
@@ -45,7 +45,7 @@ describe('RuleFilter', () => {
     const filter = createFilter();
     const rule = makeRule({
       id: 'r1',
-      model: 'M',
+      model: 'm',
       effectiveFrom: new Date('2024-01-01'),
       effectiveUntil: new Date('2024-06-01'),
     });
@@ -56,7 +56,7 @@ describe('RuleFilter', () => {
 
   it('skips rules with non-matching tags', async () => {
     const filter = createFilter();
-    const rule = makeRule({ id: 'r1', model: 'M', tags: ['tax'] });
+    const rule = makeRule({ id: 'r1', model: 'm', tags: ['tax'] });
     const input = makeInput({ meta: { tenantId: 't', tags: ['payroll'] } });
     const result = await filter.filter([rule], input, new Date('2024-06-01'));
     expect(result.skipped).toHaveLength(1);
@@ -65,7 +65,7 @@ describe('RuleFilter', () => {
 
   it('passes rules with matching tags', async () => {
     const filter = createFilter();
-    const rule = makeRule({ id: 'r1', model: 'M', tags: ['tax', 'vat'] });
+    const rule = makeRule({ id: 'r1', model: 'm', tags: ['tax', 'vat'] });
     const input = makeInput({ meta: { tenantId: 't', tags: ['tax'] } });
     const result = await filter.filter([rule], input, new Date('2024-06-01'));
     expect(result.passed).toHaveLength(1);
@@ -75,7 +75,7 @@ describe('RuleFilter', () => {
     const filter = createFilter();
     const rule = makeRule({
       id: 'r1',
-      model: 'M',
+      model: 'm',
       condition: { dsl: 'unknown_dsl', value: {} },
     });
     const result = await filter.filter([rule], makeInput(), new Date('2024-06-01'));
@@ -87,7 +87,7 @@ describe('RuleFilter', () => {
     const filter = createFilter([{ name: 'jsonlogic', result: false }]);
     const rule = makeRule({
       id: 'r1',
-      model: 'M',
+      model: 'm',
       condition: { dsl: 'jsonlogic', value: { '==': [1, 2] } },
     });
     const result = await filter.filter([rule], makeInput(), new Date('2024-06-01'));
@@ -99,7 +99,7 @@ describe('RuleFilter', () => {
     const filter = createFilter([{ name: 'jsonlogic', result: true }]);
     const rule = makeRule({
       id: 'r1',
-      model: 'M',
+      model: 'm',
       condition: { dsl: 'jsonlogic', value: { '==': [1, 1] } },
     });
     const result = await filter.filter([rule], makeInput(), new Date('2024-06-01'));
@@ -110,7 +110,7 @@ describe('RuleFilter', () => {
     const filter = createFilter();
     const rule = makeRule({
       id: 'r1',
-      model: 'M',
+      model: 'm',
       effectiveFrom: new Date('2023-01-01'),
       effectiveUntil: new Date('2023-12-31'),
     });
@@ -139,7 +139,7 @@ describe('RuleFilter', () => {
 
     const rule = makeRule({
       id: 'r1',
-      model: 'M',
+      model: 'm',
       condition: { dsl: 'broken', value: 'bad syntax' },
     });
     const result = await filter.filter([rule], makeInput(), new Date('2024-06-01'));
@@ -151,7 +151,7 @@ describe('RuleFilter', () => {
     it('excludes a rule whose effectiveUntil equals the evaluated date', async () => {
       const rule = makeRule({
         id: 'r1',
-        model: 'M',
+        model: 'm',
         effectiveFrom: new Date('2024-01-01T00:00:00.000Z'),
         effectiveUntil: new Date('2024-06-01T00:00:00.000Z'),
       });
@@ -172,7 +172,7 @@ describe('RuleFilter', () => {
     });
 
     it('rejects an invalid evaluation date with spec INVALID_DATE, before any rule', async () => {
-      const rule = makeRule({ id: 'r1', model: 'M' });
+      const rule = makeRule({ id: 'r1', model: 'm' });
       const error = await createFilter()
         .filter([rule], makeInput(), new Date('x'))
         .then(
@@ -189,12 +189,12 @@ describe('RuleFilter', () => {
       const bad = {
         ...makeRule({
           id: 'bad',
-          model: 'M',
+          model: 'm',
           effectiveFrom: new Date('2025-01-01T00:00:00.000Z'),
         }),
         effectiveUntil: new Date('x'),
       };
-      const good = makeRule({ id: 'good', model: 'M' });
+      const good = makeRule({ id: 'good', model: 'm' });
       const result = await createFilter().filter(
         [bad, good],
         makeInput(),
@@ -215,11 +215,11 @@ describe('RuleFilter', () => {
       // isEffectiveAt has no time zone database: only UTC and ±HH:MM.
       const paris = makeRule({
         id: 'paris',
-        model: 'M',
+        model: 'm',
         effectiveFrom: '2025-01-01',
         timeZone: 'Europe/Paris',
       });
-      const utc = makeRule({ id: 'utc', model: 'M', effectiveFrom: '2025-01-01' });
+      const utc = makeRule({ id: 'utc', model: 'm', effectiveFrom: '2025-01-01' });
       const result = await createFilter().filter(
         [paris, utc],
         makeInput(),
@@ -239,7 +239,7 @@ describe('RuleFilter', () => {
     it('compares a civil date bound as a civil date, and names it as written', async () => {
       const rule = makeRule({
         id: 'r1',
-        model: 'M',
+        model: 'm',
         effectiveFrom: '2025-01-01',
         effectiveUntil: '2025-06-01',
       });
@@ -276,7 +276,7 @@ describe('RuleFilter', () => {
     it('includes a rule whose effectiveFrom equals the evaluated date', async () => {
       const rule = makeRule({
         id: 'r1',
-        model: 'M',
+        model: 'm',
         effectiveFrom: new Date('2024-06-01T00:00:00.000Z'),
       });
       const result = await createFilter().filter(
@@ -290,7 +290,7 @@ describe('RuleFilter', () => {
     it('states an open-ended window in the detail', async () => {
       const rule = makeRule({
         id: 'r1',
-        model: 'M',
+        model: 'm',
         effectiveFrom: new Date('2025-01-01T00:00:00.000Z'),
       });
       const result = await createFilter().filter(
@@ -308,14 +308,14 @@ describe('RuleFilter', () => {
     const at = new Date('2024-06-01');
 
     it('does not filter by dimensions when meta.dimensions is undefined', async () => {
-      const rule = makeRule({ id: 'r1', model: 'M', dimensions: { country: 'TG' } });
+      const rule = makeRule({ id: 'r1', model: 'm', dimensions: { country: 'TG' } });
       const result = await createFilter().filter([rule], makeInput(), at);
       expect(result.passed).toEqual([rule]);
       expect(result.skipped).toEqual([]);
     });
 
     it('excludes a rule whose dimension value differs', async () => {
-      const rule = makeRule({ id: 'r1', model: 'M', dimensions: { country: 'BJ' } });
+      const rule = makeRule({ id: 'r1', model: 'm', dimensions: { country: 'BJ' } });
       const input = makeInput({ meta: { tenantId: 't', dimensions: { country: 'TG' } } });
       const result = await createFilter().filter([rule], input, at);
       expect(result.passed).toEqual([]);
@@ -327,7 +327,7 @@ describe('RuleFilter', () => {
     it('excludes a rule whose dimension key is absent from the input', async () => {
       const rule = makeRule({
         id: 'r1',
-        model: 'M',
+        model: 'm',
         dimensions: { country: 'TG', region: 'X' },
       });
       const input = makeInput({ meta: { tenantId: 't', dimensions: { country: 'TG' } } });
@@ -338,8 +338,8 @@ describe('RuleFilter', () => {
     });
 
     it('passes matching and dimensionless rules', async () => {
-      const matching = makeRule({ id: 'r1', model: 'M', dimensions: { country: 'TG' } });
-      const free = makeRule({ id: 'r2', model: 'M' });
+      const matching = makeRule({ id: 'r1', model: 'm', dimensions: { country: 'TG' } });
+      const free = makeRule({ id: 'r2', model: 'm' });
       const input = makeInput({ meta: { tenantId: 't', dimensions: { country: 'TG' } } });
       const result = await createFilter().filter([matching, free], input, at);
       expect(result.passed).toEqual([matching, free]);
@@ -352,7 +352,7 @@ describe('RuleFilter', () => {
       it('anyOf: passes a value of the list, names the spec and the value otherwise', async () => {
         const rule = makeRule({
           id: 'r1',
-          model: 'M',
+          model: 'm',
           dimensions: { country: { anyOf: ['TG', 'BJ'] } },
         });
         const passes = await createFilter().filter([rule], inCountry('BJ'), at);
@@ -372,12 +372,12 @@ describe('RuleFilter', () => {
           makeInput({ meta: { tenantId: 't', dimensions: { zone } } });
         const all = makeRule({
           id: 'all',
-          model: 'M',
+          model: 'm',
           dimensions: { zone: { anyOf: ['FR', 'US'], match: 'all' } },
         });
         const any = makeRule({
           id: 'any',
-          model: 'M',
+          model: 'm',
           dimensions: { zone: { anyOf: ['FR', 'US'] } },
         });
         const both = await createFilter().filter([all, any], inZones(['US', 'FR']), at);
@@ -403,7 +403,7 @@ describe('RuleFilter', () => {
       it('a qualified value matches as written', async () => {
         const rule = makeRule({
           id: 'r1',
-          model: 'M',
+          model: 'm',
           dimensions: { activity: 'nace-2.1:62.10' },
         });
         const input = makeInput({
@@ -413,7 +413,7 @@ describe('RuleFilter', () => {
       });
 
       it('an input value spec cannot read rejects the evaluation, unchanged', async () => {
-        const rule = makeRule({ id: 'r1', model: 'M', dimensions: { country: 'TG' } });
+        const rule = makeRule({ id: 'r1', model: 'm', dimensions: { country: 'TG' } });
         const refused = async (country: string): Promise<unknown> =>
           createFilter()
             .filter([rule], inCountry(country), at)
@@ -434,7 +434,7 @@ describe('RuleFilter', () => {
       it('a ref names the spec error: no referential is provided yet, never a silent mismatch', async () => {
         const rule = makeRule({
           id: 'r1',
-          model: 'M',
+          model: 'm',
           dimensions: { country: { ref: 'ue', anyOf: ['EU'], except: ['FR'] } },
         });
         const result = await createFilter().filter([rule], inCountry('TG'), at);
@@ -453,7 +453,7 @@ describe('RuleFilter', () => {
     it('checks tags before dimensions', async () => {
       const rule = makeRule({
         id: 'r1',
-        model: 'M',
+        model: 'm',
         tags: ['tax'],
         dimensions: { country: 'BJ' },
       });
@@ -486,7 +486,7 @@ describe('RuleFilter', () => {
     }
 
     const reading = (id: string, ...pointers: string[]) =>
-      makeRule({ id, model: 'M', condition: { dsl: 'listing', value: pointers } });
+      makeRule({ id, model: 'm', condition: { dsl: 'listing', value: pointers } });
 
     it('reports pointers absent from data, sorted and unique', async () => {
       const rules = [
@@ -515,7 +515,7 @@ describe('RuleFilter', () => {
     it('ignores conditions of rules excluded before evaluation', async () => {
       const rule = makeRule({
         id: 'r1',
-        model: 'M',
+        model: 'm',
         dimensions: { country: 'BJ' },
         condition: { dsl: 'listing', value: ['/revenue/total'] },
       });
@@ -645,7 +645,7 @@ describe('RuleFilter', () => {
         },
       });
       const filter = new RuleFilter(registry, new PluginSandbox(500, 100));
-      const rule = makeRule({ id: 'r1', model: 'M', condition: { dsl: 'spy', value: {} } });
+      const rule = makeRule({ id: 'r1', model: 'm', condition: { dsl: 'spy', value: {} } });
       const input = makeInput({
         data: { amount: 5 },
         meta: { tenantId: 't', dates: { effective: '2026-01-01' }, dimensions: { country: 'TG' } },
@@ -695,7 +695,7 @@ describe('RuleFilter', () => {
       it.each([
         ['an Error', new Error('boom'), 'boom'],
         ['a string', 'plain', 'plain'],
-        ['an object', { code: 1 }, '[object Object]'],
+        ['an object', { code: 1 }, 'Error'],
       ])(
         'keeps the outcome and reports a diagnostic when listVariables throws %s',
         async (_n, thrown, text) => {
@@ -709,7 +709,7 @@ describe('RuleFilter', () => {
             },
           });
           const filter = new RuleFilter(registry, new PluginSandbox(500, 100));
-          const rule = makeRule({ id: 'r1', model: 'M', condition: { dsl: 'flaky', value: {} } });
+          const rule = makeRule({ id: 'r1', model: 'm', condition: { dsl: 'flaky', value: {} } });
           const result = await filter.filter([rule], makeInput(), at);
           expect(result.passed).toEqual([rule]);
           expect(result.skipped).toEqual([]);
@@ -732,7 +732,7 @@ describe('RuleFilter', () => {
           } as unknown as NonNullable<DSLEvaluator['listVariables']>,
         });
         const filter = new RuleFilter(registry, new PluginSandbox(500, 100));
-        const rule = makeRule({ id: 'r1', model: 'M', condition: { dsl: 'lazy', value: {} } });
+        const rule = makeRule({ id: 'r1', model: 'm', condition: { dsl: 'lazy', value: {} } });
         const result = await filter.filter([rule], makeInput(), at);
         expect(result.missingFacts).toEqual([]);
         expect(result.passed).toEqual([rule]);
@@ -748,7 +748,7 @@ describe('RuleFilter', () => {
     it('stays empty when the DSL has no listVariables', async () => {
       const rule = makeRule({
         id: 'r1',
-        model: 'M',
+        model: 'm',
         condition: { dsl: 'jsonlogic', value: { var: 'revenue.total' } },
       });
       const result = await createFilter([{ name: 'jsonlogic', result: true }]).filter(
@@ -766,7 +766,7 @@ describe('RuleFilter', () => {
     const at = new Date('2024-06-01');
 
     it('names the tags on TAG_MISMATCH', async () => {
-      const rule = makeRule({ id: 'r1', model: 'M', tags: ['tax', 'vat'] });
+      const rule = makeRule({ id: 'r1', model: 'm', tags: ['tax', 'vat'] });
       const input = makeInput({ meta: { tenantId: 't', tags: ['payroll'] } });
       const result = await createFilter().filter([rule], input, at);
       expect(result.skipped[0]!.detail).toBe('rule tags [tax, vat], input tags [payroll]');
@@ -775,7 +775,7 @@ describe('RuleFilter', () => {
     it('sets a detail on CONDITION_FALSE', async () => {
       const rule = makeRule({
         id: 'r1',
-        model: 'M',
+        model: 'm',
         condition: { dsl: 'jsonlogic', value: {} },
       });
       const result = await createFilter([{ name: 'jsonlogic', result: false }]).filter(
@@ -796,7 +796,7 @@ describe('RuleFilter', () => {
         },
       });
       const filter = new RuleFilter(registry, new PluginSandbox(500, 100));
-      const rule = makeRule({ id: 'r1', model: 'M', condition: { dsl: 'broken', value: 'x' } });
+      const rule = makeRule({ id: 'r1', model: 'm', condition: { dsl: 'broken', value: 'x' } });
       const result = await filter.filter([rule], makeInput(), at);
       expect(result.skipped[0]).toMatchObject({
         reason: 'DSL_ERROR',
@@ -807,7 +807,7 @@ describe('RuleFilter', () => {
     it('names the DSL on DSL_NOT_FOUND', async () => {
       const rule = makeRule({
         id: 'r1',
-        model: 'M',
+        model: 'm',
         condition: { dsl: 'unknown_dsl', value: {} },
       });
       const result = await createFilter().filter([rule], makeInput(), at);

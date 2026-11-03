@@ -49,7 +49,7 @@ class EnrichingPlugin implements PPEPlugin {
 
 describe('Chained beforeEvaluate hooks', () => {
   it('second plugin sees modifications from first plugin', async () => {
-    const model = new StubModel('M', 100);
+    const model = new StubModel('m', 100);
 
     // First plugin adds 'enrichedA' to input.data
     const pluginA = new EnrichingPlugin('plugin-a', 'enrichedA', 'fromA');
@@ -72,7 +72,7 @@ describe('Chained beforeEvaluate hooks', () => {
       strict: false,
     });
 
-    const rules = [makeRule({ id: 'r1', model: 'M', params: {} })];
+    const rules = [makeRule({ id: 'r1', model: 'm', params: {} })];
     const result = await engine.evaluate(rules, makeInput());
 
     // Both plugins' modifications should be present
@@ -115,7 +115,7 @@ describe('Chained beforeEvaluate hooks', () => {
       },
     };
 
-    const model = new StubModel('M', 50);
+    const model = new StubModel('m', 50);
     const modelPlugin: PPEPlugin = {
       name: 'model-host',
       version: '1.0.0',
@@ -130,7 +130,7 @@ describe('Chained beforeEvaluate hooks', () => {
       strict: false,
     });
 
-    const rules = [makeRule({ id: 'r1', model: 'M', params: {} })];
+    const rules = [makeRule({ id: 'r1', model: 'm', params: {} })];
     await engine.evaluate(rules, makeInput());
 
     // pluginB should have received the enrichment from pluginA
@@ -168,7 +168,7 @@ function engineWith(
     name: 'model-host',
     version: '1.0.0',
     onInit(context: PluginContext): void {
-      context.modelRegistry.register(new StubModel('M', 100));
+      context.modelRegistry.register(new StubModel('m', 100));
     },
   };
   return new PPEEngine({
@@ -197,7 +197,7 @@ describe('Hook errors', () => {
         throw thrown;
       },
     });
-    const error = await failure(engineWith([broken]), [makeRule({ id: 'r1', model: 'M' })]);
+    const error = await failure(engineWith([broken]), [makeRule({ id: 'r1', model: 'm' })]);
     expect(error).toBeInstanceOf(PluginHookError);
     expect(error).toMatchObject({
       code: 'PLUGIN_HOOK',
@@ -219,7 +219,7 @@ describe('Hook errors', () => {
     });
     const input = makeInput();
     const error = await engineWith([broken])
-      .evaluate([makeRule({ id: 'r1', model: 'M' })], input)
+      .evaluate([makeRule({ id: 'r1', model: 'm' })], input)
       .then(
         () => undefined,
         (caught: unknown) => caught,
@@ -244,7 +244,7 @@ describe('Hook errors', () => {
         throw new Error('onError crash');
       },
     });
-    const error = await failure(engineWith([broken]), [makeRule({ id: 'r1', model: 'M' })]);
+    const error = await failure(engineWith([broken]), [makeRule({ id: 'r1', model: 'm' })]);
     expect(error).toBeInstanceOf(PluginHookError);
     expect(error).toMatchObject({
       hook: 'afterEvaluate',
@@ -266,12 +266,12 @@ describe('Hook errors', () => {
       pluginWith(name, {
         beforeEvaluate: (input, rules) => ({
           input,
-          rules: [...rules, makeRule({ id: `${name}-rule`, model: 'M' })],
+          rules: [...rules, makeRule({ id: `${name}-rule`, model: 'm' })],
         }),
         afterEvaluate: () => undefined,
       });
     const result = await engineWith([adding('p1'), adding('p2')], [facts]).evaluate(
-      [makeRule({ id: 'r1', model: 'M', condition: { dsl: 'facts', value: 'x' } })],
+      [makeRule({ id: 'r1', model: 'm', condition: { dsl: 'facts', value: 'x' } })],
       makeInput(),
     );
     expect(result.diagnostics.map((d) => [d.source, d.plugin, d.hook, d.message])).toEqual([
@@ -295,7 +295,7 @@ describe('Plugin state', () => {
       },
     });
     const result = await engineWith([stateful]).evaluate(
-      [makeRule({ id: 'r1', model: 'M' })],
+      [makeRule({ id: 'r1', model: 'm' })],
       makeInput(),
     );
     expect(result.pluginState).toEqual({ stateful: { a: 1 } });
@@ -328,7 +328,7 @@ describe('Plugin state', () => {
       },
     });
     const error = await failure(engineWith([valid, dated, reader]), [
-      makeRule({ id: 'r1', model: 'M' }),
+      makeRule({ id: 'r1', model: 'm' }),
     ]);
     expect(error).toBeInstanceOf(PluginHookError);
     expect(error).toMatchObject({ plugin: 'dated', hook: 'beforeEvaluate' });
@@ -340,7 +340,7 @@ describe('Plugin state', () => {
 });
 
 describe('afterEvaluate returns annotations, not a result', () => {
-  const rules1 = (): Rule[] => [makeRule({ id: 'r1', model: 'M' })];
+  const rules1 = (): Rule[] => [makeRule({ id: 'r1', model: 'm' })];
 
   /** The failure is a PluginHookError of the plugin, with the message of its cause. */
   async function expectRefused(plugin: PPEPlugin, message: string): Promise<void> {
@@ -433,7 +433,7 @@ describe('afterEvaluate returns annotations, not a result', () => {
   });
 
   it('hands plugins a view: a plugin that writes into it changes nothing, and the evaluation fails', async () => {
-    const rule = makeRule({ id: 'r1', model: 'M', params: { rate: 1 } });
+    const rule = makeRule({ id: 'r1', model: 'm', params: { rate: 1 } });
     const careless = pluginWith('careless', {
       afterEvaluate(_input, result): undefined {
         // A careless plugin writing through the readonly types.
@@ -473,7 +473,7 @@ describe('Hook timeouts and onError typing', () => {
     const host: PPEPlugin = {
       name: 'model-host',
       version: '1.0.0',
-      onInit: (context) => context.modelRegistry.register(new StubModel('M', 100)),
+      onInit: (context) => context.modelRegistry.register(new StubModel('m', 100)),
     };
     const engine = new PPEEngine({
       plugins: [host, slow],
@@ -481,7 +481,7 @@ describe('Hook timeouts and onError typing', () => {
       strict: false,
       timeout: { hook: 20 },
     });
-    const error = await failure(engine, [makeRule({ id: 'r1', model: 'M' })]);
+    const error = await failure(engine, [makeRule({ id: 'r1', model: 'm' })]);
     expect(error).toBeInstanceOf(PluginHookError);
     expect(error).toMatchObject({
       code: 'PLUGIN_HOOK',
@@ -511,7 +511,7 @@ describe('Hook timeouts and onError typing', () => {
       },
       onError,
     });
-    const error = await failure(engineWith([broken]), [makeRule({ id: 'r1', model: 'M' })]);
+    const error = await failure(engineWith([broken]), [makeRule({ id: 'r1', model: 'm' })]);
     expect(error).toBeInstanceOf(PluginHookError);
     expectCopyOf((error as PluginHookError).cause, thrown);
     // The PluginHookError is a PPEError: onError gets it as it is, not wrapped.
@@ -527,7 +527,7 @@ describe('Hook timeouts and onError typing', () => {
       },
       onError,
     });
-    const error = await failure(engineWith([broken]), [makeRule({ id: 'r1', model: 'M' })]);
+    const error = await failure(engineWith([broken]), [makeRule({ id: 'r1', model: 'm' })]);
     expect(error).toBeInstanceOf(PluginHookError);
     expectCopyOf((error as PluginHookError).cause, thrown);
     expect(onError).toHaveBeenCalledTimes(1);
@@ -542,7 +542,7 @@ describe('Hook timeouts and onError typing', () => {
       version: '1.0.0',
       onInit: (context) =>
         context.modelRegistry.register({
-          name: 'CRASH',
+          name: 'crash',
           version: '1.0.0',
           validateParams: () => ({ valid: true }),
           calculate: () => {
@@ -552,7 +552,7 @@ describe('Hook timeouts and onError typing', () => {
       onError,
     };
     const engine = new PPEEngine({ plugins: [crashing], dsls: [], strict: false });
-    const outcome = engine.evaluate([makeRule({ id: 'r1', model: 'CRASH' })], makeInput());
+    const outcome = engine.evaluate([makeRule({ id: 'r1', model: 'crash' })], makeInput());
     const received: unknown = await outcome.then(
       () => undefined,
       (caught: unknown) => caught,

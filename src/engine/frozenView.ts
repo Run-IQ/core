@@ -9,22 +9,15 @@ import { FrozenViewWriteError } from '../errors/FrozenViewWriteError.js';
 
 /**
  * The views of one call into plugin code (one `calculate`, one `validateParams`, one
- * `listVariables`, one DSL evaluation, one `afterEvaluate`). The views belong to the scope and so
- * do the errors they throw: an error is a refused write only for the scope that threw it, and
- * only while that call is the one being judged. An error caught in one call and thrown again in
- * another, or forged by any code, is not one (it is the plugin's own throw).
+ * `listVariables`, one DSL evaluation). A write into a view is refused with a dedicated error,
+ * and the scope notes the reason in a slot of its own, private to this call: when the call ends
+ * with a throw and the slot is set, the rule that wrote is excluded with that reason. Nothing the
+ * plugin can reach decides it: not the class, the identity or the content of what it throws.
  */
-/** Every error a view of any scope threw: a brand the engine alone sets (the set is private). */
-const ALL_VIEW_ERRORS = new WeakSet<object>();
-
-/** True for an error some view of the engine threw for a write (whichever call it belongs to). */
-export function isAnyViewError(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && ALL_VIEW_ERRORS.has(error);
-}
-
 export class ViewScope {
   private readonly views = new WeakMap<object, object>();
-  private readonly errors = new WeakSet<object>();
+  /** The reason of the first refused write of this call, or `undefined` if none was refused. */
+  wrote: string | undefined;
 
   /**
    * A view of `value` that reads like the value and refuses every write, deeply and lazily. A
@@ -36,15 +29,9 @@ export class ViewScope {
     return this.view(value) as T;
   }
 
-  /** True for an error a view of this scope threw for a write (not one that merely looks like it). */
-  isWriteError(error: unknown): error is FrozenViewWriteError {
-    return typeof error === 'object' && error !== null && this.errors.has(error);
-  }
-
   private refuse(key: string | symbol): never {
     const error = new FrozenViewWriteError(clip(typeof key === 'symbol' ? key.toString() : key));
-    this.errors.add(error);
-    ALL_VIEW_ERRORS.add(error);
+    this.wrote ??= error.message;
     throw error;
   }
 

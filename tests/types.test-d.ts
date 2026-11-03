@@ -63,7 +63,7 @@ import type {
 
 /** A model written before phase 2: it returns a bare number, with no output declaration. */
 class LegacyNumberModel implements CalculationModel {
-  readonly name = 'FLAT';
+  readonly name = 'flat';
   readonly version = '1.0.0';
 
   validateParams(_params: unknown): ValidationResult {

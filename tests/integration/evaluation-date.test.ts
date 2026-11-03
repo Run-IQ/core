@@ -9,7 +9,7 @@ const host: PPEPlugin = {
   name: 'model-host',
   version: '1.0.0',
   onInit(context: PluginContext): void {
-    context.modelRegistry.register(new StubModel('M', 100));
+    context.modelRegistry.register(new StubModel('m', 100));
   },
 };
 
@@ -22,7 +22,7 @@ describe('the evaluation date is an input, a rule bound is a rule', () => {
     // of RuleFilter itself still gets spec's INVALID_DATE (tests/engine/RuleFilter.test.ts).
     const input = makeInput({ meta: { tenantId: 't', effectiveDate: new Date('x') } });
     const error = await engine()
-      .evaluate([makeRule({ id: 'r1', model: 'M' })], input)
+      .evaluate([makeRule({ id: 'r1', model: 'm' })], input)
       .then(
         () => undefined,
         (caught: unknown) => caught,
@@ -48,7 +48,7 @@ describe('the evaluation date is an input, a rule bound is a rule', () => {
     };
     const error = await engine([corrupt])
       .evaluate(
-        [makeRule({ id: 'bad', model: 'M' }), makeRule({ id: 'good', model: 'M' })],
+        [makeRule({ id: 'bad', model: 'm' }), makeRule({ id: 'good', model: 'm' })],
         makeInput({ meta: { tenantId: 't', effectiveDate: new Date('2025-06-01T00:00:00.000Z') } }),
       )
       .then(
@@ -64,7 +64,7 @@ describe('the evaluation date is an input, a rule bound is a rule', () => {
   describe('the evaluation date: meta.effectiveDate, or meta.dates.effective', () => {
     const inJune = makeRule({
       id: 'june',
-      model: 'M',
+      model: 'm',
       effectiveFrom: new Date('2025-01-01T00:00:00.000Z'),
       effectiveUntil: new Date('2025-06-01T00:00:00.000Z'),
     });

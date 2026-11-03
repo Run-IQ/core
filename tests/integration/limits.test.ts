@@ -15,7 +15,7 @@ function spyingPlugin(): PPEPlugin & { calls: string[] } {
     version: '1.0.0',
     calls,
     onInit(context: PluginContext): void {
-      context.modelRegistry.register(new StubModel('M', 10));
+      context.modelRegistry.register(new StubModel('m', 10));
     },
     beforeEvaluate(input, rules) {
       calls.push('beforeEvaluate');
@@ -38,7 +38,7 @@ const failureOf = async (run: () => Promise<unknown>): Promise<unknown> =>
   );
 
 const rules = (count: number) =>
-  Array.from({ length: count }, (_, i) => makeRule({ id: `r${i}`, model: 'M' }));
+  Array.from({ length: count }, (_, i) => makeRule({ id: `r${i}`, model: 'm' }));
 
 const nested = (levels: number): Record<string, unknown> => {
   let value: Record<string, unknown> = { leaf: 1 };

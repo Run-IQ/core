@@ -18,11 +18,13 @@ const INTRINSIC_ERRORS: ReadonlySet<unknown> = new Set([
   URIError.prototype,
 ]);
 
-/** `text` as it is, or cut to `MAX_TEXT` characters on a code point with its length. */
+/**
+ * `text` as it is, or cut to `MAX_TEXT` characters on a code point with its length. Always
+ * well-formed: a lone surrogate is replaced, whatever the length, so that no text the engine
+ * writes into a record or an error can hold one.
+ */
 export function clip(text: string): string {
-  return text.length <= MAX_TEXT
-    ? text
-    : clipText(text, MAX_TEXT, `... (${text.length} characters)`);
+  return clipText(text, MAX_TEXT, `... (${text.length} characters)`);
 }
 
 interface State {

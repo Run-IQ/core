@@ -20,7 +20,7 @@ import { makeRule, makeInput, StubModel, InMemorySnapshotAdapter } from '../help
 // evaluation. Every probe asserts the exact failure, or that a later change has no effect.
 
 const FLAT: CalculationModel = {
-  name: 'FLAT',
+  name: 'flat',
   version: '1.0.0',
   validateParams: (params) =>
     typeof (params as { rate?: unknown }).rate === 'number'
@@ -33,7 +33,7 @@ const host: PPEPlugin = {
   version: '1.0.0',
   onInit(context: PluginContext): void {
     context.modelRegistry.register(FLAT);
-    context.modelRegistry.register(new StubModel('M', 10));
+    context.modelRegistry.register(new StubModel('m', 10));
   },
 };
 const pluginWith = (name: string, hooks: Partial<PPEPlugin>): PPEPlugin => ({
@@ -83,7 +83,7 @@ function build(
   });
   return { engine, saved, adapter: inner };
 }
-const tax = (rate = 100): Rule => makeRule({ id: 'tax', model: 'FLAT', params: { rate } });
+const tax = (rate = 100): Rule => makeRule({ id: 'tax', model: 'flat', params: { rate } });
 async function failure(
   built: Built,
   rules: unknown,
@@ -138,7 +138,7 @@ describe('S1: nothing is kept by reference; one definition of plain', () => {
   it('A1: a caller changing foreign data while a hook is awaited changes nothing', async () => {
     const data = foreign<Record<string, unknown>>('({ amount: 5 })');
     const reader: CalculationModel = {
-      name: 'READ',
+      name: 'read',
       version: '1.0.0',
       validateParams: () => ({ valid: true }),
       calculate: (input) => input['amount'] as number,
@@ -154,7 +154,7 @@ describe('S1: nothing is kept by reference; one definition of plain', () => {
       }),
     ]);
     const result = await built.engine.evaluate(
-      [makeRule({ id: 'r', model: 'READ' })],
+      [makeRule({ id: 'r', model: 'read' })],
       makeInput({ data }),
     );
     expect(result.value).toBe(5);
@@ -177,11 +177,11 @@ describe('S1: nothing is kept by reference; one definition of plain', () => {
 
   it('A4b: a foreign source rule changed by the caller during a hook await keeps its checked content', async () => {
     const rule = foreign<Rule>(
-      `({ id: 'tax', version: 1, model: 'FLAT', priority: 100, tags: [], params: { rate: 5 }, effectiveFrom: '2024-01-01', effectiveUntil: null, checksum: '' })`,
+      `({ id: 'tax', version: 1, model: 'flat', priority: 100, tags: [], params: { rate: 5 }, effectiveFrom: '2024-01-01', effectiveUntil: null, checksum: '' })`,
     );
     const good = makeRule({
       id: 'tax',
-      model: 'FLAT',
+      model: 'flat',
       params: { rate: 5 },
       effectiveFrom: '2024-01-01' as never,
     });
@@ -196,11 +196,11 @@ describe('S1: nothing is kept by reference; one definition of plain', () => {
 
   it('A5b: a foreign rule a hook adds and later changes keeps its validated content', async () => {
     const add = foreign<Rule>(
-      `({ id: 'add', version: 1, model: 'FLAT', priority: 90, tags: [], params: { rate: 7 }, effectiveFrom: '2024-01-01', effectiveUntil: null, checksum: '' })`,
+      `({ id: 'add', version: 1, model: 'flat', priority: 90, tags: [], params: { rate: 7 }, effectiveFrom: '2024-01-01', effectiveUntil: null, checksum: '' })`,
     );
     (add as { checksum: string }).checksum = makeRule({
       id: 'add',
-      model: 'FLAT',
+      model: 'flat',
       priority: 90,
       params: { rate: 7 },
       effectiveFrom: '2024-01-01' as never,
@@ -210,7 +210,7 @@ describe('S1: nothing is kept by reference; one definition of plain', () => {
       slowHook,
     ]);
     setTimeout(() => ((add.params as { rate: number }).rate = 7000), 5);
-    const result = await built.engine.evaluate([makeRule({ id: 'slow', model: 'M' })], makeInput());
+    const result = await built.engine.evaluate([makeRule({ id: 'slow', model: 'm' })], makeInput());
     expect(result.appliedRules.find((r) => r.id === 'add')?.params).toEqual({ rate: 7 });
   });
 
@@ -238,7 +238,7 @@ describe('S1: nothing is kept by reference; one definition of plain', () => {
   it('C1: a Proxy rule whose prototype changes between reads fails as a PluginHookError', async () => {
     class Fake {}
     let reads = 0;
-    const real = makeRule({ id: 'add', model: 'FLAT', params: { rate: 7 } });
+    const real = makeRule({ id: 'add', model: 'flat', params: { rate: 7 } });
     const proxy = new Proxy(real, {
       getPrototypeOf: () => (++reads === 1 ? Fake.prototype : Object.prototype),
     });
@@ -314,7 +314,7 @@ describe('S3: the total a hook can make the engine read is bounded', () => {
   it('D1: the same big rule returned many times is refused within the aggregate bound, quickly', async () => {
     const big = makeRule({
       id: 'big',
-      model: 'M',
+      model: 'm',
       params: { pad: new Array<number>(50_000).fill(1) },
     });
     const built = build(
@@ -338,7 +338,7 @@ describe('S3: the total a hook can make the engine read is bounded', () => {
   it('D3: source rules sharing one big params are held to maxRuleSetNodes', async () => {
     const pad = new Array<number>(50_000).fill(1);
     const rules = Array.from({ length: 20 }, (_, i) =>
-      makeRule({ id: `r${i}`, model: 'M', params: { pad } }),
+      makeRule({ id: `r${i}`, model: 'm', params: { pad } }),
     );
     const built = build([], { limits: { maxRuleSetNodes: 200_000 } });
     const started = Date.now();
@@ -370,7 +370,7 @@ describe('S4: the engine holds no Date', () => {
   const dated = (): Rule =>
     makeRule({
       id: 'd',
-      model: 'FLAT',
+      model: 'flat',
       params: { rate: 3, since: new Date('2024-01-01T00:00:00Z') },
       condition: { dsl: 'slow', value: { at: new Date('2024-01-01T00:00:00Z') } },
     });
@@ -378,7 +378,7 @@ describe('S4: the engine holds no Date', () => {
   it('E2: validateParams receives the date as a string, and cannot move it', async () => {
     let seen: unknown;
     const spy: CalculationModel = {
-      name: 'SPY',
+      name: 'spy',
       version: '1.0.0',
       validateParams: (params) => {
         seen = (params as { since: unknown }).since;
@@ -388,7 +388,7 @@ describe('S4: the engine holds no Date', () => {
     };
     const built = build([pluginWith('reg', { onInit: (c) => c.modelRegistry.register(spy) })]);
     await built.engine.evaluate(
-      [makeRule({ id: 's', model: 'SPY', params: { since: new Date('2024-01-01T00:00:00Z') } })],
+      [makeRule({ id: 's', model: 'spy', params: { since: new Date('2024-01-01T00:00:00Z') } })],
       makeInput(),
     );
     expect(seen).toBe('2024-01-01T00:00:00.000Z');
@@ -423,7 +423,7 @@ describe('S5: writes are trapped and classified by class, never by message', () 
 
   it("E1: a write in validateParams is that rule's MODEL_ERROR", async () => {
     const writer: CalculationModel = {
-      name: 'VW',
+      name: 'vw',
       version: '1.0.0',
       validateParams: (params) => {
         (params as Record<string, unknown>)['rate'] = 1;
@@ -433,7 +433,7 @@ describe('S5: writes are trapped and classified by class, never by message', () 
     };
     const built = build([regModel(writer)]);
     const result = await built.engine.evaluate(
-      [makeRule({ id: 'w', model: 'VW', params: { rate: 5 } }), makeRule({ id: 'ok', model: 'M' })],
+      [makeRule({ id: 'w', model: 'vw', params: { rate: 5 } }), makeRule({ id: 'ok', model: 'm' })],
       makeInput(),
     );
     expect(result.appliedRules.map((r) => r.id)).toEqual(['ok']);
@@ -442,7 +442,7 @@ describe('S5: writes are trapped and classified by class, never by message', () 
 
   it("E4: a TypeError of the model's own, with a write-like message, fails the evaluation", async () => {
     const thrower: CalculationModel = {
-      name: 'TH',
+      name: 'th',
       version: '1.0.0',
       validateParams: () => ({ valid: true }),
       calculate: () => {
@@ -450,7 +450,7 @@ describe('S5: writes are trapped and classified by class, never by message', () 
       },
     };
     const built = build([regModel(thrower)]);
-    const error = await failure(built, [makeRule({ id: 't', model: 'TH' })]);
+    const error = await failure(built, [makeRule({ id: 't', model: 'th' })]);
     expect(error).toBeInstanceOf(UnexpectedEngineError);
     expect((error as { cause: unknown }).cause).toMatchObject({ name: 'TypeError' });
   });
@@ -458,7 +458,7 @@ describe('S5: writes are trapped and classified by class, never by message', () 
   it("E5: a write into the model's own frozen table fails the evaluation", async () => {
     const table = Object.freeze({ a: 1 });
     const own: CalculationModel = {
-      name: 'OWN',
+      name: 'own',
       version: '1.0.0',
       validateParams: () => ({ valid: true }),
       calculate: () => {
@@ -467,7 +467,7 @@ describe('S5: writes are trapped and classified by class, never by message', () 
       },
     };
     const built = build([regModel(own)]);
-    const error = await failure(built, [makeRule({ id: 'o', model: 'OWN' })]);
+    const error = await failure(built, [makeRule({ id: 'o', model: 'own' })]);
     expect(error).toBeInstanceOf(UnexpectedEngineError);
     expect((error as { cause: unknown }).cause).toMatchObject({ name: 'TypeError' });
   });
@@ -483,7 +483,7 @@ describe('S5: writes are trapped and classified by class, never by message', () 
     };
     const built = build([], {}, [writer]);
     const result = await built.engine.evaluate(
-      [makeRule({ id: 'd', model: 'M', condition: { dsl: 'slow', value: { y: 1 } } })],
+      [makeRule({ id: 'd', model: 'm', condition: { dsl: 'slow', value: { y: 1 } } })],
       makeInput(),
     );
     expect(result.skippedRules[0]!.reason).toBe('DSL_ERROR');
@@ -515,7 +515,7 @@ describe('S7: the registries are fixed for the evaluation', () => {
   it('J1: a model registered during the evaluation is not seen, so a rule added with it is refused', async () => {
     let context!: PluginContext;
     const late: CalculationModel = {
-      name: 'LATE',
+      name: 'late',
       version: '1.0.0',
       validateParams: () => ({ valid: false, errors: ['no'] }),
       calculate: () => 101,
@@ -531,7 +531,7 @@ describe('S7: the registries are fixed for the evaluation', () => {
       pluginWith('a', {
         beforeEvaluate: (input, rules) => ({
           input,
-          rules: [...rules, makeRule({ id: 'late', model: 'LATE', params: { rate: 'junk' } })],
+          rules: [...rules, makeRule({ id: 'late', model: 'late', params: { rate: 'junk' } })],
         }),
       }),
     ]);
@@ -539,7 +539,7 @@ describe('S7: the registries are fixed for the evaluation', () => {
     expect(error).toBeInstanceOf(PluginHookError);
     expect(error).toMatchObject({ plugin: 'a' });
     expect(((error as PluginHookError).cause as Error).message).toBe(
-      'plugin a added rule late@1, whose model LATE is not registered',
+      'plugin a added rule late@1, whose model late is not registered',
     );
   });
 
@@ -555,7 +555,7 @@ describe('S7: the registries are fixed for the evaluation', () => {
       }),
     ]);
     const result = await built.engine.evaluate(
-      [makeRule({ id: 'd', model: 'M', condition: { dsl: 'late', value: null } })],
+      [makeRule({ id: 'd', model: 'm', condition: { dsl: 'late', value: null } })],
       makeInput(),
     );
     expect(result.skippedRules[0]).toMatchObject({ reason: 'DSL_NOT_FOUND' });
@@ -764,7 +764,7 @@ describe('S12: the survivors of the fourth review', () => {
   });
 
   it('M51: a label a plugin added and another skipped cannot be added again with other content', async () => {
-    const extra = makeRule({ id: 'x', model: 'FLAT', params: { rate: 1 } });
+    const extra = makeRule({ id: 'x', model: 'flat', params: { rate: 1 } });
     const built = build([
       pluginWith('a', { beforeEvaluate: (input, rules) => ({ input, rules: [...rules, extra] }) }),
       pluginWith('b', {
@@ -778,7 +778,7 @@ describe('S12: the survivors of the fourth review', () => {
       pluginWith('c', {
         beforeEvaluate: (input, rules) => ({
           input,
-          rules: [...rules, makeRule({ id: 'x', model: 'FLAT', params: { rate: 9 } })],
+          rules: [...rules, makeRule({ id: 'x', model: 'flat', params: { rate: 9 } })],
         }),
       }),
     ]);
@@ -858,17 +858,17 @@ describe('the rest of the survivors of the fourth review', () => {
     const built = build([
       pluginWith('reg1', {
         onInit: (c) =>
-          c.modelRegistry.register(writing('DEL', (rule) => void delete rule['priority'])),
+          c.modelRegistry.register(writing('del', (rule) => void delete rule['priority'])),
       }),
       pluginWith('reg2', {
         onInit: (c) =>
           c.modelRegistry.register(
-            writing('DEF', (rule) => void Object.defineProperty(rule, 'x', { value: 1 })),
+            writing('def', (rule) => void Object.defineProperty(rule, 'x', { value: 1 })),
           ),
       }),
     ]);
     const result = await built.engine.evaluate(
-      [makeRule({ id: 'del', model: 'DEL' }), makeRule({ id: 'def', model: 'DEF' })],
+      [makeRule({ id: 'del', model: 'del' }), makeRule({ id: 'def', model: 'def' })],
       makeInput(),
     );
     expect(result.skippedRules.map((s) => [s.rule.id, s.reason, s.detail])).toEqual([
@@ -889,7 +889,7 @@ describe('the rest of the survivors of the fourth review', () => {
     };
     const built = build([], {}, [dsl]);
     const result = await built.engine.evaluate(
-      [makeRule({ id: 'd', model: 'M', condition: { dsl: 'slow', value: { y: 1 } } })],
+      [makeRule({ id: 'd', model: 'm', condition: { dsl: 'slow', value: { y: 1 } } })],
       makeInput(),
     );
     expect(result.diagnostics.map((d) => d.message)).toEqual([
@@ -901,7 +901,7 @@ describe('the rest of the survivors of the fourth review', () => {
   it('what a model returns is copied: an output that is a view of its input is plain data', async () => {
     const OBJ = { type: 'object', combine: 'highestPriority' } as const;
     const returning: CalculationModel = {
-      name: 'OBJ',
+      name: 'obj',
       version: '1.0.0',
       output: OBJ,
       validateParams: () => ({ valid: true }),
@@ -909,7 +909,7 @@ describe('the rest of the survivors of the fourth review', () => {
     };
     const built = build([regModel(returning)]);
     const result = await built.engine.evaluate(
-      [makeRule({ id: 'o', model: 'OBJ', output: 'thing' })],
+      [makeRule({ id: 'o', model: 'obj', output: 'thing' })],
       makeInput({ data: { nest: { v: 1 } } }),
     );
     const value = result.outputs['thing']!.value as object;

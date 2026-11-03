@@ -204,8 +204,8 @@ export class ExecutionPipeline {
             views.trapped(rule.params),
           );
         } catch (error) {
-          if (!views.isWriteError(error)) throw UnexpectedEngineError.foreign(error);
-          skipped.push({ rule, reason: 'MODEL_ERROR', detail: error.message });
+          if (views.wrote === undefined) throw UnexpectedEngineError.foreign(error);
+          skipped.push({ rule, reason: 'MODEL_ERROR', detail: views.wrote });
           continue;
         }
         // What the model returns is data the engine copies once, bounded (`maxRuleLeaves` nodes,
@@ -221,9 +221,8 @@ export class ExecutionPipeline {
           // The budget of the evaluation is the engine's bound, not that rule's fault.
           if (isRaisedLimit(error) && error.limit === 'maxHookLeaves') throw error;
           const causes = isReadFailure(error) ? causesOf(error) : [];
-          const written = causes.find((cause) => views.isWriteError(cause));
-          if (written !== undefined) {
-            skipped.push({ rule, reason: 'MODEL_ERROR', detail: (written as Error).message });
+          if (views.wrote !== undefined) {
+            skipped.push({ rule, reason: 'MODEL_ERROR', detail: views.wrote });
             continue;
           }
           if (causes.length > 0) throw UnexpectedEngineError.foreign(causes[0]);

@@ -179,7 +179,7 @@ function fixture(modes: Partial<Record<Callback, Mode>> = {}): {
     return answer();
   };
   const model: CalculationModel = {
-    name: 'HOSTILE',
+    name: 'hostile',
     version: '1.0.0',
     output: { type: 'number', combine: 'sum' },
     validateParams: () =>
@@ -204,7 +204,7 @@ function fixture(modes: Partial<Record<Callback, Mode>> = {}): {
     onInit: (context: PluginContext) =>
       act('onInit', () => {
         context.modelRegistry.register(hostile(model, 'model') as CalculationModel);
-        context.modelRegistry.register(new StubModel('PLAIN', 3));
+        context.modelRegistry.register(new StubModel('plain', 3));
         return undefined;
       }) as never,
     beforeEvaluate: (input, current) =>
@@ -231,10 +231,10 @@ function fixture(modes: Partial<Record<Callback, Mode>> = {}): {
   const rules = [
     makeRule({
       id: 'hostile',
-      model: 'HOSTILE',
+      model: 'hostile',
       condition: { dsl: 'hostiledsl', value: { any: 1 } },
     }),
-    makeRule({ id: 'plain', model: 'PLAIN' }),
+    makeRule({ id: 'plain', model: 'plain' }),
   ];
   return { plugin, dsl, rules };
 }
@@ -363,7 +363,7 @@ describe('a plugin made only of Proxies, in every role', () => {
           context.modelRegistry.register(
             hostile(
               {
-                name: 'REJECTS',
+                name: 'rejects',
                 version: '1.0.0',
                 validateParams: () => ({ valid: true }),
                 calculate: () => Promise.reject(boom('late')),
@@ -377,7 +377,7 @@ describe('a plugin made only of Proxies, in every role', () => {
     );
     const second = new PPEEngine({ plugins: [rejecting], dsls: [], strict: false });
     const failure = await second
-      .evaluate([makeRule({ id: 'r', model: 'REJECTS' })], makeInput())
+      .evaluate([makeRule({ id: 'r', model: 'rejects' })], makeInput())
       .then(
         () => undefined,
         (caught: unknown) => caught,
@@ -400,7 +400,7 @@ describe('a plugin made only of Proxies, in every role', () => {
           context.modelRegistry.register(
             hostile(
               {
-                name: 'SUBBED',
+                name: 'subbed',
                 version: '1.0.0',
                 validateParams: () => ({ valid: true }),
                 calculate: () => Sub.reject(boom('subclass')),
@@ -414,7 +414,7 @@ describe('a plugin made only of Proxies, in every role', () => {
     );
     const engine = new PPEEngine({ plugins: [sub], dsls: [], strict: false });
     const failure = await engine
-      .evaluate([makeRule({ id: 'r', model: 'SUBBED' })], makeInput())
+      .evaluate([makeRule({ id: 'r', model: 'subbed' })], makeInput())
       .then(
         () => undefined,
         (caught: unknown) => caught,

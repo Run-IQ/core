@@ -8,10 +8,10 @@ describe('DominanceResolver', () => {
 
   it('sorts rules by priority descending, then id ascending', () => {
     const rules = [
-      makeRule({ id: 'z', model: 'M', priority: 100 }),
-      makeRule({ id: 'high', model: 'M', priority: 300 }),
-      makeRule({ id: 'b', model: 'M', priority: 100 }),
-      makeRule({ id: 'mid', model: 'M', priority: 200 }),
+      makeRule({ id: 'z', model: 'm', priority: 100 }),
+      makeRule({ id: 'high', model: 'm', priority: 300 }),
+      makeRule({ id: 'b', model: 'm', priority: 100 }),
+      makeRule({ id: 'mid', model: 'm', priority: 200 }),
     ];
     const { kept, skipped } = resolver.resolve(rules, 'throw');
     expect(kept.map((r) => r.id)).toEqual(['high', 'mid', 'b', 'z']);
@@ -20,10 +20,10 @@ describe('DominanceResolver', () => {
 
   it('keeps only the highest priority of a dominance group', () => {
     const rules = [
-      makeRule({ id: 'tva-local', model: 'M', priority: 1000, dominanceGroup: 'tva' }),
+      makeRule({ id: 'tva-local', model: 'm', priority: 1000, dominanceGroup: 'tva' }),
       makeRule({
         id: 'tva-national',
-        model: 'M',
+        model: 'm',
         priority: 3000,
         version: 2,
         dominanceGroup: 'tva',
@@ -39,8 +39,8 @@ describe('DominanceResolver', () => {
 
   it('does not mix different groups', () => {
     const rules = [
-      makeRule({ id: 'a', model: 'M', priority: 3000, dominanceGroup: 'g1' }),
-      makeRule({ id: 'b', model: 'M', priority: 1000, dominanceGroup: 'g2' }),
+      makeRule({ id: 'a', model: 'm', priority: 3000, dominanceGroup: 'g1' }),
+      makeRule({ id: 'b', model: 'm', priority: 1000, dominanceGroup: 'g2' }),
     ];
     const { kept, skipped } = resolver.resolve(rules, 'throw');
     expect(kept.map((r) => r.id)).toEqual(['a', 'b']);
@@ -49,8 +49,8 @@ describe('DominanceResolver', () => {
 
   it('throws RuleConflictError with both ids on a tie at the top of a group', () => {
     const rules = [
-      makeRule({ id: 'r1', model: 'M', priority: 100, dominanceGroup: 'G1' }),
-      makeRule({ id: 'r2', model: 'M', priority: 100, dominanceGroup: 'G1' }),
+      makeRule({ id: 'r1', model: 'm', priority: 100, dominanceGroup: 'G1' }),
+      makeRule({ id: 'r2', model: 'm', priority: 100, dominanceGroup: 'G1' }),
     ];
     try {
       resolver.resolve(rules, 'throw');
@@ -63,8 +63,8 @@ describe('DominanceResolver', () => {
 
   it("keeps the smallest id on a top tie in 'first' mode and marks the other RULE_CONFLICT", () => {
     const rules = [
-      makeRule({ id: 'r2', model: 'M', priority: 100, dominanceGroup: 'G1' }),
-      makeRule({ id: 'r1', model: 'M', priority: 100, dominanceGroup: 'G1' }),
+      makeRule({ id: 'r2', model: 'm', priority: 100, dominanceGroup: 'G1' }),
+      makeRule({ id: 'r1', model: 'm', priority: 100, dominanceGroup: 'G1' }),
     ];
     const { kept, skipped } = resolver.resolve(rules, 'first');
     expect(kept.map((r) => r.id)).toEqual(['r1']);
@@ -76,9 +76,9 @@ describe('DominanceResolver', () => {
 
   it('does not conflict on a tie below the head: both are DOMINATED', () => {
     const rules = [
-      makeRule({ id: 'top', model: 'M', priority: 5000, dominanceGroup: 'g' }),
-      makeRule({ id: 'x', model: 'M', priority: 1000, dominanceGroup: 'g' }),
-      makeRule({ id: 'y', model: 'M', priority: 1000, dominanceGroup: 'g' }),
+      makeRule({ id: 'top', model: 'm', priority: 5000, dominanceGroup: 'g' }),
+      makeRule({ id: 'x', model: 'm', priority: 1000, dominanceGroup: 'g' }),
+      makeRule({ id: 'y', model: 'm', priority: 1000, dominanceGroup: 'g' }),
     ];
     const { kept, skipped } = resolver.resolve(rules, 'throw');
     expect(kept.map((r) => r.id)).toEqual(['top']);
@@ -90,8 +90,8 @@ describe('DominanceResolver', () => {
 
   it('never dominates nor conflicts rules without a group, even at equal priority', () => {
     const rules = [
-      makeRule({ id: 'b', model: 'M', priority: 100 }),
-      makeRule({ id: 'a', model: 'M', priority: 100 }),
+      makeRule({ id: 'b', model: 'm', priority: 100 }),
+      makeRule({ id: 'a', model: 'm', priority: 100 }),
     ];
     const { kept, skipped } = resolver.resolve(rules, 'throw');
     expect(kept.map((r) => r.id)).toEqual(['a', 'b']);
@@ -104,15 +104,15 @@ describe('DominanceResolver', () => {
 
   describe('determinism', () => {
     const fixture = [
-      makeRule({ id: 'g1-a', model: 'M', priority: 3000, dominanceGroup: 'g1' }),
-      makeRule({ id: 'g1-b', model: 'M', priority: 1000, dominanceGroup: 'g1' }),
-      makeRule({ id: 'g1-c', model: 'M', priority: 1000, dominanceGroup: 'g1' }),
-      makeRule({ id: 'g2-a', model: 'M', priority: 200, dominanceGroup: 'g2' }),
-      makeRule({ id: 'g2-b', model: 'M', priority: 200, dominanceGroup: 'g2', version: 2 }),
-      makeRule({ id: 'g2-b', model: 'M', priority: 200, dominanceGroup: 'g2', version: 1 }),
-      makeRule({ id: 'g2-z', model: 'M', priority: 50, dominanceGroup: 'g2' }),
-      makeRule({ id: 'free-2', model: 'M', priority: 200 }),
-      makeRule({ id: 'free-1', model: 'M', priority: 200 }),
+      makeRule({ id: 'g1-a', model: 'm', priority: 3000, dominanceGroup: 'g1' }),
+      makeRule({ id: 'g1-b', model: 'm', priority: 1000, dominanceGroup: 'g1' }),
+      makeRule({ id: 'g1-c', model: 'm', priority: 1000, dominanceGroup: 'g1' }),
+      makeRule({ id: 'g2-a', model: 'm', priority: 200, dominanceGroup: 'g2' }),
+      makeRule({ id: 'g2-b', model: 'm', priority: 200, dominanceGroup: 'g2', version: 2 }),
+      makeRule({ id: 'g2-b', model: 'm', priority: 200, dominanceGroup: 'g2', version: 1 }),
+      makeRule({ id: 'g2-z', model: 'm', priority: 50, dominanceGroup: 'g2' }),
+      makeRule({ id: 'free-2', model: 'm', priority: 200 }),
+      makeRule({ id: 'free-1', model: 'm', priority: 200 }),
     ];
 
     const permutations = <T>(items: readonly T[]): T[][] =>
@@ -147,10 +147,10 @@ describe('DominanceResolver', () => {
 
     it("raises the same conflict for every input order when two groups conflict in 'throw' mode", () => {
       const rules = [
-        makeRule({ id: 'q2', model: 'M', priority: 10, dominanceGroup: 'zeta' }),
-        makeRule({ id: 'q1', model: 'M', priority: 10, dominanceGroup: 'zeta' }),
-        makeRule({ id: 'p2', model: 'M', priority: 20, dominanceGroup: 'alpha' }),
-        makeRule({ id: 'p1', model: 'M', priority: 20, dominanceGroup: 'alpha' }),
+        makeRule({ id: 'q2', model: 'm', priority: 10, dominanceGroup: 'zeta' }),
+        makeRule({ id: 'q1', model: 'm', priority: 10, dominanceGroup: 'zeta' }),
+        makeRule({ id: 'p2', model: 'm', priority: 20, dominanceGroup: 'alpha' }),
+        makeRule({ id: 'p1', model: 'm', priority: 20, dominanceGroup: 'alpha' }),
       ];
       for (const order of permutations(rules)) {
         try {

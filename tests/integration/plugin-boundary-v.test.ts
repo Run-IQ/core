@@ -26,7 +26,7 @@ import {
 // Round 6 of the 9L audit (V1 to V11 and the rulings on the threat model).
 
 const FLAT: CalculationModel = {
-  name: 'FLAT',
+  name: 'flat',
   version: '1.0.0',
   validateParams: (params) =>
     typeof (params as { rate?: unknown }).rate === 'number'
@@ -39,7 +39,7 @@ const host: PPEPlugin = {
   version: '1.0.0',
   onInit(context: PluginContext): void {
     context.modelRegistry.register(FLAT);
-    context.modelRegistry.register(new StubModel('M', 10));
+    context.modelRegistry.register(new StubModel('m', 10));
   },
 };
 const pluginWith = (name: string, hooks: Partial<PPEPlugin>): PPEPlugin => ({
@@ -76,7 +76,7 @@ function build(
   });
   return { engine, saved };
 }
-const tax = (rate = 100): Rule => makeRule({ id: 'tax', model: 'FLAT', params: { rate } });
+const tax = (rate = 100): Rule => makeRule({ id: 'tax', model: 'flat', params: { rate } });
 async function failure(
   built: Built,
   rules: unknown,
@@ -97,22 +97,23 @@ describe('V1: the declarations a model gives are copied when it is registered', 
 
   it('Vg2: a plugin writing into model.output during an evaluation changes nothing', async () => {
     let context!: PluginContext;
-    const model = new ValueModel('SUMM', declaration(), { a: 3, b: 4 });
+    const model = new ValueModel('summ', declaration(), { a: 3, b: 4 });
     const built = build([
       pluginWith('grab', { onInit: (c) => void (context = c) }),
       regModel('a', model),
       pluginWith('b', {
         beforeEvaluate: (input, rules) => {
-          const live = context.modelRegistry.get('SUMM') as unknown as {
-            output: { combine: string };
-          };
-          live.output.combine = 'max';
+          // What the registry tells is a frozen descriptor: the declaration cannot be written.
+          const told = context.modelRegistry.get('summ');
+          expect(() => {
+            (told.output as unknown as { combine: string }).combine = 'max';
+          }).toThrow(TypeError);
           return { input, rules };
         },
       }),
     ]);
     const result = await built.engine.evaluate(
-      [makeRule({ id: 'a', model: 'SUMM' }), makeRule({ id: 'b', model: 'SUMM' })],
+      [makeRule({ id: 'a', model: 'summ' }), makeRule({ id: 'b', model: 'summ' })],
       makeInput(),
     );
     expect(result.value).toBe(7);
@@ -120,11 +121,11 @@ describe('V1: the declarations a model gives are copied when it is registered', 
 
   it('Vg2b: the same write made before the evaluation, after registration, changes nothing', async () => {
     const output = declaration() as { type: string; combine: string };
-    const model = new ValueModel('SUMM', output as never, { a: 3, b: 4 });
+    const model = new ValueModel('summ', output as never, { a: 3, b: 4 });
     const built = build([regModel('a', model)]);
     output.combine = 'max';
     const result = await built.engine.evaluate(
-      [makeRule({ id: 'a', model: 'SUMM' }), makeRule({ id: 'b', model: 'SUMM' })],
+      [makeRule({ id: 'a', model: 'summ' }), makeRule({ id: 'b', model: 'summ' })],
       makeInput(),
     );
     expect(result.value).toBe(7);
@@ -133,7 +134,7 @@ describe('V1: the declarations a model gives are copied when it is registered', 
   it('Vg3: the declaration is read once, and the copy is the one validated', () => {
     let reads = 0;
     const model: CalculationModel = {
-      name: 'ONCE',
+      name: 'once',
       version: '1.0.0',
       get output() {
         reads += 1;
@@ -145,7 +146,7 @@ describe('V1: the declarations a model gives are copied when it is registered', 
     const registry = new ModelRegistry();
     registry.register(model);
     expect(reads).toBe(1);
-    const fixed = snapshotModels(registry).get('ONCE');
+    const fixed = snapshotModels(registry).get('once');
     expect(reads).toBe(1);
     expect(fixed.output).toEqual(declaration());
     expect(Object.isFrozen(fixed.output)).toBe(true);
@@ -155,13 +156,13 @@ describe('V1: the declarations a model gives are copied when it is registered', 
     const registry = new ModelRegistry();
     class Box {}
     const model = {
-      name: 'BOX',
+      name: 'box',
       version: '1.0.0',
       output: { type: 'number', combine: 'sum', extra: new Box() },
       validateParams: () => ({ valid: true }),
       calculate: () => 1,
     } as unknown as CalculationModel;
-    expect(() => registry.register(model)).toThrow(/BOX/);
+    expect(() => registry.register(model)).toThrow(/box/);
   });
 
   it("Vj3: an evaluator's capabilities are a frozen copy taken at registration", () => {
@@ -208,7 +209,7 @@ describe('V2: undefined is not a JSON value', () => {
   it('Vt: no dimensions at all still applies a rule that declares some', async () => {
     const rule = makeRule({
       id: 'dim',
-      model: 'FLAT',
+      model: 'flat',
       params: { rate: 7 },
       dimensions: { region: 'TG' },
     });
@@ -274,7 +275,7 @@ describe('V3: text is bounded and weighed', () => {
   it('L1: a string shared by many rules costs what it weighs in each of them', async () => {
     const shared = 'x'.repeat(6400); // 100 nodes each time it is read
     const rules = Array.from({ length: 5 }, (_, index) =>
-      makeRule({ id: `r${index}`, model: 'FLAT', params: { rate: 1, text: shared } }),
+      makeRule({ id: `r${index}`, model: 'flat', params: { rate: 1, text: shared } }),
     );
     const built = build([], { limits: { maxRuleSetNodes: 300, maxStringLength: 10_000 } });
     const error = await failure(built, rules);
@@ -290,7 +291,7 @@ describe('V3: text is bounded and weighed', () => {
         rules: [
           ...rules,
           ...Array.from({ length: 5 }, (_, index) =>
-            makeRule({ id: `h${index}`, model: 'FLAT', params: { rate: 1, text: shared } }),
+            makeRule({ id: `h${index}`, model: 'flat', params: { rate: 1, text: shared } }),
           ),
         ],
       }),
@@ -331,7 +332,7 @@ describe('V4: the trace is bounded by the input times its steps', () => {
   it('Tn: nodes of the input times applied steps past maxTraceNodes is refused, by name', async () => {
     // data { a: 1, b: 2 } and the tenant: 4 + 2 = 6 nodes; 5 steps: 30.
     const rules = Array.from({ length: 5 }, (_, index) =>
-      makeRule({ id: `r${index}`, model: 'FLAT', params: { rate: 1 } }),
+      makeRule({ id: `r${index}`, model: 'flat', params: { rate: 1 } }),
     );
     const input = makeInput({ data: { a: 1, b: 2 } });
     const refused = await failure(build([], { limits: { maxTraceNodes: 29 } }), rules, input);
@@ -343,8 +344,8 @@ describe('V4: the trace is bounded by the input times its steps', () => {
 
   it('Tn2: every step shares the one frozen data of the evaluation', async () => {
     const rules = [
-      makeRule({ id: 'a', model: 'FLAT', params: { rate: 1 } }),
-      makeRule({ id: 'b', model: 'FLAT', params: { rate: 2 } }),
+      makeRule({ id: 'a', model: 'flat', params: { rate: 1 } }),
+      makeRule({ id: 'b', model: 'flat', params: { rate: 2 } }),
     ];
     const result = await build([]).engine.evaluate(rules, makeInput({ data: { x: 1 } }));
     const [first, second] = result.trace.steps;
@@ -357,7 +358,7 @@ describe('V5: a refused write is only the one a view of this call threw', () => 
   it('Vq: a view error caught in one evaluation and thrown in another fails the second', async () => {
     let caught: unknown;
     const writer: CalculationModel = {
-      name: 'WRI',
+      name: 'wri',
       version: '1.0.0',
       validateParams: () => ({ valid: true }),
       calculate: (_input, _rule, params) => {
@@ -370,7 +371,7 @@ describe('V5: a refused write is only the one a view of this call threw', () => 
       },
     };
     const replayer: CalculationModel = {
-      name: 'REP',
+      name: 'rep',
       version: '1.0.0',
       validateParams: () => ({ valid: true }),
       calculate: () => {
@@ -379,13 +380,13 @@ describe('V5: a refused write is only the one a view of this call threw', () => 
     };
     const built = build([regModel('w', writer), regModel('r', replayer)]);
     await built.engine.evaluate(
-      [makeRule({ id: 'w', model: 'WRI', params: { rate: 1 } })],
+      [makeRule({ id: 'w', model: 'wri', params: { rate: 1 } })],
       makeInput(),
     );
     expect(caught).toBeInstanceOf(FrozenViewWriteError);
     const error = await failure(
       built,
-      [makeRule({ id: 'r', model: 'REP' })],
+      [makeRule({ id: 'r', model: 'rep' })],
       makeInput({ requestId: 'second' }),
     );
     expect(error).toBeInstanceOf(UnexpectedEngineError);
@@ -405,7 +406,7 @@ describe('V5: a refused write is only the one a view of this call threw', () => 
       },
     });
     const replayer: CalculationModel = {
-      name: 'RV',
+      name: 'rv',
       version: '1.0.0',
       validateParams: () => {
         throw caught;
@@ -417,7 +418,7 @@ describe('V5: a refused write is only the one a view of this call threw', () => 
     expect(caught).toBeInstanceOf(FrozenViewWriteError);
     const error = await failure(
       built,
-      [makeRule({ id: 'rv', model: 'RV' })],
+      [makeRule({ id: 'rv', model: 'rv' })],
       makeInput({ requestId: 'second' }),
     );
     expect(error).toBeInstanceOf(UnexpectedEngineError);
@@ -425,7 +426,7 @@ describe('V5: a refused write is only the one a view of this call threw', () => 
 
   it('Vq2: an error a model catches and rethrows in the same call is still its refused write', async () => {
     const rethrower: CalculationModel = {
-      name: 'RET',
+      name: 'ret',
       version: '1.0.0',
       validateParams: () => ({ valid: true }),
       calculate: (_input, _rule, params) => {
@@ -440,7 +441,7 @@ describe('V5: a refused write is only the one a view of this call threw', () => 
     };
     const built = build([regModel('r', rethrower)]);
     const result = await built.engine.evaluate(
-      [makeRule({ id: 'r', model: 'RET', params: { rate: 1 } })],
+      [makeRule({ id: 'r', model: 'ret', params: { rate: 1 } })],
       makeInput(),
     );
     expect(result.skippedRules[0]).toMatchObject({ reason: 'MODEL_ERROR' });
@@ -449,7 +450,7 @@ describe('V5: a refused write is only the one a view of this call threw', () => 
 
 describe('V6: nothing that is not plain data reaches the record', () => {
   it('W1: an invalid Date in params excludes the rule and is a string in the record', async () => {
-    const valid = makeRule({ id: 'bad', model: 'FLAT', params: { rate: 1 } });
+    const valid = makeRule({ id: 'bad', model: 'flat', params: { rate: 1 } });
     const rule = { ...valid, params: { rate: 1, at: new Date(NaN) } } as unknown as Rule;
     const built = build([]);
     const result = await built.engine.evaluate([rule], makeInput());
@@ -463,7 +464,7 @@ describe('V6: nothing that is not plain data reaches the record', () => {
   });
 
   it('W4: an invalid effectiveFrom excludes the rule the same way', async () => {
-    const rule = makeRule({ id: 'bad', model: 'FLAT', params: { rate: 1 } });
+    const rule = makeRule({ id: 'bad', model: 'flat', params: { rate: 1 } });
     const broken = { ...rule, effectiveFrom: new Date(NaN) } as unknown as Rule;
     const built = build([]);
     const result = await built.engine.evaluate([broken], makeInput());
@@ -476,7 +477,7 @@ describe('V6: nothing that is not plain data reaches the record', () => {
   it('W6: a hook returning a kept rule with a non-plain member in place of a string fails', async () => {
     const given = makeRule({
       id: 'k',
-      model: 'FLAT',
+      model: 'flat',
       params: { rate: 1, tag: '<not plain: Box>' },
     });
     const sneaky = pluginWith('sneaky', {
@@ -496,7 +497,7 @@ describe('V6: nothing that is not plain data reaches the record', () => {
   it('W7: a skip whose rule holds a non-plain member in place of a string fails', async () => {
     const given = makeRule({
       id: 'k',
-      model: 'FLAT',
+      model: 'flat',
       params: { rate: 1, tag: '<not plain: Box>' },
     });
     const sneaky = pluginWith('sneaky', {
@@ -536,7 +537,7 @@ describe('V7: the failure the caller receives is the engine own', () => {
   it('Vc: a plugin cannot rewrite the error its model threw', async () => {
     const boom = new Error('boom');
     const model: CalculationModel = {
-      name: 'BOOM',
+      name: 'boom',
       version: '1.0.0',
       validateParams: () => ({ valid: true }),
       calculate: () => {
@@ -549,7 +550,7 @@ describe('V7: the failure the caller receives is the engine own', () => {
       },
     });
     const error = await failure(build([regModel('m', model), meddler]), [
-      makeRule({ id: 'b', model: 'BOOM' }),
+      makeRule({ id: 'b', model: 'boom' }),
     ]);
     expect(error).toBeInstanceOf(UnexpectedEngineError);
     expect(error).not.toBe(boom);
@@ -567,20 +568,20 @@ describe('V8: what a model returns is judged by what went wrong', () => {
   });
 
   it('W8: a getter of the output that throws is the model throw: the evaluation fails', async () => {
-    const model = modelReturning('GET', () => ({
+    const model = modelReturning('get', () => ({
       get value(): number {
         throw new Error('getter boom');
       },
     }));
     const error = await failure(build([regModel('m', model)]), [
-      makeRule({ id: 'g', model: 'GET' }),
+      makeRule({ id: 'g', model: 'get' }),
     ]);
     expect(error).toBeInstanceOf(UnexpectedEngineError);
     expect(((error as UnexpectedEngineError).cause as Error).message).toBe('getter boom');
   });
 
   it('W11: a getter of the output that writes into the params is a MODEL_ERROR', async () => {
-    const model = modelReturning('WGET', (params) => ({
+    const model = modelReturning('wget', (params) => ({
       get value(): number {
         (params as Record<string, number>)['rate'] = 9;
         return 1;
@@ -588,19 +589,19 @@ describe('V8: what a model returns is judged by what went wrong', () => {
     }));
     const built = build([regModel('m', model)]);
     const result = await built.engine.evaluate(
-      [makeRule({ id: 'w', model: 'WGET', params: { rate: 1 } })],
+      [makeRule({ id: 'w', model: 'wget', params: { rate: 1 } })],
       makeInput(),
     );
     expect(result.skippedRules[0]).toMatchObject({ reason: 'MODEL_ERROR' });
   });
 
   it('W9: an output past maxRuleLeaves is refused for that rule, naming the bound', async () => {
-    const model = modelReturning('BIG', () => ({
+    const model = modelReturning('big', () => ({
       value: 1,
       detail: Array.from({ length: 50 }, (_, index) => index),
     }));
     const built = build([regModel('m', model)], { limits: { maxRuleLeaves: 20 } });
-    const result = await built.engine.evaluate([makeRule({ id: 'b', model: 'BIG' })], makeInput());
+    const result = await built.engine.evaluate([makeRule({ id: 'b', model: 'big' })], makeInput());
     expect(result.skippedRules[0]?.reason).toBe('OUTPUT_MISMATCH');
     expect(result.skippedRules[0]?.detail).toContain('maxRuleLeaves');
   });
@@ -609,7 +610,7 @@ describe('V8: what a model returns is judged by what went wrong', () => {
 describe('V9: the closed view refuses a new key as every other write', () => {
   it('Vo2: preventExtensions then defineProperty of a new key is MODEL_ERROR', async () => {
     const closer: CalculationModel = {
-      name: 'CLO',
+      name: 'clo',
       version: '1.0.0',
       validateParams: () => ({ valid: true }),
       calculate: (_input, _rule, params) => {
@@ -620,7 +621,7 @@ describe('V9: the closed view refuses a new key as every other write', () => {
     };
     const built = build([regModel('c', closer)]);
     const result = await built.engine.evaluate(
-      [makeRule({ id: 'c', model: 'CLO', params: { rate: 1 } })],
+      [makeRule({ id: 'c', model: 'clo', params: { rate: 1 } })],
       makeInput(),
     );
     expect(result.skippedRules[0]).toMatchObject({ reason: 'MODEL_ERROR' });
@@ -633,7 +634,7 @@ describe('V11: survivors of round 6', () => {
     const big = (id: string): Rule =>
       makeRule({
         id,
-        model: 'FLAT',
+        model: 'flat',
         params: { rate: 1, list: Array.from({ length: 400 }, (_, index) => index) },
       });
     const first = pluginWith('first', {

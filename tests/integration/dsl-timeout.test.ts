@@ -31,14 +31,14 @@ const promising: DSLEvaluator = {
 describe('a DSL that returns a promise', () => {
   it('is excluded as DSL_ERROR, naming the breach, and its rejection is handled', async () => {
     const engine = new PPEEngine({
-      plugins: [new StubPlugin('test', [new StubModel('M', 500)])],
+      plugins: [new StubPlugin('test', [new StubModel('m', 500)])],
       dsls: [promising],
       strict: false,
       timeout: { dsl: 50, hook: 500 },
     });
     const rule = makeRule({
       id: 'r-slow',
-      model: 'M',
+      model: 'm',
       params: {},
       condition: { dsl: 'slow-dsl', value: { always: true } },
     });
@@ -53,18 +53,18 @@ describe('a DSL that returns a promise', () => {
 
   it('continues evaluating other rules', async () => {
     const engine = new PPEEngine({
-      plugins: [new StubPlugin('test', [new StubModel('M', 200)])],
+      plugins: [new StubPlugin('test', [new StubModel('m', 200)])],
       dsls: [promising],
       strict: false,
       timeout: { dsl: 50, hook: 500 },
     });
     const slowRule = makeRule({
       id: 'r-slow',
-      model: 'M',
+      model: 'm',
       params: {},
       condition: { dsl: 'slow-dsl', value: {} },
     });
-    const normalRule = makeRule({ id: 'r-normal', model: 'M', params: {} });
+    const normalRule = makeRule({ id: 'r-normal', model: 'm', params: {} });
     const result = await engine.evaluate([slowRule, normalRule], makeInput());
     expect(result.skippedRules.map((skip) => [skip.rule.id, skip.reason])).toEqual([
       ['r-slow', 'DSL_ERROR'],
