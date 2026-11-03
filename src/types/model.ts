@@ -1,4 +1,4 @@
-import type { OutputDeclaration } from '@run-iq/spec';
+import type { JsonPointer, OutputDeclaration } from '@run-iq/spec';
 import type { Rule } from './rule.js';
 import type { OutputValue } from './output.js';
 
@@ -39,6 +39,16 @@ export interface CalculationModel<V extends OutputValue = number> {
 
   validateParams(params: unknown): ValidationResult;
 
+  /**
+   * Computes the rule's contribution. The arguments are views that refuse every write: `input` is
+   * the evaluation's own data, `rule` and its `params` the engine's rule, which holds no `Date`
+   * (dates are `YYYY-MM-DDTHH:MM:SS.sssZ` strings, civil dates `YYYY-MM-DD`). A write (assignment,
+   * `delete`, `defineProperty`) throws a `FrozenViewWriteError`, which does not fail the
+   * evaluation: the rule is excluded with the reason `MODEL_ERROR` and the detail `wrote to its
+   * input: <key>`. The same holds for `validateParams`. Any other throw, a `TypeError` of the
+   * model's own included, is the model's and fails the evaluation. What the model returns is
+   * copied. A view cannot be passed to `structuredClone`: copy the part you need first. `Object.freeze` and `Object.preventExtensions` on a view are not writes. An error counts as a refused write only if a view of this very call threw it: a model that throws a `FrozenViewWriteError` of its own, or one it caught in another call, fails the evaluation. A throw of the model's own (an error from a getter of its output included) fails the evaluation too, as an `UnexpectedEngineError` whose `cause` is a frozen copy of what it threw. The `output` declaration is copied when the model is registered.
+   */
   calculate(
     input: Record<string, unknown>,
     matchedRule: Readonly<Rule>,
@@ -46,4 +56,12 @@ export interface CalculationModel<V extends OutputValue = number> {
   ): V | CalculationOutput<V>;
 
   describeParams?(): Record<string, ParamDescriptor>;
+
+  /**
+   * The JSON pointers, into the evaluation context, of the facts the model reads for these
+   * `params` (`/revenue/total`; D-1), joined with those of the rule's condition by `readsOf`. A
+   * model that returns anything else, or throws, has its rule's reads treated as unknown (D-39);
+   * a model without it declares nothing.
+   */
+  listVariables?(params: unknown): JsonPointer[];
 }

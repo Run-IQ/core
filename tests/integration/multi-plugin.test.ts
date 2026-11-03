@@ -4,8 +4,8 @@ import { makeRule, makeInput, StubModel, StubPlugin } from '../helpers.js';
 
 describe('Multi-plugin', () => {
   it('supports multiple plugins with different models', async () => {
-    const model1 = new StubModel('M1', 100);
-    const model2 = new StubModel('M2', 200);
+    const model1 = new StubModel('m1', 100);
+    const model2 = new StubModel('m2', 200);
 
     const plugin1 = new StubPlugin('plugin-a', [model1]);
     const plugin2 = new StubPlugin('plugin-b', [model2]);
@@ -17,8 +17,8 @@ describe('Multi-plugin', () => {
     });
 
     const rules = [
-      makeRule({ id: 'r1', model: 'M1', priority: 200, params: {} }),
-      makeRule({ id: 'r2', model: 'M2', priority: 100, params: {} }),
+      makeRule({ id: 'r1', model: 'm1', priority: 200, params: {} }),
+      makeRule({ id: 'r2', model: 'm2', priority: 100, params: {} }),
     ];
 
     const result = await engine.evaluate(rules, makeInput());

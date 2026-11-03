@@ -1,4 +1,5 @@
 import { PPEError } from './PPEError.js';
+import { markEngineError } from './engineError.js';
 
 /**
  * A rule inhibits a carrier of exceptions that takes precedence over it (higher priority, or
@@ -19,3 +20,5 @@ export class ExceptionPrecedenceError extends PPEError {
     this.name = 'ExceptionPrecedenceError';
   }
 }
+
+markEngineError(ExceptionPrecedenceError);

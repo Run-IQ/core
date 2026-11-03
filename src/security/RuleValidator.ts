@@ -1,8 +1,12 @@
+import { refusalsOf } from '../engine/pluginBoundary.js';
+import { askValidateParams, defaultCrossing } from '../engine/pluginBoundary.js';
+import type { Crossing } from '../engine/pluginBoundary.js';
 import { EXCEPTION_MODEL, SpecError, verifyRuleChecksum } from '@run-iq/spec';
 import type { Rule } from '../types/rule.js';
 import type { SkippedRule } from '../types/result.js';
 import type { ModelRegistry } from '../registry/ModelRegistry.js';
 import { ValidationError } from '../errors/ValidationError.js';
+import { UnexpectedEngineError } from '../errors/UnexpectedEngineError.js';
 import { ruleLabel } from '../utils/values.js';
 
 export interface RuleValidationResult {
@@ -29,7 +33,16 @@ export class RuleValidator {
   constructor(
     private readonly modelRegistry: ModelRegistry,
     private readonly onChecksumMismatch: 'throw' | 'skip' = 'skip',
+    private readonly crossing: Crossing = defaultCrossing(),
   ) {}
+
+  /**
+   * True when the rule's model is one the evaluation can run: registered when the evaluation
+   * began, or the exception model. Used for the rules a hook adds.
+   */
+  knowsModel(rule: Rule): boolean {
+    return rule.model === EXCEPTION_MODEL || this.modelRegistry.has(rule.model);
+  }
 
   validate(rules: ReadonlyArray<Rule>): RuleValidationResult {
     const valid: Rule[] = [];
@@ -48,6 +61,17 @@ export class RuleValidator {
   }
 
   private checkRule(rule: Rule): SkippedRule | null {
+    // 0. An object inside the rule was not plain when it was read: the rule is excluded for it,
+    // naming where. What stands in the copy is a string, never an object the caller made up.
+    const refusals = refusalsOf(rule);
+    if (refusals !== undefined) {
+      return {
+        rule,
+        reason: 'INVALID_RULE',
+        detail: `Invalid rule ${ruleLabel(rule)}: ${refusals.join('; ')}`,
+      };
+    }
+
     // 1. Verify checksum (full rule integrity)
     let intact: boolean;
     try {
@@ -77,11 +101,16 @@ export class RuleValidator {
     // in beforeEvaluate (e.g., meta-rules). ExecutionPipeline will skip them.
     if (rule.model !== EXCEPTION_MODEL && this.modelRegistry.has(rule.model)) {
       const model = this.modelRegistry.get(rule.model);
-      const validation = model.validateParams(rule.params);
-      if (!validation.valid) {
-        const errors = validation.errors?.length
-          ? validation.errors.join('; ')
-          : 'the model gave no error';
+      // The result crosses the boundary once, through the one reader (see `askValidateParams`).
+      const verdict = askValidateParams(
+        model,
+        rule.params,
+        this.crossing,
+        UnexpectedEngineError.foreign,
+      );
+      if (verdict.kind === 'error') return { rule, reason: 'MODEL_ERROR', detail: verdict.detail };
+      if (verdict.kind === 'invalid') {
+        const errors = verdict.errors === '' ? 'the model gave no error' : verdict.errors;
         const detail = `Invalid params for rule ${ruleLabel(rule)} (model ${rule.model}): ${errors}`;
         return { rule, reason: 'INVALID_PARAMS', detail };
       }

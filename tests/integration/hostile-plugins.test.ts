@@ -4,8 +4,14 @@ import type { PPEPlugin, PluginContext, BeforeEvaluateResult } from '../../src/t
 import type { UnsealedResult } from '../../src/types/result.js';
 import type { DSLEvaluator } from '../../src/types/dsl.js';
 import type { PPEEngineConfig } from '../../src/engine/PPEEngine.js';
-import { PipelineTimeoutError, UnexpectedEngineError } from '../../src/index.js';
-import { makeRule, makeInput, StubModel, StubDSL, InMemorySnapshotAdapter } from '../helpers.js';
+import { PipelineTimeoutError, PluginHookError, ValidationError } from '../../src/index.js';
+import {
+  makeRule,
+  makeInput,
+  StubModel,
+  InMemorySnapshotAdapter,
+  expectSameFailure,
+} from '../helpers.js';
 
 // These plugins break the hook contract on purpose, the way untyped JavaScript plugins can.
 
@@ -13,7 +19,7 @@ const host: PPEPlugin = {
   name: 'model-host',
   version: '1.0.0',
   onInit(context: PluginContext): void {
-    context.modelRegistry.register(new StubModel('M', 100));
+    context.modelRegistry.register(new StubModel('m', 100));
   },
 };
 
@@ -35,7 +41,15 @@ function untyped<T>(value: unknown): T {
   return value as T;
 }
 
-const rule = () => makeRule({ id: 'r1', model: 'M' });
+const rule = () => makeRule({ id: 'r1', model: 'm' });
+
+/** What `evaluate` rejects with, or `undefined` when it resolves. */
+async function failure(engine: PPEEngine, rules = [rule()]): Promise<unknown> {
+  return engine.evaluate(rules, makeInput()).then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+}
 
 function revokedProxy(): object {
   const { proxy, revoke } = Proxy.revocable({}, {});
@@ -47,8 +61,8 @@ describe('hostile thrown values', () => {
   const thrown: [string, () => unknown, string][] = [
     ['a number', () => 42, '42'],
     ['a symbol', () => Symbol('s'), 'Symbol(s)'],
-    ['a null-prototype object', () => Object.create(null), '(unprintable error)'],
-    ['a revoked proxy', revokedProxy, '(unprintable error)'],
+    ['a null-prototype object', () => Object.create(null), 'Error'],
+    ['a revoked proxy', revokedProxy, 'Error'],
     [
       'a proxy whose getPrototypeOf throws',
       () =>
@@ -60,12 +74,12 @@ describe('hostile thrown values', () => {
             },
           },
         ),
-      '(unprintable error)',
+      'Error',
     ],
   ];
   for (const hook of ['beforeEvaluate', 'afterEvaluate'] as const) {
     for (const [label, make, message] of thrown) {
-      it(`${hook} throwing ${label} becomes a diagnostic and a wrapped onError`, async () => {
+      it(`${hook} throwing ${label} fails the evaluation with a PluginHookError`, async () => {
         const onError = vi.fn();
         const value = make();
         const bad = pluginWith('bad', {
@@ -74,13 +88,24 @@ describe('hostile thrown values', () => {
           },
           onError,
         });
-        const result = await engineWith([bad]).evaluate([rule()], makeInput());
-        expect(result.value).toBe(100);
-        expect(result.diagnostics).toEqual([{ source: 'hook', plugin: 'bad', hook, message }]);
-        const error: unknown = onError.mock.calls[0]?.[0];
-        expect(error).toBeInstanceOf(UnexpectedEngineError);
-        // Compared by identity: printing or deep-comparing a hostile proxy would throw.
-        expect(error instanceof UnexpectedEngineError && error.cause === value).toBe(true);
+        const error = await failure(engineWith([bad]));
+        expect(error).toBeInstanceOf(PluginHookError);
+        expect(error).toMatchObject({
+          code: 'PLUGIN_HOOK',
+          plugin: 'bad',
+          hook,
+          message: `plugin bad ${hook} failed: ${message}`,
+        });
+        // Never the hostile object itself: a copy where it can be read, else a marker string.
+        expect(error instanceof PluginHookError).toBe(true);
+        // Whatever was thrown, the engine holds its text: a frozen plain record, never the value.
+        const cause = (error as PluginHookError).cause as { name: string; message: string };
+        expect(cause !== value).toBe(true);
+        expect(Object.isFrozen(cause)).toBe(true);
+        expect(Object.getPrototypeOf(cause)).toBe(Object.prototype);
+        expect(cause.message).toBe(message === 'Error' ? '' : message);
+        expect(onError).toHaveBeenCalledTimes(1);
+        expectSameFailure(onError.mock.calls[0]?.[0], error);
       });
     }
   }
@@ -88,27 +113,23 @@ describe('hostile thrown values', () => {
 
 describe('hostile beforeEvaluate results', () => {
   const cases: [string, (result: BeforeEvaluateResult) => unknown, string][] = [
-    ['undefined', () => undefined, 'returned undefined, not a result; ignored'],
-    ['{}', () => ({}), 'returned a malformed input; ignored'],
-    ['an input without rules', (r) => ({ input: r.input }), 'returned a malformed rules; ignored'],
-    ['rules: 5', (r) => ({ input: r.input, rules: 5 }), 'returned a malformed rules; ignored'],
-    ['rules: [5]', (r) => ({ input: r.input, rules: [5] }), 'returned a malformed rules; ignored'],
-    ['skipped: 5', (r) => ({ ...r, skipped: 5 }), 'returned a malformed skipped; ignored'],
+    ['undefined', () => undefined, 'returned undefined, not a result'],
+    ['{}', () => ({}), 'returned a malformed input'],
+    ['an input without rules', (r) => ({ input: r.input }), 'returned a malformed rules'],
+    ['rules: 5', (r) => ({ input: r.input, rules: 5 }), 'returned a malformed rules'],
+    ['rules: [5]', (r) => ({ input: r.input, rules: [5] }), 'returned a malformed rules'],
+    ['skipped: 5', (r) => ({ ...r, skipped: 5 }), 'returned a malformed skipped'],
     [
       'a skip without a rule object',
-      (r) => ({ ...r, skipped: [{ rule: 5, reason: 'X' }] }),
-      'returned a malformed skipped; ignored',
+      (r) => ({ ...r, skipped: [{ rule: 5, reason: 'x' }] }),
+      'returned a malformed skipped',
     ],
     [
       'a skip without a string reason',
       (r) => ({ ...r, skipped: [{ rule: r.rules[0], reason: 5 }] }),
-      'returned a malformed skipped; ignored',
+      'returned a malformed skipped',
     ],
-    [
-      'data that is not an object',
-      (r) => ({ ...r, input: { ...r.input, data: 5 } }),
-      'returned a malformed input; ignored',
-    ],
+
     [
       'a state getter that throws',
       (r) => {
@@ -125,7 +146,7 @@ describe('hostile beforeEvaluate results', () => {
     ],
   ];
   for (const [label, make, message] of cases) {
-    it(`commits nothing for ${label}`, async () => {
+    it(`fails the evaluation for ${label}, whatever else the result holds`, async () => {
       const onError = vi.fn();
       const bad = pluginWith('bad', {
         beforeEvaluate: (input, _rules) =>
@@ -141,16 +162,16 @@ describe('hostile beforeEvaluate results', () => {
           return { input, rules };
         },
       });
-      const result = await engineWith([bad, reader]).evaluate([rule()], makeInput());
-      expect(result.value).toBe(100);
+      const error = await failure(engineWith([bad, reader]));
+      expect(error).toBeInstanceOf(PluginHookError);
+      expect(error).toMatchObject({ plugin: 'bad', hook: 'beforeEvaluate' });
+      // The plugin after it is never reached: nothing of the result is used.
       expect(seen).toBeUndefined();
-      expect(result.pluginState).toEqual({});
       const expected =
         message === 'state getter' ? message : `plugin bad beforeEvaluate ${message}`;
-      expect(result.diagnostics).toEqual([
-        { source: 'hook', plugin: 'bad', hook: 'beforeEvaluate', message: expected },
-      ]);
+      expect((error as PluginHookError).cause).toMatchObject({ message: expected });
       expect(onError).toHaveBeenCalledTimes(1);
+      expectSameFailure(onError.mock.calls[0]?.[0], error);
     });
   }
 
@@ -171,175 +192,86 @@ describe('hostile beforeEvaluate results', () => {
     expect(result.diagnostics).toEqual([]);
   });
 
-  it('gives a plugin skip without detail the detail "skipped by plugin <name>"', async () => {
+  it('gives a plugin skip without detail the detail "plugin <name>: skipped"', async () => {
     const fiscal = pluginWith('fiscal', {
       beforeEvaluate: (input, rules) => ({
         input,
         rules: [],
-        skipped: rules.map((r) => ({ rule: r, reason: 'SHORT_CIRCUITED' as const })),
+        skipped: rules.map((r) => ({ rule: r, reason: 'PLUGIN' as const })),
       }),
     });
     const result = await engineWith([fiscal]).evaluate([rule()], makeInput());
     expect(result.skippedRules.map((s) => [s.rule.id, s.reason, s.detail])).toEqual([
-      ['r1', 'SHORT_CIRCUITED', 'skipped by plugin fiscal'],
+      ['r1', 'PLUGIN', 'plugin fiscal: skipped'],
     ]);
   });
 });
 
 describe('hostile afterEvaluate results', () => {
   for (const [returned, described] of [
-    [undefined, 'undefined'],
     [null, 'null'],
     [42, '42'],
     ['str', '"str"'],
   ] as const) {
-    it(`ignores a result that is ${described}`, async () => {
-      const bad = pluginWith('bad', { afterEvaluate: () => untyped<UnsealedResult>(returned) });
-      const result = await engineWith([bad]).evaluate([rule()], makeInput());
-      expect(result.value).toBe(100);
-      expect(result.diagnostics.map((d) => d.message)).toEqual([
-        `plugin bad afterEvaluate returned ${described}, not a result; ignored`,
-      ]);
+    it(`fails the evaluation for an afterEvaluate result that is ${described}`, async () => {
+      const bad = pluginWith('bad', { afterEvaluate: () => untyped<never>(returned) });
+      const error = await failure(engineWith([bad]));
+      expect(error).toBeInstanceOf(PluginHookError);
+      expect(error).toMatchObject({ plugin: 'bad', hook: 'afterEvaluate' });
+      expect((error as PluginHookError).cause).toMatchObject({
+        message: `plugin bad afterEvaluate returned ${described}, not annotations`,
+      });
     });
   }
 
-  it('ignores a result whose appliedRules is not an array of objects', async () => {
-    const bad = pluginWith('bad', {
-      afterEvaluate: (_input, result) => untyped<UnsealedResult>({ ...result, appliedRules: [5] }),
-    });
-    const result = await engineWith([bad]).evaluate([rule()], makeInput());
-    expect(result.appliedRules.map((r) => r.id)).toEqual(['r1']);
-    expect(result.diagnostics.map((d) => d.message)).toEqual([
-      'plugin bad afterEvaluate returned a malformed appliedRules; ignored',
-    ]);
-  });
-
-  it('reads value once: a getter answering 7, 7, then "evil" leaves value and outputs in sync', async () => {
+  it('reads annotations once: a getter answering one object, then another, is judged on its first answer', async () => {
     let reads = 0;
-    const bad = pluginWith('bad', {
-      afterEvaluate(_input, result): UnsealedResult {
-        const out = { ...result };
-        Object.defineProperty(out, 'value', {
-          enumerable: true,
-          get: () => (reads++ < 2 ? 7 : 'evil'),
-        });
-        return out;
-      },
-    });
-    const result = await engineWith([bad]).evaluate([rule()], makeInput());
-    expect(result.value).toBe(7);
-    expect(result.outputs['value']!.value).toBe(7);
-    expect(result.diagnostics.map((d) => d.message)).toEqual([
-      'plugin bad rewrote output value from 100 to 7',
-    ]);
-  });
-
-  it('reads appliedRules once: a proxy cannot show one list to the check and another to the result', async () => {
-    let reads = 0;
-    const bad = pluginWith('bad', {
-      afterEvaluate: (_input, result) =>
-        new Proxy(result, {
-          get(target, key) {
-            if (key !== 'appliedRules') return Reflect.get(target, key);
-            return reads++ === 0
-              ? target.appliedRules
-              : [...target.appliedRules, { id: 'HIDDEN', model: 'X' }];
+    const bad = pluginWith('p', {
+      afterEvaluate: () =>
+        untyped<never>({
+          get annotations() {
+            reads += 1;
+            return reads === 1 ? { first: 1 } : { second: 2 };
           },
         }),
     });
     const result = await engineWith([bad]).evaluate([rule()], makeInput());
-    expect(result.appliedRules.map((r) => r.id)).toEqual(['r1']);
-    expect(result.diagnostics).toEqual([]);
+    expect(reads).toBe(1);
+    expect(result.meta).toEqual({ p: { first: 1 } });
   });
 
-  it('ignores every engine-owned field a plugin edits, in one diagnostic', async () => {
-    const st = pluginWith('st', {
-      beforeEvaluate: (input, rules) => ({ input, rules, state: { a: 1 } }),
+  it('fails the evaluation when a plugin returns engine-owned fields, naming the first', async () => {
+    const bad = pluginWith('bad', {
+      afterEvaluate: (_input, result) => untyped<never>({ ...result, value: 99 }),
     });
-    // A careless plugin writing through the readonly types.
-    interface Writable {
-      pluginState: Record<string, { a: number }>;
-      diagnostics: unknown[];
-      pluginVersions: Record<string, string>;
-      missingFacts: string[];
-      dslVersions: Record<string, string>;
+    const error = await failure(engineWith([bad]));
+    expect(error).toBeInstanceOf(PluginHookError);
+    expect(error).toMatchObject({ plugin: 'bad', hook: 'afterEvaluate' });
+    expect((error as PluginHookError).cause).toMatchObject({
+      message: 'plugin bad afterEvaluate returned a field other than annotations: requestId',
+    });
+  });
+
+  it('fails the evaluation for a symbol key and for a class instance', async () => {
+    class Result {
+      annotations = { a: 1 };
     }
-    const bad = pluginWith('bad', {
-      afterEvaluate(_input, result): UnsealedResult {
-        const writable = untyped<Writable>(result);
-        writable.pluginState['st']!.a = 999;
-        writable.diagnostics.push({ source: 'engine', message: 'forged' });
-        writable.pluginVersions['model-host'] = '6.6.6';
-        writable.missingFacts.push('ghost');
-        writable.dslVersions['fake'] = '1';
-        return result;
-      },
-    });
-    const result = await engineWith([st, bad]).evaluate([rule()], makeInput());
-    expect(result.pluginState).toEqual({ st: { a: 1 } });
-    expect(result.pluginVersions).toEqual({ 'model-host': '1.0.0', st: '1.0.0', bad: '1.0.0' });
-    expect(result.missingFacts).toEqual([]);
-    expect(result.dslVersions).toEqual({});
-    expect(result.diagnostics).toEqual([
-      {
-        source: 'hook',
-        plugin: 'bad',
-        hook: 'afterEvaluate',
-        message:
-          'plugin bad changed engine-owned fields diagnostics, dslVersions, missingFacts, ' +
-          'pluginState, pluginVersions; ignored',
-      },
-    ]);
+    for (const returned of [{ [Symbol('s')]: 1 }, new Result()]) {
+      const bad = pluginWith('bad', { afterEvaluate: () => untyped<never>(returned) });
+      const error = await failure(engineWith([bad]));
+      expect(error).toBeInstanceOf(PluginHookError);
+    }
   });
 
-  it('names applied and skipped entries kept under the same id but changed', async () => {
-    const bad = pluginWith('bad', {
-      afterEvaluate: (_input, result) => ({
-        ...result,
-        appliedRules: result.appliedRules.map((r) => ({ ...r, version: 99 })),
-        skippedRules: result.skippedRules.map((s) => ({
-          ...s,
-          reason: 'DOMINATED' as const,
-          detail: 'forged',
-        })),
-      }),
-    });
-    const result = await engineWith([bad], {}, [new StubDSL('never', false)]).evaluate(
-      [rule(), makeRule({ id: 'x', model: 'M', condition: { dsl: 'never', value: null } })],
-      makeInput(),
-    );
-    expect(result.diagnostics.map((d) => d.message)).toEqual([
-      'plugin bad changed applied rules: r1',
-      'plugin bad changed skipped rules: x',
-    ]);
-  });
-
-  it('accepts the fiscal transition: value, pseudo applied rule, trace and meta', async () => {
-    const fiscal = pluginWith('fiscal', {
-      afterEvaluate: (_input, result) => ({
-        ...result,
-        value: 0,
-        appliedRules: [
-          ...result.appliedRules,
-          untyped<UnsealedResult['appliedRules'][number]>({
-            id: 'SC',
-            model: 'META_SHORT_CIRCUIT',
-            priority: 9999,
-          }),
-        ],
-        trace: { ...result.trace, steps: [...result.trace.steps] },
-        meta: { fiscalBreakdown: { unknown: 100 } },
-      }),
-    });
-    const result = await engineWith([fiscal]).evaluate([rule()], makeInput());
-    expect(result.value).toBe(0);
-    expect(result.outputs['value']!.value).toBe(0);
-    expect(result.appliedRules.map((r) => r.id)).toEqual(['r1', 'SC']);
-    expect(result.meta).toEqual({ fiscalBreakdown: { unknown: 100 } });
-    expect(result.diagnostics.map((d) => d.message)).toEqual([
-      'plugin fiscal rewrote output value from 100 to 0',
-      'plugin fiscal added applied rules: SC',
-    ]);
+  it('accepts annotations: the same trace, the decision untouched', async () => {
+    const good = pluginWith('good', { afterEvaluate: () => ({ annotations: { note: 'ok' } }) });
+    const plain = await engineWith([]).evaluate([rule()], makeInput());
+    const result = await engineWith([good]).evaluate([rule()], makeInput());
+    expect(result.meta).toEqual({ good: { note: 'ok' } });
+    expect(result.value).toBe(plain.value);
+    expect(result.appliedRules).toEqual(plain.appliedRules);
+    expect(result.trace.steps.length).toBe(plain.trace.steps.length);
+    expect(result.diagnostics).toEqual([]);
   });
 });
 
@@ -351,7 +283,7 @@ describe('pipeline timeout abort', () => {
   it('stops the late pipeline: no afterEvaluate, no save, no onError', async () => {
     const adapter = new InMemorySnapshotAdapter();
     const save = vi.spyOn(adapter, 'save');
-    const afterEvaluate = vi.fn((_input: unknown, result: UnsealedResult) => result);
+    const afterEvaluate = vi.fn((_input: unknown, _result: UnsealedResult) => undefined);
     const onError = vi.fn();
     let release: () => void = () => undefined;
     const slow = pluginWith('slow', {
@@ -394,14 +326,14 @@ describe('fields read by name', () => {
       beforeEvaluate(input, rules): BeforeEvaluateResult {
         const out: BeforeEvaluateResult = { input, rules: [] };
         Object.defineProperty(out, 'skipped', {
-          value: rules.map((r) => ({ rule: r, reason: 'SHORT_CIRCUITED' })),
+          value: rules.map((r) => ({ rule: r, reason: 'PLUGIN' })),
         });
         return out;
       },
     });
     const result = await engineWith([p]).evaluate([rule()], makeInput());
     expect(result.skippedRules.map((s) => [s.rule.id, s.reason, s.detail])).toEqual([
-      ['r1', 'SHORT_CIRCUITED', 'skipped by plugin p'],
+      ['r1', 'PLUGIN', 'plugin p: skipped'],
     ]);
     expect(result.diagnostics).toEqual([]);
   });
@@ -423,7 +355,7 @@ describe('fields read by name', () => {
       }
       get skipped(): NonNullable<BeforeEvaluateResult['skipped']> {
         reads.push('skipped');
-        return this.source.map((r) => ({ rule: r, reason: 'SHORT_CIRCUITED' as const }));
+        return this.source.map((r) => ({ rule: r, reason: 'PLUGIN' as const }));
       }
       get state(): BeforeEvaluateResult['state'] {
         reads.push('state');
@@ -437,139 +369,105 @@ describe('fields read by name', () => {
     expect(result.skippedRules.map((s) => s.rule.id)).toEqual(['r1']);
     expect(result.appliedRules).toEqual([]);
   });
-
-  it('keeps a non-enumerable meta and reads each afterEvaluate field once', async () => {
-    const reads = new Map<string, number>();
-    const p = pluginWith('p', {
-      afterEvaluate(_input, result): UnsealedResult {
-        const out = { ...result };
-        for (const key of [
-          'value',
-          'appliedRules',
-          'skippedRules',
-          'trace',
-          'breakdown',
-        ] as const) {
-          const current: unknown = out[key];
-          Object.defineProperty(out, key, {
-            enumerable: true,
-            get: () => {
-              reads.set(key, (reads.get(key) ?? 0) + 1);
-              return current;
-            },
-          });
-        }
-        Object.defineProperty(out, 'meta', { value: { m: 1 } });
-        return out;
-      },
-    });
-    const result = await engineWith([p]).evaluate([rule()], makeInput());
-    expect(result.meta).toEqual({ m: 1 });
-    expect(Object.fromEntries(reads)).toEqual({
-      value: 1,
-      appliedRules: 1,
-      skippedRules: 1,
-      trace: 1,
-      breakdown: 1,
-    });
-    expect(result.diagnostics).toEqual([]);
-  });
-});
-
-describe('trace and breakdown shapes', () => {
-  for (const [label, change, field] of [
-    ['trace.steps: 5', { trace: { steps: 5 } }, 'trace'],
-    ['trace.steps: [5]', { trace: { steps: [5] } }, 'trace'],
-    ['breakdown: [null, 5]', { breakdown: [null, 5] }, 'breakdown'],
-  ] as const) {
-    it(`ignores a result with ${label}`, async () => {
-      const bad = pluginWith('bad', {
-        afterEvaluate: (_input, result) => untyped<UnsealedResult>({ ...result, ...change }),
-      });
-      const result = await engineWith([bad]).evaluate([rule()], makeInput());
-      expect(result.trace.steps).toHaveLength(1);
-      expect(result.breakdown).toHaveLength(1);
-      expect(result.diagnostics.map((d) => d.message)).toEqual([
-        `plugin bad afterEvaluate returned a malformed ${field}; ignored`,
-      ]);
-    });
-  }
 });
 
 describe('rules removed without a skip', () => {
-  it('names them, by id then version', async () => {
+  it('fails the evaluation, naming them by id then version', async () => {
     const p = pluginWith('p', {
       beforeEvaluate: (input, rules) => ({
         input,
         rules: rules.filter((r) => r.id === 'keep'),
         skipped: rules
           .filter((r) => r.id === 'listed')
-          .map((r) => ({ rule: r, reason: 'SHORT_CIRCUITED' as const })),
+          .map((r) => ({ rule: r, reason: 'PLUGIN' as const })),
       }),
     });
-    const result = await engineWith([p]).evaluate(
-      [
-        makeRule({ id: 'b', model: 'M', version: 2 }),
-        makeRule({ id: 'keep', model: 'M' }),
-        makeRule({ id: 'listed', model: 'M' }),
-        makeRule({ id: 'b', model: 'M', version: 1 }),
-        makeRule({ id: 'a', model: 'M' }),
-      ],
-      makeInput(),
-    );
-    expect(result.diagnostics).toEqual([
-      {
-        source: 'hook',
-        plugin: 'p',
-        hook: 'beforeEvaluate',
-        message: 'plugin p removed rules without a skip: a@1, b@1, b@2',
-      },
+    const error = await failure(engineWith([p]), [
+      makeRule({ id: 'b', model: 'm', version: 2 }),
+      makeRule({ id: 'keep', model: 'm' }),
+      makeRule({ id: 'listed', model: 'm' }),
+      makeRule({ id: 'b', model: 'm', version: 1 }),
+      makeRule({ id: 'a', model: 'm' }),
     ]);
+    expect(error).toBeInstanceOf(PluginHookError);
+    expect(error).toMatchObject({ plugin: 'p', hook: 'beforeEvaluate' });
+    expect((error as PluginHookError).cause).toMatchObject({
+      message: 'plugin p removed rules without a skip: a@1, b@1, b@2',
+    });
   });
 });
 
 describe('rules removed or added by beforeEvaluate (multisets)', () => {
-  it('names a dropped duplicate', async () => {
+  it('B24: two given rules with one id@version are refused at the source, identical copies included', async () => {
     const p = pluginWith('p', {
       beforeEvaluate: (input, rules) => ({ input, rules: rules.slice(1) }),
     });
-    const d = makeRule({ id: 'd', model: 'M' });
-    const result = await engineWith([p]).evaluate([d, { ...d }], makeInput());
-    expect(result.diagnostics.map((x) => x.message)).toEqual([
-      'plugin p removed rules without a skip: d@1',
-    ]);
+    const d = makeRule({ id: 'd', model: 'm' });
+    const error = await failure(engineWith([p]), [d, { ...d }]);
+    expect(error).toBeInstanceOf(ValidationError);
+    expect((error as ValidationError).reasons).toEqual(['rules/0 and rules/1 are both d@1']);
   });
 
-  it('names rules that appeared, after those removed', async () => {
+  it('fails the evaluation for a dropped rule, and names it', async () => {
+    const p = pluginWith('p', {
+      beforeEvaluate: (input, rules) => ({ input, rules: rules.slice(1) }),
+    });
+    const error = await failure(engineWith([p]), [makeRule({ id: 'd', model: 'm' })]);
+    expect(error).toBeInstanceOf(PluginHookError);
+    expect((error as PluginHookError).cause).toMatchObject({
+      message: 'plugin p removed rules without a skip: d@1',
+    });
+  });
+
+  it('fails the evaluation for a rule replaced by another version: the old one is lost', async () => {
     const p = pluginWith('p', {
       beforeEvaluate: (input, rules) => ({
         input,
-        rules: rules.map((r) => makeRule({ id: r.id, model: 'M', version: r.version + 1 })),
+        rules: rules.map((r) => makeRule({ id: r.id, model: 'm', version: r.version + 1 })),
       }),
     });
-    const result = await engineWith([p]).evaluate([makeRule({ id: 'v', model: 'M' })], makeInput());
-    expect(result.diagnostics.map((x) => x.message)).toEqual([
-      'plugin p removed rules without a skip: v@1',
-      'plugin p added rules: v@2',
-    ]);
+    const error = await failure(engineWith([p]), [makeRule({ id: 'v', model: 'm' })]);
+    expect(error).toBeInstanceOf(PluginHookError);
+    expect((error as PluginHookError).cause).toMatchObject({
+      message: 'plugin p removed rules without a skip: v@1',
+    });
   });
 
-  it('names an added duplicate, sorted by id then version', async () => {
+  it('fails the evaluation for a given rule returned twice: it would count twice', async () => {
+    const p = pluginWith('p', {
+      beforeEvaluate: (input, rules) => ({ input, rules: [...rules, ...rules] }),
+    });
+    const error = await failure(engineWith([p]));
+    expect(error).toBeInstanceOf(PluginHookError);
+    expect((error as PluginHookError).cause).toMatchObject({
+      message: 'plugin p returned rule r1@1 2 times (rules and skips together), it was given 1',
+    });
+  });
+
+  it('names the rules added, sorted by id then version', async () => {
     const p = pluginWith('p', {
       beforeEvaluate: (input, rules) => ({
         input,
         rules: [
           ...rules,
-          makeRule({ id: 'z', model: 'M' }),
-          rules[0]!,
-          makeRule({ id: 'a', model: 'M', version: 3 }),
+          makeRule({ id: 'z', model: 'm' }),
+          makeRule({ id: 'a', model: 'm', version: 3 }),
         ],
       }),
     });
     const result = await engineWith([p]).evaluate([rule()], makeInput());
-    expect(result.diagnostics.map((x) => x.message)).toEqual([
-      'plugin p added rules: a@3, r1@1, z@1',
-    ]);
+    expect(result.diagnostics.map((x) => x.message)).toEqual(['plugin p added rules: a@3, z@1']);
+  });
+
+  it('fails the evaluation for a rule added twice', async () => {
+    const extra = makeRule({ id: 'z', model: 'm' });
+    const p = pluginWith('p', {
+      beforeEvaluate: (input, rules) => ({ input, rules: [...rules, extra, extra] }),
+    });
+    const error = await failure(engineWith([p]));
+    expect((error as PluginHookError).cause).toMatchObject({
+      message: 'plugin p added rule z@1 more than once',
+    });
   });
 });
 

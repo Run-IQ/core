@@ -45,7 +45,7 @@ Two cloud sessions work in parallel, **lane A** and **lane B**, with the machine
 - **Owner questions.** For a product, licence or irreversible choice, any publish, tag or release, any push to `master` or `main`, deleting a repository or another branch, a change to a repo the job does not name, or a budget choice: post `Cloud session (lane A): BLOCKED (owner decision) <why>` and wait.
 - **Waiting.** Never end the session while waiting: poll issue #1 and the PR every 2 minutes for a new comment whose body starts with `Machine session`, then keep only those tagged for your lane, `(all lanes)` or `DECISION`. Do not match on `Machine session:` alone, which misses tagged comments. Re-arm the watch when it expires.
 - **No footers.** No "Generated with", no `Co-Authored-By`, no signature line in commits, pull requests or comments. Tools that append one (`gh api`, some MCP create calls) must be followed by an edit that removes it, then checked.
-- **The owner is the sole author** of every commit: check `git config user.name` and `user.email` before the first commit of a session.
+- **The owner is the sole author** of every commit: check `git config user.name` and `user.email` before the first commit of a session. A commit with another author is never pushed. If one is made by mistake, stop and report it before pushing.
 - **Never:** push to `master` or `main`, publish a package, create or move a tag, create a repository, force-push, print or store a token.
 
 ## 4. Owner decisions
@@ -61,6 +61,8 @@ Decisions of 2 November 2026 that apply to core. Items marked "from <task>" are 
 - From Task 10: a store failure fails the evaluation.
 - From 9M2: only rules in force have an effect, so the exceptions of a beaten carrier do not apply.
 - Tags absent means no tag filter (D-38, tested in 9Q).
+- A plugin attack is handled, never left open (2 November 2026). The 9L threat model stands: in one JavaScript realm, plugin code cannot be isolated from other plugin code, so the engine never runs unverified code in its process. Phase 3 delivers: (1) fail-closed loading: a plugin runs in-process only if its manifest is signed by a key in the trust list and the hash of its code matches the manifest, the default trust list holds the Run-IQ key only, an integrator adds keys explicitly, and every other plugin runs in `sandbox`; an unsigned, altered or unknown plugin is refused with its reason, never moved silently; (2) a real sandbox, out of process or in a separate isolate, with no network and no disk, bounded time and memory, and only JSON data crossing it, checked by the 9L boundary; (3) captured intrinsics: core captures `JSON`, `Object.freeze`, `Reflect` and the rest at load time, before any plugin; (4) the proof names every plugin that ran, with its name, version, code hash, signing key and execution mode; (5) supply chain: locked and audited dependencies, packages published with provenance, signed releases, no dependency added without review.
+- A pause after the work in progress (2 November 2026). Lane A finishes 9L until audit OK and merge, then does the small core follow-up to spec#4 (`job-core-followup-9k5`, posted when spec#4 merges) so core's CI is not left red, then stops, takes no new job, keeps the watch armed and waits for a `Machine session` comment to resume. Nothing else is started.
 - A list given in the input is complete unless the caller declares otherwise, and a fact given without an assertion counts as determined. Both are the caller's declarations, recorded in the proof.
 
 ## 5. Rule for future decisions

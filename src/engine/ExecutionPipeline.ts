@@ -6,10 +6,24 @@ import type { BreakdownItem, SkippedRule } from '../types/result.js';
 import type { DecisionOutput } from '../types/output.js';
 import type { ModelRegistry } from '../registry/ModelRegistry.js';
 import { findNonJson, isJsonValue } from '../utils/json.js';
-import { isPlainObject, ruleLabel } from '../utils/values.js';
+import { describeThrown, isPlainObject, ruleLabel } from '../utils/values.js';
 import type { ShortCircuit } from './ExceptionProcessor.js';
 import type { TraceBuilder } from './TraceBuilder.js';
 import { OutputCombiner } from './OutputCombiner.js';
+import {
+  PER_VALUE_LIMITS,
+  causesOf,
+  defaultCrossing,
+  isReadFailure,
+  readBounded,
+} from './pluginBoundary.js';
+import type { Budget } from './pluginBoundary.js';
+import { clip } from '../utils/frozenCopy.js';
+import { isRaisedLimit, raiseLimit } from '../errors/EngineLimitError.js';
+import { ViewScope } from './frozenView.js';
+import { clipFault } from './pluginPort.js';
+import { UnexpectedEngineError } from '../errors/UnexpectedEngineError.js';
+import type { EngineLimits } from '../limits.js';
 import type { Contribution } from './OutputCombiner.js';
 import { compareByPriorityThenIdentity, compareRuleIdentity } from './resolveTie.js';
 import {
@@ -94,6 +108,8 @@ export class ExecutionPipeline {
   constructor(
     private readonly modelRegistry: ModelRegistry,
     private readonly conflictMode: 'throw' | 'first',
+    private readonly limits: Readonly<EngineLimits>,
+    private readonly budget: Budget = defaultCrossing().budget,
   ) {}
 
   execute(
@@ -101,6 +117,7 @@ export class ExecutionPipeline {
     input: EvaluationInput,
     traceBuilder: TraceBuilder,
     shortCircuits: ReadonlyMap<string, ShortCircuit>,
+    inputNodes: number,
   ): PipelineResult {
     const outputs = new Map<string, DecisionOutput>();
     const steps: Step[] = [];
@@ -131,7 +148,9 @@ export class ExecutionPipeline {
       const name = outputOf(rule);
       const shortCircuit = shortCircuits.get(name);
       if (shortCircuit === undefined) {
-        feeding.set(name, [...(feeding.get(name) ?? []), rule]);
+        const feeders = feeding.get(name);
+        if (feeders === undefined) feeding.set(name, [rule]);
+        else feeders.push(rule);
       } else if (sameRule(rule, shortCircuit.rule)) {
         applied.push(rule);
       } else {
@@ -181,7 +200,52 @@ export class ExecutionPipeline {
       for (const rule of feeders) {
         const model = this.modelRegistry.get(rule.model);
         const start = performance.now();
-        const raw: unknown = model.calculate(input.data, rule, rule.params);
+        // The model gets write-trapping views of the engine's frozen data: a write into them is
+        // refused with a dedicated error, and the rule that wrote is excluded by that class.
+        let raw: unknown;
+        const views = new ViewScope();
+        try {
+          raw = model.calculate(
+            views.trapped(input.data),
+            views.trapped(rule),
+            views.trapped(rule.params),
+          );
+        } catch (error) {
+          if (views.wrote === undefined) throw UnexpectedEngineError.foreign(error);
+          skipped.push({ rule, reason: 'MODEL_ERROR', detail: views.wrote });
+          continue;
+        }
+        // What the model returns is data the engine copies once, bounded (`maxRuleLeaves` nodes,
+        // `maxInputDepth` levels) and without recursion: never a view it was handed, never a cycle
+        // or a depth that would overflow the stack. A property of it that throws is the model's
+        // own throw (a refused write into a view is that rule's `MODEL_ERROR`, as in `calculate`).
+        try {
+          raw = readBounded(raw, this.limits, `output ${name}`, {
+            leafLimit: 'maxRuleLeaves',
+            budget: this.budget,
+          });
+        } catch (error) {
+          // The budget of the evaluation is the engine's bound, not that rule's fault.
+          if (isRaisedLimit(error) && error.limit === 'maxHookLeaves') throw error;
+          // An output past a bound of one value is that rule's fault (a fault stops at what it
+          // touches); the budget of the whole evaluation is the engine's (B68).
+          if (isRaisedLimit(error) && PER_VALUE_LIMITS.has(error.limit)) {
+            skipped.push({ rule, reason: 'MODEL_ERROR', detail: clipFault(error.message) });
+            continue;
+          }
+          const causes = isReadFailure(error) ? causesOf(error) : [];
+          if (views.wrote !== undefined) {
+            skipped.push({ rule, reason: 'MODEL_ERROR', detail: views.wrote });
+            continue;
+          }
+          if (causes.length > 0) throw UnexpectedEngineError.foreign(causes[0]);
+          skipped.push({
+            rule,
+            reason: 'OUTPUT_MISMATCH',
+            detail: `output ${name}: the model returned a value that cannot be copied: ${clip(describeThrown(error))}`,
+          });
+          continue;
+        }
         const durationMs = Math.round((performance.now() - start) * 100) / 100;
         const { value, detail } = readCalculation(raw, declaration);
         if (!isJsonValue(value)) {
@@ -223,6 +287,13 @@ export class ExecutionPipeline {
         compareByPriorityThenIdentity(a.rule, b.rule) ||
         (a.output < b.output ? -1 : a.output > b.output ? 1 : 0),
     );
+    // Every step of the trace records the input it was computed on, and the record writes it each
+    // time: the cost of the trace is the nodes of the input times the number of steps, which no
+    // bound on either one alone holds. Past `maxTraceNodes` the evaluation is refused, by name.
+    const traceNodes = inputNodes * steps.length;
+    if (traceNodes > this.limits.maxTraceNodes) {
+      throw raiseLimit('maxTraceNodes', this.limits.maxTraceNodes, traceNodes);
+    }
     for (const step of steps) {
       const { rule } = step;
       traceBuilder.addStep({
@@ -233,7 +304,8 @@ export class ExecutionPipeline {
         conditionResult: true,
         conditionDetail: rule.condition?.value ?? null,
         modelUsed: step.modelUsed,
-        inputSnapshot: { ...input.data },
+        // The engine's own frozen copy of the data, shared by every step: nothing can change it.
+        inputSnapshot: input.data,
         contribution: step.contribution,
         ...(step.unrounded === undefined ? {} : { unrounded: step.unrounded }),
         detail: step.detail,

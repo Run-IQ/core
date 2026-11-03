@@ -1,3 +1,4 @@
+import { markEngineError } from './engineError.js';
 export class PPEError extends Error {
   constructor(
     message: string,
@@ -8,3 +9,5 @@ export class PPEError extends Error {
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }
+
+markEngineError(PPEError);

@@ -1,4 +1,5 @@
 import { PPEError } from './PPEError.js';
+import { markEngineError } from './engineError.js';
 
 export class RuleConflictError extends PPEError {
   constructor(
@@ -12,3 +13,5 @@ export class RuleConflictError extends PPEError {
     this.name = 'RuleConflictError';
   }
 }
+
+markEngineError(RuleConflictError);

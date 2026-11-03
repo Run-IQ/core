@@ -1,4 +1,5 @@
 import { PPEError } from './PPEError.js';
+import { markEngineError } from './engineError.js';
 
 /**
  * Thrown by `evaluate` for a `requestId` whose snapshot already exists. Until Task 10 core
@@ -13,3 +14,5 @@ export class DuplicateRequestError extends PPEError {
     this.name = 'DuplicateRequestError';
   }
 }
+
+markEngineError(DuplicateRequestError);

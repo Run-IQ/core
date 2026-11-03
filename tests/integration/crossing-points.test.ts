@@ -1,0 +1,673 @@
+import { afterEach, beforeEach, describe, it, expect } from 'vitest';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { PPEEngine } from '../../src/engine/PPEEngine.js';
+import type { PPEEngineConfig } from '../../src/engine/PPEEngine.js';
+import { CROSSING_POINTS, Budget } from '../../src/engine/pluginBoundary.js';
+import type { CrossingPoint, PluginCallback } from '../../src/engine/pluginBoundary.js';
+import { readsOf } from '../../src/context/reads.js';
+import { PluginHookError } from '../../src/errors/PluginHookError.js';
+import { UnexpectedEngineError } from '../../src/errors/UnexpectedEngineError.js';
+import { EngineLimitError } from '../../src/errors/EngineLimitError.js';
+import { ValidationError } from '../../src/errors/ValidationError.js';
+import { resolveLimits } from '../../src/limits.js';
+import type { EngineLimitsInput } from '../../src/limits.js';
+import type { PPEPlugin } from '../../src/types/plugin.js';
+import type { CalculationModel } from '../../src/types/model.js';
+import type { DSLEvaluator } from '../../src/types/dsl.js';
+import type { Rule } from '../../src/types/rule.js';
+import { DSLTimeoutError } from '../../src/errors/DSLTimeoutError.js';
+import { FrozenViewWriteError } from '../../src/errors/FrozenViewWriteError.js';
+import { makeRule, makeInput } from '../helpers.js';
+
+// The inventory of the crossing points (round 7, ruling 1): every callback a plugin can give is an
+// entry of `CROSSING_POINTS`; each entry the engine calls gets three probes here, and each entry it
+// does not call is looked for in the source. A callback added to `PPEPlugin`, `CalculationModel` or
+// `DSLEvaluator` without an entry is a compile error (the type of the inventory), and one added
+// with an entry but without a harness here fails this file.
+
+/**
+ * The engine error a plugin forges. The "forged" probe of each entry runs once for each exported
+ * engine error class (`forgeries`), through this.
+ */
+let forgery: () => Error = () =>
+  new ValidationError('Invalid evaluation input', ['forged by a plugin']);
+const forged = (): Error => forgery();
+const forgeries: [string, () => Error][] = [
+  [
+    'ValidationError',
+    () => new ValidationError('Invalid evaluation input', ['forged by a plugin']),
+  ],
+  ['EngineLimitError (the budget)', () => new EngineLimitError('maxHookLeaves', 1, 2)],
+  ['EngineLimitError (another limit)', () => new EngineLimitError('maxRules', 1, 2)],
+  ['DSLTimeoutError', () => new DSLTimeoutError('forged', 1)],
+  ['PluginHookError', () => new PluginHookError('forged', 'beforeEvaluate', new Error('forged'))],
+  ['FrozenViewWriteError', () => new FrozenViewWriteError('forged')],
+  ['UnexpectedEngineError', () => new UnexpectedEngineError(new Error('forged'))],
+];
+
+const model = (name: string, parts: Partial<CalculationModel>): CalculationModel => ({
+  name,
+  version: '1.0.0',
+  validateParams: () => ({ valid: true }),
+  calculate: () => 1,
+  ...parts,
+});
+const registering =
+  (...models: CalculationModel[]): PPEPlugin['onInit'] =>
+  (context) => {
+    for (const one of models) context.modelRegistry.register(one);
+  };
+const plugin = (name: string, hooks: Partial<PPEPlugin>): PPEPlugin => ({
+  name,
+  version: '1.0.0',
+  onInit: () => undefined,
+  ...hooks,
+});
+
+function engine(
+  plugins: PPEPlugin[],
+  limits: EngineLimitsInput = {},
+  dsls: DSLEvaluator[] = [],
+  extra: Partial<PPEEngineConfig> = {},
+): PPEEngine {
+  return new PPEEngine({ plugins, dsls, strict: false, limits, ...extra });
+}
+const rules = (count: number, modelName: string, extra: Partial<Rule> = {}): Rule[] =>
+  Array.from({ length: count }, (_, index) =>
+    makeRule({ id: `r${index}`, model: modelName, ...extra }),
+  );
+async function outcome(run: () => Promise<unknown> | unknown): Promise<unknown> {
+  try {
+    return await run();
+  } catch (error) {
+    return error;
+  }
+}
+
+interface Probes {
+  /** An oversized value: the named limit, or (for a thrown value) a bounded copy. */
+  readonly oversized: () => Promise<void>;
+  /** A forged engine error: the caller never receives it as itself. */
+  readonly forged: () => Promise<void>;
+  /** An `undefined` hidden in a list: refused with its pointer. */
+  readonly hidden: () => Promise<void>;
+  /** A promise: refused where the contract is synchronous, awaited where it is not; handled. */
+  readonly thenable: () => Promise<void>;
+}
+type Harness = Partial<Record<PluginCallback, Omit<Probes, 'thenable'>>>;
+
+/** A text far past any bound a test sets. */
+const BIG = 'x'.repeat(5000);
+
+const harness: Harness = {
+  'PPEPlugin.onInit': {
+    oversized: async () => {
+      const big = Object.assign(new Error(BIG), {
+        list: Array.from({ length: 5000 }, (_, i) => i),
+      });
+      const error = (await outcome(() =>
+        engine([
+          plugin('p', {
+            onInit: () => {
+              throw big;
+            },
+          }),
+        ]),
+      )) as PluginHookError;
+      expect(error).toBeInstanceOf(PluginHookError);
+      expect(error).toMatchObject({ hook: 'onInit', plugin: 'p' });
+      // Held as text: the name and the message, cut with a visible marker; nothing else of it.
+      const cause = error.cause as { name: string; message: string; list?: unknown };
+      expect(cause.message.length).toBeLessThan(1100);
+      expect(cause.message.endsWith('... [clipped]')).toBe(true);
+      expect(cause.list).toBeUndefined();
+    },
+    forged: async () => {
+      const fake = forged();
+      const error = await outcome(() =>
+        engine([
+          plugin('p', {
+            onInit: () => {
+              throw fake;
+            },
+          }),
+        ]),
+      );
+      expect(error).not.toBe(fake);
+      expect(error).toBeInstanceOf(PluginHookError);
+    },
+    hidden: async () => {
+      // Nothing is read from onInit: a thrown value is copied, not refused.
+      const error = (await outcome(() =>
+        engine([
+          plugin('p', {
+            onInit: () => {
+              throw { list: [1, undefined] };
+            },
+          }),
+        ]),
+      )) as PluginHookError;
+      expect(error).toBeInstanceOf(PluginHookError);
+    },
+  },
+
+  'PPEPlugin.beforeEvaluate': {
+    oversized: async () => {
+      const bad = plugin('bad', {
+        beforeEvaluate: (input, current) => ({ input, rules: current, state: { text: BIG } }),
+      });
+      const error = (await outcome(() =>
+        engine([bad], { maxStringLength: 100 }).evaluate([], makeInput()),
+      )) as PluginHookError;
+      expect(error).toBeInstanceOf(PluginHookError);
+      expect(error.cause).toMatchObject({ name: 'EngineLimitError' });
+      expect(error.cause).toMatchObject({
+        message: expect.stringContaining('engine limit maxStringLength exceeded'),
+      });
+    },
+    forged: async () => {
+      const fake = forged();
+      const bad = plugin('bad', {
+        beforeEvaluate: () => {
+          throw fake;
+        },
+      });
+      const error = await outcome(() => engine([bad]).evaluate([], makeInput()));
+      expect(error).not.toBe(fake);
+      expect(error).toBeInstanceOf(PluginHookError);
+      expect((error as PluginHookError).cause).not.toBe(fake);
+    },
+    hidden: async () => {
+      const bad = plugin('bad', {
+        beforeEvaluate: (input, current) => ({
+          input: { ...input, data: { list: [1, undefined] } },
+          rules: current,
+        }),
+      });
+      const error = (await outcome(() =>
+        engine([bad]).evaluate([], makeInput()),
+      )) as PluginHookError;
+      expect(error).toBeInstanceOf(PluginHookError);
+      expect((error.cause as ValidationError).reasons.join('; ')).toContain('/data/list/1');
+    },
+  },
+
+  'PPEPlugin.afterEvaluate': {
+    oversized: async () => {
+      const bad = plugin('bad', {
+        afterEvaluate: () => ({ annotations: { text: BIG } }),
+      });
+      const error = (await outcome(() =>
+        engine([bad], { maxStringLength: 100 }).evaluate([], makeInput()),
+      )) as PluginHookError;
+      expect(error).toBeInstanceOf(PluginHookError);
+      expect(error.cause).toMatchObject({
+        message: expect.stringContaining('engine limit maxStringLength exceeded'),
+      });
+    },
+    forged: async () => {
+      const fake = forged();
+      const bad = plugin('bad', {
+        afterEvaluate: () => {
+          throw fake;
+        },
+      });
+      const error = await outcome(() => engine([bad]).evaluate([], makeInput()));
+      expect(error).not.toBe(fake);
+      expect(error).toBeInstanceOf(PluginHookError);
+    },
+    hidden: async () => {
+      const bad = plugin('bad', {
+        afterEvaluate: () => ({ annotations: { list: [1, undefined] } }) as never,
+      });
+      const error = (await outcome(() =>
+        engine([bad]).evaluate([], makeInput()),
+      )) as PluginHookError;
+      expect(error).toBeInstanceOf(PluginHookError);
+      expect(String((error.cause as Error).message)).toContain('1');
+    },
+  },
+
+  'PPEPlugin.onError': {
+    oversized: async () => {
+      // onError returns nothing that is read; what it is handed is a bounded copy.
+      let told: unknown;
+      const failing = plugin('failing', {
+        beforeEvaluate: () => {
+          throw Object.assign(new Error(BIG), { list: Array.from({ length: 5000 }, (_, i) => i) });
+        },
+        onError: (error) => {
+          told = error;
+        },
+      });
+      await outcome(() => engine([failing]).evaluate([], makeInput()));
+      const cause = (told as { cause: { message: string; list?: unknown } }).cause;
+      expect(cause.message.length).toBeLessThan(1100);
+      expect(cause.list).toBeUndefined();
+    },
+    forged: async () => {
+      // A throw of onError is swallowed: the caller gets the evaluation's own error, not that one.
+      const fake = forged();
+      const failing = plugin('failing', {
+        beforeEvaluate: () => {
+          throw new Error('real');
+        },
+        onError: () => {
+          throw fake;
+        },
+      });
+      const error = await outcome(() => engine([failing]).evaluate([], makeInput()));
+      expect(error).not.toBe(fake);
+      expect(error).toBeInstanceOf(PluginHookError);
+    },
+    hidden: async () => {
+      // Nothing is read from onError's return value.
+      const failing = plugin('failing', {
+        beforeEvaluate: () => {
+          throw new Error('real');
+        },
+        onError: (() => [1, undefined]) as unknown as NonNullable<PPEPlugin['onError']>,
+      });
+      const error = await outcome(() => engine([failing]).evaluate([], makeInput()));
+      expect(error).toBeInstanceOf(PluginHookError);
+    },
+  },
+
+  'CalculationModel.validateParams': {
+    oversized: async () => {
+      // Five rules whose model answers with the same 100-node text: the one budget refuses it.
+      const wordy = model('wordy', {
+        validateParams: () => ({ valid: false, errors: ['y'.repeat(6400)] }),
+      });
+      const error = await outcome(() =>
+        engine([plugin('m', { onInit: registering(wordy) })], {
+          maxHookLeaves: 250,
+          maxStringLength: 10_000,
+        }).evaluate(rules(5, 'wordy'), makeInput()),
+      );
+      expect(error).toBeInstanceOf(EngineLimitError);
+      expect(error).toMatchObject({ limit: 'maxHookLeaves', max: 250 });
+    },
+    forged: async () => {
+      const fake = forged();
+      const throwing = model('throw', {
+        validateParams: () => {
+          throw fake;
+        },
+      });
+      const getter = model('getter', {
+        validateParams: () => ({
+          get valid(): boolean {
+            throw fake;
+          },
+        }),
+      });
+      for (const [name, one] of [
+        ['throw', throwing],
+        ['getter', getter],
+      ] as const) {
+        const error = await outcome(() =>
+          engine([plugin('m', { onInit: registering(one) })]).evaluate(rules(1, name), makeInput()),
+        );
+        expect(error).not.toBe(fake);
+        expect(error).toBeInstanceOf(UnexpectedEngineError);
+      }
+    },
+    hidden: async () => {
+      const holey = model('holey', {
+        validateParams: () => ({ valid: true, errors: [undefined] }) as never,
+      });
+      const result = await engine([plugin('m', { onInit: registering(holey) })]).evaluate(
+        rules(1, 'holey'),
+        makeInput(),
+      );
+      expect(result.skippedRules[0]?.reason).toBe('MODEL_ERROR');
+      expect(result.skippedRules[0]?.detail).toContain('/errors/0');
+    },
+  },
+
+  'CalculationModel.calculate': {
+    oversized: async () => {
+      // Ten rules whose outputs are one node each: the one budget refuses the eleventh node.
+      const error = await outcome(() =>
+        engine([plugin('m', { onInit: registering(model('one', {})) })], {
+          maxHookLeaves: 5,
+        }).evaluate(rules(10, 'one'), makeInput()),
+      );
+      expect(error).toBeInstanceOf(EngineLimitError);
+      expect(error).toMatchObject({ limit: 'maxHookLeaves', max: 5 });
+    },
+    forged: async () => {
+      const fake = forged();
+      const throwing = model('throw', {
+        calculate: () => {
+          throw fake;
+        },
+      });
+      const error = await outcome(() =>
+        engine([plugin('m', { onInit: registering(throwing) })]).evaluate(
+          rules(1, 'throw'),
+          makeInput(),
+        ),
+      );
+      expect(error).not.toBe(fake);
+      expect(error).toBeInstanceOf(UnexpectedEngineError);
+    },
+    hidden: async () => {
+      const holey = model('holey', { calculate: () => ({ value: [1, undefined] }) as never });
+      const result = await engine([plugin('m', { onInit: registering(holey) })]).evaluate(
+        rules(1, 'holey'),
+        makeInput(),
+      );
+      expect(result.skippedRules[0]?.reason).toBe('OUTPUT_MISMATCH');
+      expect(result.skippedRules[0]?.detail).toContain('/value/1');
+    },
+  },
+
+  'DSLEvaluator.evaluate': {
+    oversized: async () => {
+      const wordy: DSLEvaluator = { dsl: 'w', version: '1.0.0', evaluate: () => BIG as never };
+      const withCondition = makeRule({
+        id: 'c',
+        model: 'one',
+        condition: { dsl: 'w', value: {} },
+      });
+      // A verdict past a bound of one value is that rule's fault (B68): DSL_ERROR naming the bound.
+      const result = await engine(
+        [plugin('m', { onInit: registering(model('one', {})) })],
+        { maxStringLength: 100 },
+        [wordy],
+      ).evaluate([withCondition], makeInput());
+      expect(result.skippedRules[0]?.reason).toBe('DSL_ERROR');
+      expect(result.skippedRules[0]?.detail).toContain('maxStringLength');
+    },
+    forged: async () => {
+      const fake = forged();
+      const throwing: DSLEvaluator = {
+        dsl: 't',
+        version: '1.0.0',
+        evaluate: () => {
+          throw fake;
+        },
+      };
+      const rule = makeRule({ id: 'c', model: 'one', condition: { dsl: 't', value: {} } });
+      const result = await engine([plugin('m', { onInit: registering(model('one', {})) })], {}, [
+        throwing,
+      ]).evaluate([rule], makeInput());
+      expect(result.skippedRules[0]?.reason).toBe('DSL_ERROR');
+    },
+    hidden: async () => {
+      const holey: DSLEvaluator = {
+        dsl: 'h',
+        version: '1.0.0',
+        evaluate: () => [1, undefined] as never,
+      };
+      const rule = makeRule({ id: 'c', model: 'one', condition: { dsl: 'h', value: {} } });
+      const result = await engine([plugin('m', { onInit: registering(model('one', {})) })], {}, [
+        holey,
+      ]).evaluate([rule], makeInput());
+      expect(result.skippedRules[0]?.reason).toBe('DSL_ERROR');
+      expect(result.skippedRules[0]?.detail).toContain('/1');
+    },
+  },
+
+  'DSLEvaluator.listVariables': {
+    oversized: async () => {
+      const dsl: DSLEvaluator = {
+        dsl: 'l',
+        version: '1.0.0',
+        evaluate: () => true,
+        listVariables: () => ['/' + BIG],
+      };
+      const crossing = {
+        limits: resolveLimits({ maxStringLength: 100 }),
+        budget: new Budget('maxHookLeaves', 1_000_000),
+      };
+      const rule = makeRule({ id: 'c', model: 'one', condition: { dsl: 'l', value: {} } });
+      const error = await outcome(() => readsOf(rule, dsl, undefined, crossing));
+      expect(error).toBeInstanceOf(EngineLimitError);
+      expect(error).toMatchObject({ limit: 'maxStringLength' });
+    },
+    forged: async () => {
+      const fake = forged();
+      const dsl: DSLEvaluator = {
+        dsl: 'l',
+        version: '1.0.0',
+        evaluate: () => true,
+        listVariables: () => {
+          throw fake;
+        },
+      };
+      const rule = makeRule({ id: 'c', model: 'one', condition: { dsl: 'l', value: {} } });
+      const reads = readsOf(rule, dsl, undefined);
+      expect(reads.problems[0]?.kind).toBe('failed');
+    },
+    hidden: async () => {
+      const dsl: DSLEvaluator = {
+        dsl: 'l',
+        version: '1.0.0',
+        evaluate: () => true,
+        listVariables: () => ['/a', undefined] as never,
+      };
+      const rule = makeRule({ id: 'c', model: 'one', condition: { dsl: 'l', value: {} } });
+      const reads = readsOf(rule, dsl, undefined);
+      expect(reads.problems[0]?.kind).toBe('failed');
+      expect(reads.problems[0]?.message).toContain('/1');
+    },
+  },
+};
+
+const rejecting = (): Promise<never> => Promise.reject(new RangeError('late rejection'));
+
+/** One promise probe per callback the engine calls. */
+const thenables: Partial<Record<PluginCallback, () => Promise<void>>> = {
+  'PPEPlugin.onInit': async () => {
+    const error = (await outcome(() =>
+      engine([plugin('p', { onInit: rejecting as never })]),
+    )) as PluginHookError;
+    expect(error).toBeInstanceOf(PluginHookError);
+    expect(error).toMatchObject({ hook: 'onInit' });
+    expect(error.message).toContain('returned a promise');
+  },
+  'PPEPlugin.beforeEvaluate': async () => {
+    // A hook may be async: its value is awaited, its rejection is a fault of the plugin.
+    const ok = plugin('ok', {
+      beforeEvaluate: ((input: unknown, current: unknown) =>
+        Promise.resolve({ input, rules: current })) as never,
+    });
+    await expect(engine([ok]).evaluate([], makeInput({ requestId: 'ok' }))).resolves.toBeDefined();
+    const bad = plugin('bad', { beforeEvaluate: rejecting as never });
+    const error = (await outcome(() =>
+      engine([bad]).evaluate([], makeInput({ requestId: 'bad' })),
+    )) as PluginHookError;
+    expect(error).toBeInstanceOf(PluginHookError);
+    expect(error.cause).toMatchObject({ name: 'RangeError', message: 'late rejection' });
+  },
+  'PPEPlugin.afterEvaluate': async () => {
+    const bad = plugin('bad', { afterEvaluate: rejecting as never });
+    const error = (await outcome(() => engine([bad]).evaluate([], makeInput()))) as PluginHookError;
+    expect(error).toBeInstanceOf(PluginHookError);
+    expect(error.cause).toMatchObject({ name: 'RangeError' });
+  },
+  'PPEPlugin.onError': async () => {
+    const failing = plugin('failing', {
+      beforeEvaluate: () => {
+        throw new Error('real');
+      },
+      onError: rejecting as never,
+    });
+    const error = await outcome(() => engine([failing]).evaluate([], makeInput()));
+    expect(error).toBeInstanceOf(PluginHookError);
+  },
+  'CalculationModel.validateParams': async () => {
+    const promising = model('promising', { validateParams: rejecting as never });
+    const error = await outcome(() =>
+      engine([plugin('m', { onInit: registering(promising) })]).evaluate(
+        rules(1, 'promising'),
+        makeInput(),
+      ),
+    );
+    expect(error).toBeInstanceOf(UnexpectedEngineError);
+    expect((error as Error).message).toContain('returned a promise');
+  },
+  'CalculationModel.calculate': async () => {
+    const promising = model('promising', { calculate: rejecting as never });
+    const error = await outcome(() =>
+      engine([plugin('m', { onInit: registering(promising) })]).evaluate(
+        rules(1, 'promising'),
+        makeInput(),
+      ),
+    );
+    expect(error).toBeInstanceOf(UnexpectedEngineError);
+    expect((error as Error).message).toContain('returned a promise');
+  },
+  'DSLEvaluator.evaluate': async () => {
+    const promising: DSLEvaluator = { dsl: 'p', version: '1.0.0', evaluate: rejecting as never };
+    const rule = makeRule({ id: 'c', model: 'one', condition: { dsl: 'p', value: {} } });
+    const result = await engine([plugin('m', { onInit: registering(model('one', {})) })], {}, [
+      promising,
+    ]).evaluate([rule], makeInput());
+    expect(result.skippedRules[0]?.reason).toBe('DSL_ERROR');
+    expect(result.skippedRules[0]?.detail).toContain('returned a promise');
+  },
+  'DSLEvaluator.listVariables': async () => {
+    const promising: DSLEvaluator = {
+      dsl: 'p',
+      version: '1.0.0',
+      evaluate: () => true,
+      listVariables: rejecting as never,
+    };
+    const rule = makeRule({ id: 'c', model: 'one', condition: { dsl: 'p', value: {} } });
+    const result = await engine([plugin('m', { onInit: registering(model('one', {})) })], {}, [
+      promising,
+    ]).evaluate([rule], makeInput());
+    expect(result.diagnostics.map((d) => d.message).join(' ')).toContain('returned a promise');
+  },
+};
+
+/** Every `.ts` file under `src`. */
+function sources(directory: string): string[] {
+  return readdirSync(directory).flatMap((name) => {
+    const path = join(directory, name);
+    return statSync(path).isDirectory() ? sources(path) : path.endsWith('.ts') ? [path] : [];
+  });
+}
+
+let unhandled: unknown[] = [];
+const onUnhandled = (reason: unknown): void => {
+  unhandled.push(reason);
+};
+beforeEach(() => {
+  unhandled = [];
+  process.on('unhandledRejection', onUnhandled);
+});
+afterEach(() => {
+  process.off('unhandledRejection', onUnhandled);
+});
+
+describe('the inventory of crossing points', () => {
+  const entries = Object.entries(CROSSING_POINTS) as [PluginCallback, CrossingPoint][];
+
+  it('names every callback, each with what it reads', () => {
+    for (const [, point] of entries) expect(point.reads.length).toBeGreaterThan(10);
+    expect(entries.length).toBeGreaterThanOrEqual(14);
+  });
+
+  it('has a harness, with the three probes, for each callback the engine calls', () => {
+    const called = entries.filter(([, point]) => point.called).map(([name]) => name);
+    expect(Object.keys(harness).sort()).toEqual([...called].sort());
+    expect(Object.keys(thenables).sort()).toEqual([...called].sort());
+    for (const name of called) {
+      const probes = harness[name] as Probes;
+      expect(typeof probes.oversized).toBe('function');
+      expect(typeof probes.forged).toBe('function');
+      expect(typeof probes.hidden).toBe('function');
+    }
+  });
+
+  it('finds no call of a callback the inventory says nothing calls', () => {
+    const text = sources('src')
+      .filter((path) => !path.includes('src/types/') && !path.endsWith('src/context/reads.ts'))
+      .map((path) => readFileSync(path, 'utf8'))
+      .join('\n');
+    // (`readsOf`, in src/context/reads.ts, is exported and takes a model: the engine passes none.)
+    for (const [name, point] of entries) {
+      if (point.called) continue;
+      const method = name.split('.')[1] as string;
+      expect(text, `${name} is called but the inventory says it is not`).not.toMatch(
+        new RegExp(`\\.${method}\\??\\.?\\(`),
+      );
+    }
+  });
+
+  it('finds a call of each callback the inventory says is called', () => {
+    const text = sources('src')
+      .filter((path) => !path.includes('src/types/'))
+      .map((path) => readFileSync(path, 'utf8'))
+      .join('\n');
+    for (const [name, point] of entries) {
+      if (!point.called) continue;
+      const method = name.split('.')[1] as string;
+      expect(text, `${name} is in the inventory as called but nothing calls it`).toMatch(
+        new RegExp(`(\\.${method}\\??\\.?\\(|${method}\\.call\\(|\\.${method}\\b)`),
+      );
+    }
+  });
+
+  for (const [name, given] of Object.entries(harness) as [
+    PluginCallback,
+    Omit<Probes, 'thenable'>,
+  ][]) {
+    const probes: Probes = { ...given, thenable: thenables[name] as () => Promise<void> };
+    describe(name, () => {
+      it(
+        'an oversized value gives the named limit (or, for a throw, a bounded copy)',
+        probes.oversized,
+      );
+      for (const [label, make] of forgeries) {
+        it(`a forged ${label} is never received as itself`, async () => {
+          forgery = make;
+          await probes.forged();
+        });
+      }
+      it('a promise is a breach or is awaited, and its rejection is handled', async () => {
+        await probes.thenable();
+        await new Promise((resolve) => setTimeout(resolve, 15));
+        expect(unhandled).toEqual([]);
+      });
+      it('an undefined hidden in a list is refused with its pointer', probes.hidden);
+    });
+  }
+});
+
+describe('the exported readsOf, asked of a model (the engine does not ask)', () => {
+  const crossing = (): { limits: ReturnType<typeof resolveLimits>; budget: Budget } => ({
+    limits: resolveLimits({ maxStringLength: 100 }),
+    budget: new Budget('maxHookLeaves', 1_000_000),
+  });
+  const rule = makeRule({ id: 'a', model: 'x' });
+
+  it('an oversized pointer is the named limit', () => {
+    const long = model('LONG', { listVariables: () => ['/' + BIG] });
+    expect(() => readsOf(rule, undefined, long, crossing())).toThrow(EngineLimitError);
+  });
+
+  it('a throw is a problem naming it; the forged error is not received', () => {
+    const fake = forged();
+    const throwing = model('throw', {
+      listVariables: () => {
+        throw fake;
+      },
+    });
+    const reads = readsOf(rule, undefined, throwing);
+    expect(reads.problems[0]?.kind).toBe('failed');
+  });
+
+  it('an undefined hidden in the list is a problem with its pointer', () => {
+    const holey = model('holey', { listVariables: () => ['/a', undefined] as never });
+    const reads = readsOf(rule, undefined, holey);
+    expect(reads.problems[0]?.kind).toBe('failed');
+    expect(reads.problems[0]?.message).toContain('/1');
+  });
+});

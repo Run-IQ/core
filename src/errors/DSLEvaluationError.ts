@@ -1,4 +1,5 @@
 import { PPEError } from './PPEError.js';
+import { markEngineError } from './engineError.js';
 
 export class DSLEvaluationError extends PPEError {
   constructor(
@@ -9,3 +10,5 @@ export class DSLEvaluationError extends PPEError {
     this.name = 'DSLEvaluationError';
   }
 }
+
+markEngineError(DSLEvaluationError);

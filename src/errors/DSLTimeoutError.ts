@@ -1,4 +1,5 @@
 import { PPEError } from './PPEError.js';
+import { markEngineError } from './engineError.js';
 
 export class DSLTimeoutError extends PPEError {
   constructor(
@@ -9,3 +10,5 @@ export class DSLTimeoutError extends PPEError {
     this.name = 'DSLTimeoutError';
   }
 }
+
+markEngineError(DSLTimeoutError);

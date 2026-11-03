@@ -1,4 +1,5 @@
 import { PPEError } from './PPEError.js';
+import { markEngineError } from './engineError.js';
 
 export class SnapshotFailureError extends PPEError {
   constructor(original: unknown) {
@@ -7,3 +8,5 @@ export class SnapshotFailureError extends PPEError {
     this.cause = original;
   }
 }
+
+markEngineError(SnapshotFailureError);

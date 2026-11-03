@@ -1,4 +1,5 @@
 import { PPEError } from './PPEError.js';
+import { markEngineError } from './engineError.js';
 
 /** A plugin hook did not settle within `timeout.hook`. */
 export class HookTimeoutError extends PPEError {
@@ -11,3 +12,5 @@ export class HookTimeoutError extends PPEError {
     this.name = 'HookTimeoutError';
   }
 }
+
+markEngineError(HookTimeoutError);

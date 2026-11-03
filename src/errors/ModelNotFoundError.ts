@@ -1,4 +1,5 @@
 import { PPEError } from './PPEError.js';
+import { markEngineError } from './engineError.js';
 
 export class ModelNotFoundError extends PPEError {
   constructor(public readonly modelName: string) {
@@ -6,3 +7,5 @@ export class ModelNotFoundError extends PPEError {
     this.name = 'ModelNotFoundError';
   }
 }
+
+markEngineError(ModelNotFoundError);

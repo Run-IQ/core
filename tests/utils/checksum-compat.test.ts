@@ -8,7 +8,7 @@ function sealedRule(): Rule {
   const definition = {
     id: 'vat',
     version: 1,
-    model: 'M',
+    model: 'm',
     params: { rate: 0.18 },
     priority: 100,
     effectiveFrom: new Date('2025-01-01'),
@@ -21,7 +21,7 @@ function sealedRule(): Rule {
 
 function engine(): PPEEngine {
   return new PPEEngine({
-    plugins: [new StubPlugin('test', [new StubModel('M', 42)])],
+    plugins: [new StubPlugin('test', [new StubModel('m', 42)])],
     dsls: [],
     strict: false,
   });
@@ -71,7 +71,11 @@ describe('checksum compatibility with @run-iq/spec', () => {
   });
 
   it('a malformed rule does not crash the evaluation: it is skipped as INVALID_RULE', async () => {
-    const malformed: Rule = { ...sealedRule(), effectiveUntil: new Date('2024-01-01') };
+    const malformed: Rule = {
+      ...sealedRule(),
+      id: 'vat-bad',
+      effectiveUntil: new Date('2024-01-01'),
+    };
     const result = await engine().evaluate([malformed, sealedRule()], input);
     expect(result.appliedRules.map((r) => r.id)).toEqual(['vat']);
     expect(result.skippedRules).toHaveLength(1);

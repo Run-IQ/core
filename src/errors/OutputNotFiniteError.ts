@@ -1,4 +1,5 @@
 import { PPEError } from './PPEError.js';
+import { markEngineError } from './engineError.js';
 
 /**
  * The combined value of a number output is not finite (e.g. a sum that overflows): the decision
@@ -17,3 +18,5 @@ export class OutputNotFiniteError extends PPEError {
     this.name = 'OutputNotFiniteError';
   }
 }
+
+markEngineError(OutputNotFiniteError);
