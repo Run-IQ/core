@@ -24,7 +24,7 @@ const INTRINSIC_ERRORS: ReadonlySet<unknown> = new Set([
  * writes into a record or an error can hold one.
  */
 export function clip(text: string): string {
-  return clipText(text, MAX_TEXT, `... (${text.length} characters)`);
+  return clipText(text, MAX_TEXT, '... [clipped]');
 }
 
 interface State {

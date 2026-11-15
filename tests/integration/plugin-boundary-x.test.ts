@@ -210,7 +210,7 @@ describe('X2: the text of a skip is read through the reader', () => {
     const detail = result.skippedRules[0]?.detail ?? '';
     expect(result.skippedRules[0]?.reason).toBe('INVALID_PARAMS');
     expect(detail.length).toBeLessThan(1300);
-    expect(detail).toContain('(5000 characters)');
+    expect(detail).toContain('... [clipped]');
   });
 });
 
@@ -449,7 +449,7 @@ describe('X5: the copy of a thrown value is the engine own', () => {
     expect(copy.list.length).toBeLessThanOrEqual(1001);
     const text = frozenErrorCopy(new Error('m'.repeat(1_000_000))) as Error;
     expect(text.message.length).toBeLessThan(1100);
-    expect(text.message).toContain('(1000000 characters)');
+    expect(text.message).toContain('... [clipped]');
   });
 
   it('Xi2: the nodes of all the lists and objects together are bounded, not only each list', () => {
@@ -483,8 +483,12 @@ describe('X6: every channel is bounded', () => {
   it('a pointer in the message of a limit error is cut to 1 024 characters', () => {
     const error = new EngineLimitError('maxStringLength', 10, 11, `/data/${'k'.repeat(5000)}`);
     expect(error.message.length).toBeLessThan(1200);
-    expect(error.message).toContain('characters)');
+    // B92: cut on a code point, with the one visible marker.
+    expect(error.message).toContain('... [clipped]');
     expect(error.pointer?.length).toBeLessThan(1100);
+    const pair = new EngineLimitError('maxStringLength', 10, 11, `/${'a'.repeat(1022)}\u{1F600}x`);
+    expect(pair.pointer?.endsWith('... [clipped]')).toBe(true);
+    expect(pair.pointer?.includes('\uD83D\u{FFFD}')).toBe(false);
   });
 });
 

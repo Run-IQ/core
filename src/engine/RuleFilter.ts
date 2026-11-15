@@ -16,7 +16,7 @@ import {
 } from '@run-iq/spec';
 import type { DimensionSpec, Referential } from '@run-iq/spec';
 import { DSLEvaluationError } from '../errors/DSLEvaluationError.js';
-import { isRaisedLimit } from '../errors/EngineLimitError.js';
+import { attributeLimit, isRaisedLimit } from '../errors/EngineLimitError.js';
 import { PER_VALUE_LIMITS, defaultCrossing, readVerdict } from './pluginBoundary.js';
 import type { Crossing } from './pluginBoundary.js';
 import { ruleLabel } from '../utils/values.js';
@@ -250,6 +250,8 @@ export class RuleFilter {
           views.trapped(rule.condition.value),
           views.trapped(scope.context),
         );
+        // A refused write taints the call even when the DSL caught it and answered (AE4).
+        if (views.wrote !== undefined) throw new Error(views.wrote);
         // The verdict crosses once, through the one reader; it is still read by truthiness (N21).
         if (!readVerdict(result, this.crossing, `condition of ${ruleLabel(rule)}`)) {
           return { reason: 'CONDITION_FALSE', detail: 'condition evaluated to false' };
@@ -257,7 +259,9 @@ export class RuleFilter {
       } catch (error) {
         // A verdict past a bound of one value is that rule's fault; every other bound is the
         // evaluation's (B68).
-        if (isRaisedLimit(error) && !PER_VALUE_LIMITS.has(error.limit)) throw error;
+        if (isRaisedLimit(error) && !PER_VALUE_LIMITS.has(error.limit)) {
+          throw attributeLimit(error, `dsl:${rule.condition.dsl}`);
+        }
         const cause = error instanceof DSLEvaluationError ? error.originalError : error;
         // The text of a fault is cut on a code point here too: a verdict that cannot be read gives
         // a failure that joins the reason of every property, and none of it is longer than this.

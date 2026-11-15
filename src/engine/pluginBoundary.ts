@@ -6,7 +6,7 @@ import { DEFAULT_LIMITS } from '../limits.js';
 import type { PPEPlugin } from '../types/plugin.js';
 import type { CalculationModel } from '../types/model.js';
 import type { DSLEvaluator } from '../types/dsl.js';
-import { isRaisedLimit, raiseLimit } from '../errors/EngineLimitError.js';
+import { attributeLimit, isRaisedLimit, raiseLimit } from '../errors/EngineLimitError.js';
 import { InputCopier } from '../input/copyInput.js';
 import type { RuleValidator } from '../security/RuleValidator.js';
 import { compareRuleIdentity } from './resolveTie.js';
@@ -647,12 +647,16 @@ export function askValidateParams(
     const raw = model.validateParams(scope.trapped(params));
     // The answer every model gives for almost every rule, `{ valid: true }`, read as the reader
     // reads it (the prototype and the keys once, the property as a data property) without the walk.
-    if (reading(() => isPlainValid(raw))) return VALID;
+    // A refused write taints the call even when the model caught it and answered normally.
+    if (reading(() => isPlainValid(raw))) {
+      return scope.wrote === undefined ? VALID : errorVerdict(crossing, clip(scope.wrote));
+    }
     const result = readBounded(raw, crossing.limits, what, {
       leafLimit: 'maxRuleLeaves',
       budget: crossing.budget,
       budgetMode: 'text',
     });
+    if (scope.wrote !== undefined) return errorVerdict(crossing, clip(scope.wrote));
     verdict = judgeValidation(result, what);
     // The text of what the engine keeps of it (the detail of a skip) is in the record; its weight
     // against the budget was counted when it was read.
@@ -660,7 +664,8 @@ export function askValidateParams(
   } catch (error) {
     if (isRaisedLimit(error)) {
       // A bound of one result is that rule's fault; the budget of the evaluation is the engine's.
-      if (error.limit === 'maxHookLeaves') throw error;
+      if (error.limit === 'maxHookLeaves')
+        throw attributeLimit(error, `validateParams:${model.name}`);
       return errorVerdict(crossing, clip(`${what}: ${error.message}`));
     }
     if (isMalformed(error)) return errorVerdict(crossing, clip(error.message));

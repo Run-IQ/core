@@ -2,6 +2,7 @@ import { PPEError } from './PPEError.js';
 import type { EngineLimits } from '../limits.js';
 import { markEngineError } from './engineError.js';
 import { raised } from '../engine/trust.js';
+import { clipText } from '../utils/weight.js';
 
 /** Characters of a pointer shown in a message (spec cuts its issue text at 1 024). */
 const MAX_POINTER_TEXT = 1024;
@@ -13,6 +14,11 @@ const MAX_POINTER_TEXT = 1024;
 export class EngineLimitError extends PPEError {
   /** Where the bound was passed, when it is a place in the data (`/data/text`), cut at 1 024. */
   public readonly pointer: string | undefined;
+  /**
+   * Where a bound of the whole evaluation was passed when plugin code handed over the value:
+   * `model:<name>`, `dsl:<name>` or `validateParams:<model>`. Absent for the caller's own data.
+   */
+  public readonly source: string | undefined;
 
   constructor(
     public readonly limit: keyof EngineLimits,
@@ -20,17 +26,18 @@ export class EngineLimitError extends PPEError {
     public readonly actual: number,
     /** Where the bound was passed, when it is a place in the data (`/data/text`). */
     pointer?: string,
+    source?: string,
   ) {
-    // A pointer can be as long as the key that is refused: it is cut, as spec cuts its issue text.
+    // A pointer can be as long as the key that is refused: it is cut on a code point, with the
+    // visible marker, as spec cuts its issue text (B92).
     const shown =
-      pointer === undefined || pointer.length <= MAX_POINTER_TEXT
-        ? pointer
-        : `${pointer.slice(0, MAX_POINTER_TEXT)}... (${pointer.length} characters)`;
+      pointer === undefined ? pointer : clipText(pointer, MAX_POINTER_TEXT, '... [clipped]');
     super(
-      `engine limit ${limit} exceeded: ${actual} > ${max}${shown === undefined ? '' : ` at ${shown}`}`,
+      `engine limit ${limit} exceeded: ${actual} > ${max}${shown === undefined ? '' : ` at ${shown}`}${source === undefined ? '' : ` (returned by ${source})`}`,
       'ENGINE_LIMIT',
     );
     this.pointer = shown;
+    this.source = source;
     this.name = 'EngineLimitError';
   }
 }
@@ -54,4 +61,15 @@ export function raiseLimit(
 /** True for a limit error. Only code that no plugin frame sits under asks. */
 export function isRaisedLimit(value: unknown): value is EngineLimitError {
   return value instanceof EngineLimitError;
+}
+
+/**
+ * The same limit, attributed to the plugin value that broke it (`model:<name>`, `dsl:<name>`,
+ * `validateParams:<model>`): a bound of the whole evaluation passed while reading what a model, a
+ * DSL or a `validateParams` returned always names where it came from (B75).
+ */
+export function attributeLimit(error: EngineLimitError, source: string): EngineLimitError {
+  return Object.freeze(
+    raised(new EngineLimitError(error.limit, error.max, error.actual, error.pointer, source)),
+  );
 }

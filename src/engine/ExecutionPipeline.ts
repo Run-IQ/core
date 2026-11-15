@@ -19,7 +19,7 @@ import {
 } from './pluginBoundary.js';
 import type { Budget } from './pluginBoundary.js';
 import { clip } from '../utils/frozenCopy.js';
-import { isRaisedLimit, raiseLimit } from '../errors/EngineLimitError.js';
+import { attributeLimit, isRaisedLimit, raiseLimit } from '../errors/EngineLimitError.js';
 import { ViewScope } from './frozenView.js';
 import { clipFault } from './pluginPort.js';
 import { UnexpectedEngineError } from '../errors/UnexpectedEngineError.js';
@@ -215,6 +215,12 @@ export class ExecutionPipeline {
           skipped.push({ rule, reason: 'MODEL_ERROR', detail: views.wrote });
           continue;
         }
+        // A refused write taints the call even when the model caught the error and returned
+        // normally: the slot of the call is set, so the rule is excluded (AE4).
+        if (views.wrote !== undefined) {
+          skipped.push({ rule, reason: 'MODEL_ERROR', detail: views.wrote });
+          continue;
+        }
         // What the model returns is data the engine copies once, bounded (`maxRuleLeaves` nodes,
         // `maxInputDepth` levels) and without recursion: never a view it was handed, never a cycle
         // or a depth that would overflow the stack. A property of it that throws is the model's
@@ -226,7 +232,9 @@ export class ExecutionPipeline {
           });
         } catch (error) {
           // The budget of the evaluation is the engine's bound, not that rule's fault.
-          if (isRaisedLimit(error) && error.limit === 'maxHookLeaves') throw error;
+          if (isRaisedLimit(error) && error.limit === 'maxHookLeaves') {
+            throw attributeLimit(error, `model:${rule.model}`);
+          }
           // An output past a bound of one value is that rule's fault (a fault stops at what it
           // touches); the budget of the whole evaluation is the engine's (B68).
           if (isRaisedLimit(error) && PER_VALUE_LIMITS.has(error.limit)) {

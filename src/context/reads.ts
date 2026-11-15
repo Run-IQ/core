@@ -8,7 +8,7 @@ import type { Rule } from '../types/rule.js';
 import { describeValue } from '../utils/json.js';
 import { describeThrown } from '../utils/values.js';
 import { isolated } from '../engine/trust.js';
-import { isRaisedLimit } from '../errors/EngineLimitError.js';
+import { attributeLimit, isRaisedLimit } from '../errors/EngineLimitError.js';
 import { clip } from '../utils/frozenCopy.js';
 import { defaultCrossing, guarded, readBounded } from '../engine/pluginBoundary.js';
 import { callSync } from '../engine/pluginPort.js';
@@ -101,30 +101,47 @@ function computeReads(
     declared = false;
   };
 
-  const collect = (source: string, ask: () => unknown): void => {
+  const collect = (source: string, ask: () => unknown, origin: string): void => {
     let items: unknown[];
     try {
       // The answer crosses once, through the one reader: copied, bounded, its text weighed.
       const raw = ask();
-      // The length is read once and capped before one item is read.
-      const length = guarded(() => (Array.isArray(raw) ? raw.length : 0));
+      // The contract is an array: an iterable, an array-like or a Set is not a list, and a lazy
+      // one is never run.
+      if (!guarded(() => Array.isArray(raw))) {
+        throw new TypeError(`${guarded(() => describeValue(raw))} is not a list`);
+      }
+      // The length is read ONCE, capped before one item is read, and never read again (a Proxy
+      // that answers another length the second time changes nothing): the items are taken by that
+      // length, each once, into a list of the engine's own.
+      const length = guarded(() => (raw as unknown[]).length);
+      if (!Number.isSafeInteger(length) || length < 0) {
+        throw new TypeError('the list has an invalid length');
+      }
       if (length > MAX_LISTED_POINTERS) {
         throw new RangeError(`${length} pointers, more than the ${MAX_LISTED_POINTERS} allowed`);
       }
-      const answer = readBounded(raw, crossing.limits, `listVariables of ${source}`, {
+      const taken: unknown[] = [];
+      for (let index = 0; index < length; index += 1) {
+        try {
+          taken.push(guarded(() => (raw as unknown[])[index]));
+        } catch (error) {
+          throw new Error(
+            `listVariables of ${source}/${index} could not be read: ${describeThrown(error)}`,
+          );
+        }
+      }
+      // What was taken crosses once, through the one reader: copied, bounded, its text weighed.
+      const answer = readBounded(taken, crossing.limits, `listVariables of ${source}`, {
         leafLimit: 'maxInputLeaves',
         budget: crossing.budget,
         budgetMode: 'text',
-      });
-      // The contract is an array: an iterable, an array-like or a Set is not a list, and a lazy
-      // one is never run. The length is read once and capped before any item is read.
-      if (!Array.isArray(answer))
-        throw new TypeError(`${guarded(() => describeValue(raw))} is not a list`);
+      }) as unknown[];
       items = [];
       for (let index = 0; index < answer.length; index += 1) items.push(answer[index]);
     } catch (error) {
       // A bound of the engine is not a plugin that failed: it is named, and it ends the evaluation.
-      if (isRaisedLimit(error)) throw error;
+      if (isRaisedLimit(error)) throw attributeLimit(error, origin);
       problem('failed', source, `failed: ${describeThrown(error)}`);
       return;
     }
@@ -174,13 +191,21 @@ function computeReads(
     if (dsl?.listVariables === undefined) declared = false;
     else {
       const value = rule.condition.value;
-      collect(rule.condition.dsl, () => askListVariables(dsl, new ViewScope().trapped(value)));
+      collect(
+        rule.condition.dsl,
+        () => askListVariables(dsl, new ViewScope().trapped(value)),
+        `dsl:${rule.condition.dsl}`,
+      );
     }
   }
   if (model?.listVariables === undefined) declared = false;
   else {
     const params = rule.params;
-    collect(model.name, () => askListVariables(model, new ViewScope().trapped(params)));
+    collect(
+      model.name,
+      () => askListVariables(model, new ViewScope().trapped(params)),
+      `model:${model.name}`,
+    );
   }
 
   return { pointers: [...pointers], outputs: [...outputs], declared, problems };
