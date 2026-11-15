@@ -207,6 +207,32 @@ describe('AH6: the constructor options', () => {
     ).toBeUndefined();
   });
 
+  it('a known key that is not enumerable, and a limit that is an accessor or inherited, are refused or ignored (AI4)', () => {
+    const base = (): Record<string, unknown> => ({ plugins: [], dsls: [] });
+    let error: unknown;
+    try {
+      new PPEEngine(
+        Object.defineProperty(base(), 'strict', { value: false, enumerable: false }) as never,
+      );
+    } catch (thrown) {
+      error = thrown;
+    }
+    expect(error).toBeInstanceOf(EngineConfigError);
+    expect((error as EngineConfigError).path).toBe('/strict');
+    refused(
+      { limits: Object.defineProperty({}, 'maxRules', { enumerable: true, get: () => 5 }) },
+      '/limits/maxRules',
+    );
+    refused(
+      { limits: Object.defineProperty({}, 'maxRules', { value: 5, enumerable: false }) },
+      '/limits/maxRules',
+    );
+    const inherited = build({ limits: Object.create({ maxRules: 1 }) });
+    expect((inherited as unknown as { limits: { maxRules: number } }).limits.maxRules).toBe(
+      100_000,
+    );
+  });
+
   it('a polluted Object.prototype is not read as an option (AI4 d)', () => {
     (Object.prototype as Record<string, unknown>)['dryRun'] = true;
     try {

@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import type { PPEEngineConfig } from '../../src/engine/PPEEngine.js';
 import { EngineLimitError } from '../../src/errors/EngineLimitError.js';
+import { resolveLimits } from '../../src/limits.js';
 import { EngineConfigError } from '../../src/errors/EngineConfigError.js';
 import { DEFAULT_LIMITS } from '../../src/limits.js';
 import type { PPEPlugin, PluginContext } from '../../src/types/plugin.js';
@@ -122,6 +123,21 @@ describe('the bounds of an evaluation (EngineLimits)', () => {
 
     it('refuses a limit of 0', () => {
       expect(refusal({ maxRules: 0 }).reason).toBe('limits.maxRules must be a positive integer');
+    });
+
+    it('clips the name of an unknown limit it echoes (AI4)', () => {
+      expect(() => resolveLimits({ ['k'.repeat(100_000)]: 1 } as never)).toThrow(
+        expect.objectContaining({
+          reasons: [expect.stringMatching(/^unknown limit: k+\.\.\. \[clipped\]$/)],
+        }) as never,
+      );
+      let reasons: readonly string[] = [];
+      try {
+        resolveLimits({ ['k'.repeat(100_000)]: 1 } as never);
+      } catch (error) {
+        reasons = (error as { reasons: readonly string[] }).reasons;
+      }
+      expect((reasons[0] ?? '').length).toBeLessThan(200);
     });
 
     it('refuses an unknown limit', () => {
