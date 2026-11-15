@@ -1,7 +1,6 @@
 import { PPEError } from './PPEError.js';
-import { describeThrown } from '../utils/values.js';
 import { describeFault, faultOf, trustedFault } from '../engine/pluginPort.js';
-import { markEngineError } from './engineError.js';
+import { isEngineError, markEngineError } from './engineError.js';
 
 /**
  * A thrown value that is not a `PPEError` (a model's `RangeError`, a plugin's `TypeError`...),
@@ -13,12 +12,16 @@ export class UnexpectedEngineError extends PPEError {
   override readonly cause: unknown;
 
   constructor(cause: unknown, message?: string) {
-    super(message ?? describeThrown(cause), 'UNEXPECTED');
+    // Only text is read from a foreign thrown value (own data strings, bounded): none of its
+    // conversion code (`toString`, `Symbol.toPrimitive`) is ever run.
+    const engine = isEngineError(cause);
+    const fault = engine ? undefined : (trustedFault(cause) ?? faultOf(cause));
+    super(
+      message ?? (fault === undefined ? (cause as PPEError).message : describeFault(fault)),
+      'UNEXPECTED',
+    );
     this.name = 'UnexpectedEngineError';
-    this.cause =
-      cause instanceof PPEError
-        ? cause
-        : Object.freeze({ ...(trustedFault(cause) ?? faultOf(cause)) });
+    this.cause = fault === undefined ? cause : Object.freeze({ ...fault });
     // Frozen at creation (B74): the cause is the text of a fault, or a frozen engine error.
     Object.freeze(this);
   }
@@ -33,13 +36,12 @@ export class UnexpectedEngineError extends PPEError {
     return new UnexpectedEngineError(Object.freeze({ ...fault }), describeFault(fault));
   }
 
-  /** `error` itself when it is a `PPEError`, else `error` wrapped. */
+  /**
+   * `error` itself when the engine created it (by identity, never by `instanceof`: a caller's
+   * subclass of `PPEError` is not the engine's), else `error` wrapped, holding its text only.
+   */
   static wrap(error: unknown): PPEError {
-    try {
-      if (error instanceof PPEError) return error;
-    } catch {
-      // A hostile value (revoked proxy...) whose prototype cannot be read: wrapped below.
-    }
+    if (isEngineError(error)) return error as PPEError;
     return new UnexpectedEngineError(error);
   }
 }

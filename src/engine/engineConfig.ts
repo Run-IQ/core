@@ -1,5 +1,10 @@
 import { EngineConfigError } from '../errors/EngineConfigError.js';
-import { describeThrown } from '../utils/values.js';
+import { ValidationError } from '../errors/ValidationError.js';
+import { resolveLimits } from '../limits.js';
+import type { EngineLimits } from '../limits.js';
+import { readInputSeedConfig } from '../input/inputSeed.js';
+import type { InputSeedConfig } from '../input/inputSeed.js';
+import { describeFault, faultOf } from './pluginPort.js';
 
 /** The options `new PPEEngine` knows. Any other key is refused, whatever its value. */
 export const CONFIG_KEYS = [
@@ -29,8 +34,8 @@ export interface ReadConfig {
   readonly onChecksumMismatch: 'throw' | 'skip' | undefined;
   readonly dryRun: boolean | undefined;
   readonly onSnapshotError: ((error: unknown) => void) | undefined;
-  readonly limits: unknown;
-  readonly inputSeed: unknown;
+  readonly limits: EngineLimits;
+  readonly inputSeed: InputSeedConfig | undefined;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -48,17 +53,53 @@ export function readEngineConfig(config: unknown): ReadConfig {
   } catch (error) {
     if (error instanceof EngineConfigError) throw error;
     // A revoked Proxy, a trap or a getter that throws: named, not raw.
-    throw new EngineConfigError('/', `the options could not be read: ${describeThrown(error)}`);
+    throw new EngineConfigError(
+      '/',
+      `the options could not be read: ${describeFault(faultOf(error))}`,
+    );
   }
 }
 
-function read(config: unknown): ReadConfig {
-  if (!isRecord(config)) throw new EngineConfigError('/', 'the options must be an object');
-  for (const key of Object.keys(config)) {
-    if (!(CONFIG_KEYS as readonly string[]).includes(key)) {
-      throw new EngineConfigError(`/${key}`, 'unknown option');
+/**
+ * The own, enumerable data properties of `value`, as a plain copy (accessors, non-enumerable and
+ * symbol keys are refused, as the input reader refuses them; inherited values are ignored: a
+ * property of the prototype, or of `Object.prototype`, is never an option). A key outside `known`
+ * is refused. A throw of a trap or a getter is named, with the path, as bounded text.
+ */
+function ownData(
+  value: Record<string, unknown>,
+  path: string,
+  known?: readonly string[],
+): Record<string, unknown> {
+  // No prototype: a polluted `Object.prototype` is never read back as an option.
+  const copy: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  try {
+    for (const key of Reflect.ownKeys(value)) {
+      const where =
+        typeof key === 'symbol'
+          ? `${path === '/' ? '' : path}/(symbol)`
+          : `${path === '/' ? '' : path}/${key}`;
+      if (typeof key === 'symbol')
+        throw new EngineConfigError(where, 'a symbol key is not allowed');
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (descriptor === undefined) continue;
+      if (!('value' in descriptor))
+        throw new EngineConfigError(where, 'must be a data property, not an accessor');
+      if (descriptor.enumerable !== true) throw new EngineConfigError(where, 'must be enumerable');
+      if (known !== undefined && !known.includes(key))
+        throw new EngineConfigError(where, 'unknown option');
+      copy[key] = descriptor.value;
     }
+  } catch (error) {
+    if (error instanceof EngineConfigError) throw error;
+    throw new EngineConfigError(path, `could not be read: ${describeFault(faultOf(error))}`);
   }
+  return copy;
+}
+
+function read(given: unknown): ReadConfig {
+  if (!isRecord(given)) throw new EngineConfigError('/', 'the options must be an object');
+  const config = ownData(given, '/', CONFIG_KEYS);
   const value = (key: (typeof CONFIG_KEYS)[number]): unknown => config[key];
 
   const list = (key: 'plugins' | 'dsls'): readonly unknown[] => {
@@ -89,23 +130,19 @@ function read(config: unknown): ReadConfig {
   const givenTimeout = value('timeout');
   if (givenTimeout !== undefined) {
     if (!isRecord(givenTimeout)) throw new EngineConfigError('/timeout', 'must be an object');
-    for (const key of Object.keys(givenTimeout)) {
-      if (!(TIMEOUT_KEYS as readonly string[]).includes(key)) {
-        throw new EngineConfigError(`/timeout/${key}`, 'unknown option');
-      }
-    }
+    const own = ownData(givenTimeout, '/timeout', TIMEOUT_KEYS);
     for (const key of TIMEOUT_KEYS) {
-      const delay = givenTimeout[key];
+      const delay = own[key];
       if (delay === undefined) continue;
       if (
         typeof delay !== 'number' ||
-        !Number.isFinite(delay) ||
+        !Number.isSafeInteger(delay) ||
         delay <= 0 ||
         delay > MAX_DELAY_MS
       ) {
         throw new EngineConfigError(
           `/timeout/${key}`,
-          `must be a number of milliseconds above 0 and at most ${MAX_DELAY_MS}`,
+          `must be a whole number of milliseconds above 0 and at most ${MAX_DELAY_MS}`,
         );
       }
       timeout[key] = delay;
@@ -139,7 +176,36 @@ function read(config: unknown): ReadConfig {
     onChecksumMismatch: choice('onChecksumMismatch', ['throw', 'skip'] as const),
     dryRun: flag('dryRun'),
     onSnapshotError: onSnapshotError as ReadConfig['onSnapshotError'],
-    limits: value('limits'),
-    inputSeed: value('inputSeed'),
+    limits: readLimits(value('limits')),
+    inputSeed: readSeed(value('inputSeed')),
   };
+}
+
+/** A `ValidationError` of a member that has its own checker, as an `EngineConfigError` with the path. */
+function asConfigError(path: string, error: unknown): never {
+  if (error instanceof ValidationError) {
+    throw new EngineConfigError(path, error.reasons.join('; '));
+  }
+  if (error instanceof EngineConfigError) throw error;
+  throw new EngineConfigError(path, `could not be read: ${describeFault(faultOf(error))}`);
+}
+
+function readLimits(given: unknown): EngineLimits {
+  if (given === undefined) return resolveLimits(undefined);
+  if (!isRecord(given)) throw new EngineConfigError('/limits', 'must be an object');
+  try {
+    return resolveLimits(ownData(given, '/limits'));
+  } catch (error) {
+    return asConfigError('/limits', error);
+  }
+}
+
+function readSeed(given: unknown): InputSeedConfig | undefined {
+  if (given === undefined) return undefined;
+  if (!isRecord(given)) throw new EngineConfigError('/inputSeed', 'inputSeed must be an object');
+  try {
+    return readInputSeedConfig(ownData(given, '/inputSeed', ['secret', 'derive']), given);
+  } catch (error) {
+    return asConfigError('/inputSeed', error);
+  }
 }

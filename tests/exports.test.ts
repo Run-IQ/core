@@ -4,9 +4,10 @@ import * as core from '../src/index.js';
 import { DEFAULT_LIMITS } from '../src/limits.js';
 
 describe('the public surface of 9L', () => {
-  it('re-exports the pointer functions of spec themselves, not copies', () => {
-    expect(core.parsePointer).toBe(parsePointer);
-    expect(core.formatPointer).toBe(formatPointer);
+  it('re-exports the pointer functions of spec, guarded: the same answers', () => {
+    // Guarded (AI7: a bad argument is an engine error, never spec's own), so not the same function.
+    expect(core.parsePointer('/a/b')).toEqual(parsePointer('/a/b'));
+    expect(core.formatPointer(parsePointer('/a~1b'))).toBe(formatPointer(parsePointer('/a~1b')));
     expect(core.formatPointer(core.parsePointer('/a~1b/~0c'))).toBe('/a~1b/~0c');
   });
 

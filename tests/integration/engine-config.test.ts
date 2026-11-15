@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import { EngineConfigError } from '../../src/errors/EngineConfigError.js';
-import { ValidationError } from '../../src/errors/ValidationError.js';
+import { PPEError } from '../../src/errors/PPEError.js';
 import { CONFIG_KEYS } from '../../src/engine/engineConfig.js';
 import { InMemorySnapshotAdapter, makeInput } from '../helpers.js';
 
@@ -123,9 +123,105 @@ describe('AH6: the constructor options', () => {
     expect(() => build({ onSnapshotError: () => undefined })).not.toThrow();
   });
 
-  it('limits and inputSeed keep their own refusal (ValidationError), as before', () => {
-    expect(refusal({ limits: { maxRules: -1 } })).toBeInstanceOf(ValidationError);
-    expect(refusal({ inputSeed: 'x' })).toBeInstanceOf(ValidationError);
+  it('limits and inputSeed faults are EngineConfigError with their path (AI4)', () => {
+    refused({ limits: { maxRules: -1 } }, '/limits');
+    refused({ limits: 'x' }, '/limits');
+    refused({ inputSeed: 'x' }, '/inputSeed');
+    refused({ inputSeed: { secret: new Uint8Array(3) } }, '/inputSeed');
+  });
+
+  it('an unknown inputSeed key is refused (AI4 b)', () => {
+    refused({ inputSeed: { secret: new Uint8Array(32), extra: 1 } }, '/inputSeed/extra');
+  });
+
+  it('an unknown limit name is clipped in the error (AI4 a)', () => {
+    const error = refusal({ limits: { ['k'.repeat(100_000)]: 1 } }) as EngineConfigError;
+    expect(error).toBeInstanceOf(EngineConfigError);
+    expect(error.message.length).toBeLessThan(1500);
+  });
+
+  it('a getter or a Proxy in limits or inputSeed is named, not raw (AI1)', () => {
+    const boom = (): never => {
+      throw new Error('boom'.repeat(1000));
+    };
+    const proxy = new Proxy({}, { ownKeys: boom });
+    for (const [key, value] of [
+      ['limits', Object.defineProperty({}, 'maxRules', { enumerable: true, get: boom })],
+      ['limits', proxy],
+      ['inputSeed', Object.defineProperty({}, 'secret', { enumerable: true, get: boom })],
+      ['inputSeed', proxy],
+    ] as const) {
+      const error = refusal({ [key]: value });
+      expect(error, key).toBeInstanceOf(EngineConfigError);
+      expect(Object.isFrozen(error)).toBe(true);
+      expect((error as EngineConfigError).path.startsWith(`/${key}`)).toBe(true);
+      expect((error as Error).message.length).toBeLessThan(1500);
+    }
+  });
+
+  it('a foreign subclass of PPEError thrown by a getter is wrapped, never handed over (AI1)', () => {
+    class Foreign extends PPEError {
+      constructor() {
+        super('mine', 'FOREIGN');
+      }
+    }
+    const own = Object.defineProperty({}, 'maxRules', {
+      enumerable: true,
+      get() {
+        throw new Foreign();
+      },
+    });
+    const error = refusal({ limits: own });
+    expect(error).toBeInstanceOf(EngineConfigError);
+    expect(error).not.toBeInstanceOf(Foreign);
+    expect(Object.isFrozen(error)).toBe(true);
+  });
+
+  it('only own data properties are options (AI4 c, d)', () => {
+    // a non-enumerable key, a symbol key, an accessor, an inherited value
+    const base = (): Record<string, unknown> => ({ plugins: [], dsls: [] });
+    const direct = (config: object, path: string): void => {
+      let error: unknown;
+      try {
+        new PPEEngine(config as never);
+      } catch (thrown) {
+        error = thrown;
+      }
+      expect(error, path).toBeInstanceOf(EngineConfigError);
+      expect((error as EngineConfigError).path).toBe(path);
+    };
+    direct(Object.defineProperty(base(), 'strcit', { value: false, enumerable: false }), '/strcit');
+    direct(Object.assign(base(), { [Symbol('x')]: 1 }), '/(symbol)');
+    direct(
+      Object.defineProperty(base(), 'strict', { enumerable: true, get: () => true }),
+      '/strict',
+    );
+    const inherited = Object.assign(Object.create({ dryRun: true }), { plugins: [], dsls: [] });
+    const engine = new PPEEngine(inherited);
+    expect(engine).toBeInstanceOf(PPEEngine);
+    expect((engine as unknown as { dryRun: boolean }).dryRun).toBe(false);
+    // an inherited member of `timeout` is ignored, not used
+    const withInherited = build({ timeout: Object.create({ pipeline: 5 }) });
+    expect(
+      (withInherited as unknown as { pipelineTimeout?: number }).pipelineTimeout,
+    ).toBeUndefined();
+  });
+
+  it('a polluted Object.prototype is not read as an option (AI4 d)', () => {
+    (Object.prototype as Record<string, unknown>)['dryRun'] = true;
+    try {
+      const engine = build({});
+      expect((engine as unknown as { dryRun: boolean }).dryRun).toBe(false);
+    } finally {
+      delete (Object.prototype as Record<string, unknown>)['dryRun'];
+    }
+  });
+
+  it('a fractional delay is refused, never rounded (AI4 e)', () => {
+    for (const key of ['dsl', 'hook', 'pipeline'] as const) {
+      refused({ timeout: { [key]: 0.5 } }, `/timeout/${key}`);
+      refused({ timeout: { [key]: 1.5 } }, `/timeout/${key}`);
+    }
   });
 
   it('a getter or a Proxy of the options that throws is named, not raw', () => {

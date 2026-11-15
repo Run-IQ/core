@@ -27,11 +27,10 @@ import { DSLRegistry, snapshotDsls } from '../registry/DSLRegistry.js';
 import { InputSanitizer } from '../security/InputSanitizer.js';
 import type { PreparedInput } from '../security/InputSanitizer.js';
 import { isRaisedLimit, raiseLimit } from '../errors/EngineLimitError.js';
-import { checkDerivedSeed, readInputSeedConfig } from '../input/inputSeed.js';
+import { checkDerivedSeed } from '../input/inputSeed.js';
 import type { InputSeedConfig } from '../input/inputSeed.js';
 import { readEngineConfig } from './engineConfig.js';
 import { EngineConfigError } from '../errors/EngineConfigError.js';
-import { resolveLimits } from '../limits.js';
 import type { EngineLimits, EngineLimitsInput } from '../limits.js';
 import { EVALUATE_OPTION_NAMES } from '../types/options.js';
 import type { EvaluateOptions } from '../types/options.js';
@@ -134,94 +133,100 @@ export class PPEEngine {
   private readonly onChecksumMismatch: 'throw' | 'skip';
 
   constructor(given: PPEEngineConfig) {
-    // The options are read once and checked: an unknown key or a value of the wrong type is an
-    // `EngineConfigError` with its path, never coerced (AH6).
-    const config = readEngineConfig(given);
-    this.strict = config.strict ?? true;
-    this.conflictMode = config.onConflict ?? (this.strict ? 'throw' : 'first');
-    this.dryRun = config.dryRun ?? false;
-    this.pipelineTimeout = config.timeout.pipeline;
-    this.limits = resolveLimits(config.limits as EngineLimitsInput | undefined);
-    this.inputSeed = readInputSeedConfig(config.inputSeed);
+    // Whatever goes wrong while building, the caller receives an engine error: one the engine
+    // created is itself, anything else is wrapped (text only), by identity (AI1).
+    try {
+      // The options are read once and checked: an unknown key or a value of the wrong type is an
+      // `EngineConfigError` with its path, never coerced (AH6).
+      const config = readEngineConfig(given);
+      this.strict = config.strict ?? true;
+      this.conflictMode = config.onConflict ?? (this.strict ? 'throw' : 'first');
+      this.dryRun = config.dryRun ?? false;
+      this.pipelineTimeout = config.timeout.pipeline;
+      this.limits = config.limits;
+      this.inputSeed = config.inputSeed;
 
-    this.modelRegistry = new ModelRegistry();
-    this.pluginRegistry = new PluginRegistry();
-    this.dslRegistry = new DSLRegistry();
+      this.modelRegistry = new ModelRegistry();
+      this.pluginRegistry = new PluginRegistry();
+      this.dslRegistry = new DSLRegistry();
 
-    this.sandbox = new PluginSandbox(config.timeout.hook ?? 500, config.timeout.dsl ?? 100);
+      this.sandbox = new PluginSandbox(config.timeout.hook ?? 500, config.timeout.dsl ?? 100);
 
-    this.onChecksumMismatch = config.onChecksumMismatch ?? 'skip';
-    this.dominanceResolver = new DominanceResolver();
+      this.onChecksumMismatch = config.onChecksumMismatch ?? 'skip';
+      this.dominanceResolver = new DominanceResolver();
 
-    this.snapshotManager = new SnapshotManager(
-      this.dryRun ? null : ((config.snapshot as ISnapshotAdapter | undefined) ?? null),
-      this.strict,
-      config.onSnapshotError,
-    );
+      this.snapshotManager = new SnapshotManager(
+        this.dryRun ? null : ((config.snapshot as ISnapshotAdapter | undefined) ?? null),
+        this.strict,
+        config.onSnapshotError,
+      );
 
-    // Register DSL evaluators
-    config.dsls.forEach((dsl, slot) => {
-      try {
-        this.dslRegistry.register(dsl as DSLEvaluator);
-      } catch (error) {
-        // A DSL that cannot be registered (a duplicate name, a member that is not a function) is a
-        // configuration fault, named by where it stands.
-        throw new EngineConfigError(`/dsls/${slot}`, describeFault(faultOf(error)));
-      }
-    });
-
-    // Initialize plugins. Each is read once, when it is registered; from then on the engine uses
-    // what it took (a name and a version it checked, the functions) and calls them through the port.
-    // What a plugin is handed are two thin views of the registries, closures over the real ones:
-    // they register, look up and list, and reach nothing else of the engine.
-    const models = this.modelRegistry;
-    const dsls = this.dslRegistry;
-    const modelApi: ModelRegistryApi = {
-      register: (model) => models.register(model),
-      get: (name) => models.describe(name),
-      has: (name) => models.has(name),
-      getAll: () => models.describeAll(),
-    };
-    const dslApi: DslRegistryApi = {
-      register: (evaluator) => dsls.register(evaluator),
-      get: (dsl) => dsls.describe(dsl),
-      has: (dsl) => dsls.has(dsl),
-      getAll: () => dsls.describeAll(),
-    };
-    Object.freeze(modelApi);
-    Object.freeze(dslApi);
-    const context: PluginContext = Object.freeze({
-      modelRegistry: modelApi,
-      dslRegistry: dslApi,
-      engineVersion: ENGINE_VERSION,
-    });
-
-    const handles: PluginHandle[] = [];
-    {
-      // A constructor called from inside a plugin's callback raises for no read in progress.
-      const restore = isolate();
-      try {
-        for (const [slot, plugin] of config.plugins.entries()) {
-          let handle: PluginHandle;
-          try {
-            handle = this.pluginRegistry.register(plugin as PPEPlugin);
-          } catch (error) {
-            throw new EngineConfigError(`/plugins/${slot}`, describeFault(faultOf(error)));
-          }
-          handles.push(handle);
-          try {
-            // `onInit` is synchronous: a promise it returns is a fault, and its rejection is handled.
-            callSync(handle.onInit, plugin as PPEPlugin, [context]);
-          } catch (error) {
-            // A throw of plugin code reaches the caller as the engine's own error, holding its text.
-            throw new PluginHookError(handle.name, 'onInit', error);
-          }
+      // Register DSL evaluators
+      config.dsls.forEach((dsl, slot) => {
+        try {
+          this.dslRegistry.register(dsl as DSLEvaluator);
+        } catch (error) {
+          // A DSL that cannot be registered (a duplicate name, a member that is not a function) is a
+          // configuration fault, named by where it stands.
+          throw new EngineConfigError(`/dsls/${slot}`, describeFault(faultOf(error)));
         }
-      } finally {
-        restore();
+      });
+
+      // Initialize plugins. Each is read once, when it is registered; from then on the engine uses
+      // what it took (a name and a version it checked, the functions) and calls them through the port.
+      // What a plugin is handed are two thin views of the registries, closures over the real ones:
+      // they register, look up and list, and reach nothing else of the engine.
+      const models = this.modelRegistry;
+      const dsls = this.dslRegistry;
+      const modelApi: ModelRegistryApi = {
+        register: (model) => models.register(model),
+        get: (name) => models.describe(name),
+        has: (name) => models.has(name),
+        getAll: () => models.describeAll(),
+      };
+      const dslApi: DslRegistryApi = {
+        register: (evaluator) => dsls.register(evaluator),
+        get: (dsl) => dsls.describe(dsl),
+        has: (dsl) => dsls.has(dsl),
+        getAll: () => dsls.describeAll(),
+      };
+      Object.freeze(modelApi);
+      Object.freeze(dslApi);
+      const context: PluginContext = Object.freeze({
+        modelRegistry: modelApi,
+        dslRegistry: dslApi,
+        engineVersion: ENGINE_VERSION,
+      });
+
+      const handles: PluginHandle[] = [];
+      {
+        // A constructor called from inside a plugin's callback raises for no read in progress.
+        const restore = isolate();
+        try {
+          for (const [slot, plugin] of config.plugins.entries()) {
+            let handle: PluginHandle;
+            try {
+              handle = this.pluginRegistry.register(plugin as PPEPlugin);
+            } catch (error) {
+              throw new EngineConfigError(`/plugins/${slot}`, describeFault(faultOf(error)));
+            }
+            handles.push(handle);
+            try {
+              // `onInit` is synchronous: a promise it returns is a fault, and its rejection is handled.
+              callSync(handle.onInit, plugin as PPEPlugin, [context]);
+            } catch (error) {
+              // A throw of plugin code reaches the caller as the engine's own error, holding its text.
+              throw new PluginHookError(handle.name, 'onInit', error);
+            }
+          }
+        } finally {
+          restore();
+        }
       }
+      this.plugins = handles;
+    } catch (error) {
+      throw UnexpectedEngineError.wrap(error);
     }
-    this.plugins = handles;
   }
 
   /**

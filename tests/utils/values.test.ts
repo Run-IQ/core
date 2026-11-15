@@ -39,7 +39,25 @@ describe('describeThrown', () => {
   it('never throws, even on a revoked proxy', () => {
     const { proxy, revoke } = Proxy.revocable({}, {});
     revoke();
-    expect(describeThrown(proxy)).toBe('(unprintable error)');
+    // A value that cannot be read says its default name, never an exception.
+    expect(describeThrown(proxy)).toBe('Error');
     expect(describeThrown(new Error('boom'))).toBe('boom');
+  });
+
+  it('AI3: never runs the conversion of a thrown object, and bounds its text', () => {
+    const calls: string[] = [];
+    const trap = {
+      toString: () => (calls.push('toString'), 'x'),
+      [Symbol.toPrimitive]: () => (calls.push('toPrimitive'), 'x'),
+    };
+    expect(describeThrown(trap)).toBe('Error');
+    expect(calls).toEqual([]);
+    const getter = Object.defineProperty(new Error('x'), 'message', {
+      get() {
+        throw new Error('getter ran');
+      },
+    });
+    expect(describeThrown(getter)).toBe('Error');
+    expect(describeThrown(new Error('m'.repeat(200_000))).length).toBeLessThan(1100);
   });
 });

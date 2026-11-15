@@ -1,4 +1,6 @@
 import { ValidationError } from '../errors/ValidationError.js';
+import { CallbackError } from '../errors/CallbackError.js';
+import { callSync } from '../engine/pluginPort.js';
 
 /**
  * Where the salt of the input digest comes from (Task 10 uses it): a `secret` of at least 32
@@ -20,7 +22,11 @@ const refuse = (...reasons: string[]): never => {
  * `secret` (a `Uint8Array` of at least 32 bytes) and `derive` (a function). `undefined` is no
  * seed. Throws `ValidationError` (`Invalid inputSeed`).
  */
-export function readInputSeedConfig(value: unknown): InputSeedConfig | undefined {
+export function readInputSeedConfig(
+  value: unknown,
+  /** What `derive` is called on: the caller's own object, so that a method keeps its `this`. */
+  owner: unknown = value,
+): InputSeedConfig | undefined {
   if (value === undefined) return undefined;
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return refuse('inputSeed must be an object');
@@ -39,8 +45,6 @@ export function readInputSeedConfig(value: unknown): InputSeedConfig | undefined
     return { secret: new Uint8Array(secret) };
   }
   if (typeof derive !== 'function') return refuse('inputSeed.derive must be a function');
-  // Called on the caller's object, so that a method keeps its `this`.
-  const owner = value;
   return { derive: (requestId) => Reflect.apply(derive, owner, [requestId]) as Uint8Array };
 }
 
@@ -53,10 +57,11 @@ export function checkDerivedSeed(seed: InputSeedConfig | undefined, requestId: s
   if (seed?.derive === undefined) return;
   let derived: unknown;
   try {
-    derived = seed.derive(requestId);
+    // Synchronous, like the plugin hooks: a thenable is a breach, never awaited, its rejection
+    // handled. A failure is held as bounded text, never converted (AI2, AI3).
+    derived = callSync(seed.derive as (...args: never[]) => unknown, undefined, [requestId]);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return refuse(`inputSeed.derive failed: ${message}`);
+    throw new CallbackError('inputSeed.derive', error);
   }
   if (!(derived instanceof Uint8Array) || derived.length !== SEED_BYTES) {
     refuse('inputSeed.derive must return 32 bytes');

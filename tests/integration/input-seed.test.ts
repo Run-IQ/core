@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import type { PPEEngineConfig } from '../../src/engine/PPEEngine.js';
+import { EngineConfigError } from '../../src/errors/EngineConfigError.js';
+import { CallbackError } from '../../src/errors/CallbackError.js';
 import { ValidationError } from '../../src/errors/ValidationError.js';
 import type { PPEPlugin, PluginContext } from '../../src/types/plugin.js';
 import { readInputSeedConfig } from '../../src/input/inputSeed.js';
@@ -33,6 +35,11 @@ const reasonsOf = async (run: () => unknown): Promise<[string, readonly string[]
     await run();
   } catch (error) {
     if (error instanceof ValidationError) return [error.message, error.reasons];
+    // At construction the refusal is a configuration fault, named by its path (AI4).
+    if (error instanceof EngineConfigError) {
+      expect(error.path).toBe('/inputSeed');
+      return ['Invalid inputSeed', [error.reason]];
+    }
     throw error;
   }
   return expect.unreachable('should have thrown');
@@ -65,8 +72,9 @@ describe('inputSeed', () => {
           throw new Error('boom');
         },
       });
-      const [, reasons] = await reasonsOf(() => engine.evaluate(rules, makeInput()));
-      expect(reasons).toEqual(['inputSeed.derive failed: boom']);
+      const error = await engine.evaluate(rules, makeInput()).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(CallbackError);
+      expect(error).toMatchObject({ callback: 'inputSeed.derive', cause: { message: 'boom' } });
     });
 
     it('accepts 32 bytes, and hands derive the requestId of the input', async () => {
@@ -81,15 +89,19 @@ describe('inputSeed', () => {
   });
 
   it('calls derive on the object the caller gave, so a method keeps its this', async () => {
-    class Seeder {
-      constructor(private readonly key: Uint8Array) {}
-      derive(requestId: string): Uint8Array {
-        return this.key.slice(0, requestId.length > 0 ? 32 : 0);
-      }
-    }
-    const engine = build(new Seeder(new Uint8Array(64)));
+    // The method is the object's own (inherited members are never read as options).
+    const seeder = (key: Uint8Array): { derive(requestId: string): Uint8Array } => {
+      const holder = {
+        derive(this: unknown, requestId: string): Uint8Array {
+          if (this !== holder) throw new Error('derive lost its this');
+          return key.slice(0, requestId.length > 0 ? 32 : 0);
+        },
+      };
+      return holder;
+    };
+    const engine = build(seeder(new Uint8Array(64)));
     await engine.evaluate(rules, makeInput());
-    const broken = build(new Seeder(new Uint8Array(16)));
+    const broken = build(seeder(new Uint8Array(16)));
     const [, reasons] = await reasonsOf(() => broken.evaluate(rules, makeInput()));
     expect(reasons).toEqual(['inputSeed.derive must return 32 bytes']);
   });

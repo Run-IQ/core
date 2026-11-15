@@ -61,21 +61,29 @@ export {
   ChecksumMismatchError,
   CallbackError,
 } from './errors/index.js';
-export { ModelRegistry } from './registry/ModelRegistry.js';
-export { DSLRegistry } from './registry/DSLRegistry.js';
-export { hydrateRule, hydrateRules } from './utils/hydrate.js';
-export { canonicalStringify } from './utils/json.js';
-export { hashParams, computeRuleChecksum } from './utils/crypto.js';
+export {
+  ModelRegistry,
+  DSLRegistry,
+  hydrateRule,
+  hydrateRules,
+  canonicalStringify,
+  hashParams,
+  computeRuleChecksum,
+  resolveLimits,
+  normalizeMeta,
+  evaluationDate,
+  readsOf,
+  buildContext,
+  formatPointer,
+  parsePointer,
+} from './guardedApi.js';
 export { VERSION } from './utils/version.js';
-export { DEFAULT_LIMITS, resolveLimits } from './limits.js';
+export { DEFAULT_LIMITS } from './limits.js';
 export type { EngineLimits, EngineLimitsInput } from './limits.js';
-export { normalizeMeta, evaluationDate } from './input/normalizeMeta.js';
 export type { NormalizedMeta } from './input/normalizeMeta.js';
 export type { InputSeedConfig } from './input/inputSeed.js';
-export { readsOf, MAX_LISTED_POINTERS } from './context/reads.js';
+export { MAX_LISTED_POINTERS } from './context/reads.js';
 export type { Reads, ReadsProblem } from './context/reads.js';
-export { buildContext } from './context/buildContext.js';
 export type { ContextBase, ContextInstance } from './context/buildContext.js';
 // Plugins import only `core` or `plugin-sdk`: the pointer functions of spec come through here.
-export { formatPointer, parsePointer } from '@run-iq/spec';
 export type { JsonPointer } from '@run-iq/spec';

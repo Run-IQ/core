@@ -3,7 +3,7 @@ import { describeThrown } from '../utils/values.js';
 import { clip, frozenErrorCopy } from '../utils/frozenCopy.js';
 import { describeFault, faultOf, trustedFault } from '../engine/pluginPort.js';
 import { EngineLimitError } from './EngineLimitError.js';
-import { markEngineError } from './engineError.js';
+import { isEngineError, markEngineError } from './engineError.js';
 
 /** Every hook of a plugin. */
 export type HookName = 'onInit' | 'beforeEvaluate' | 'afterEvaluate' | 'onError';
@@ -31,7 +31,7 @@ export class PluginHookError extends PPEError {
     // leave the engine. An error of a public class that the engine raised (a `ValidationError` for
     // an input a hook returned, a `HookTimeoutError`) is copied, frozen. The message is built from
     // what is kept.
-    const publicError = cause instanceof PPEError && !(cause instanceof EngineLimitError);
+    const publicError = isEngineError(cause) && !(cause instanceof EngineLimitError);
     const fault = publicError ? undefined : (trustedFault(cause) ?? faultOf(cause));
     super(
       `plugin ${plugin} ${hook} failed: ${fault === undefined ? clip(describeThrown(cause)) : describeFault(fault)}`,

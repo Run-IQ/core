@@ -1,4 +1,4 @@
-import { markEngineError } from './engineError.js';
+import { markEngineError, recordEngineInstance } from './engineError.js';
 /**
  * The failures of the `onError` hooks the engine attached to an error: held outside it, so that an
  * error frozen at creation can still carry them.
@@ -31,6 +31,7 @@ export class PPEError extends Error {
     super(message);
     this.name = 'PPEError';
     Object.setPrototypeOf(this, new.target.prototype);
+    recordEngineInstance(this, new.target);
     // A subclass freezes itself once its own fields are set; a bare PPEError is complete here (B74).
     if (new.target === PPEError) Object.freeze(this);
   }

@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import type { PPEEngineConfig } from '../../src/engine/PPEEngine.js';
 import { EngineLimitError } from '../../src/errors/EngineLimitError.js';
+import { EngineConfigError } from '../../src/errors/EngineConfigError.js';
 import { ValidationError } from '../../src/errors/ValidationError.js';
 import { DEFAULT_LIMITS } from '../../src/limits.js';
 import type { PPEPlugin, PluginContext } from '../../src/types/plugin.js';
@@ -107,30 +108,31 @@ describe('the bounds of an evaluation (EngineLimits)', () => {
   });
 
   describe('at construction', () => {
-    const refusal = (limits: unknown): ValidationError => {
+    const refusal = (limits: unknown): EngineConfigError => {
       try {
         engineWith(spyingPlugin(), { limits: limits as never });
       } catch (error) {
-        if (error instanceof ValidationError) return error;
+        if (error instanceof EngineConfigError) {
+          expect(error.path).toBe('/limits');
+          return error;
+        }
         throw error;
       }
       return expect.unreachable('should have thrown');
     };
 
     it('refuses a limit of 0', () => {
-      expect(refusal({ maxRules: 0 }).reasons).toEqual([
-        'limits.maxRules must be a positive integer',
-      ]);
+      expect(refusal({ maxRules: 0 }).reason).toBe('limits.maxRules must be a positive integer');
     });
 
     it('refuses an unknown limit', () => {
-      expect(refusal({ maxRulez: 5 }).reasons).toEqual(['unknown limit: maxRulez']);
+      expect(refusal({ maxRulez: 5 }).reason).toBe('unknown limit: maxRulez');
     });
 
     it('refuses a maxInputDepth above 1000, the limit of validateProofInput', () => {
-      expect(refusal({ maxInputDepth: 1001 }).reasons).toEqual([
+      expect(refusal({ maxInputDepth: 1001 }).reason).toBe(
         'limits.maxInputDepth must be at most 1000',
-      ]);
+      );
       expect(() => engineWith(spyingPlugin(), { limits: { maxInputDepth: 1000 } })).not.toThrow();
     });
   });

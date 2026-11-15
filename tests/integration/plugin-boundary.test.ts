@@ -3,6 +3,7 @@ import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import type { PPEEngineConfig } from '../../src/engine/PPEEngine.js';
 import { PluginHookError } from '../../src/errors/PluginHookError.js';
 import { EngineLimitError } from '../../src/errors/EngineLimitError.js';
+import { EngineConfigError } from '../../src/errors/EngineConfigError.js';
 import { ValidationError } from '../../src/errors/ValidationError.js';
 import { InputSanitizer } from '../../src/security/InputSanitizer.js';
 import { InputCopier } from '../../src/input/copyInput.js';
@@ -815,6 +816,6 @@ describe('maxRuleLeaves: the leaves of one rule', () => {
   it('is refused at construction when it is not a positive integer', () => {
     expect(
       () => new PPEEngine({ plugins: [host], dsls: [], limits: { maxRuleLeaves: 0 } }),
-    ).toThrow(ValidationError);
+    ).toThrow(EngineConfigError);
   });
 });

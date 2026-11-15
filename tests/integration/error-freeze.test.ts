@@ -308,3 +308,83 @@ describe('AH1 backstop: a raw error from inside the engine never reaches the cal
     }
   });
 });
+
+describe("AI1: a foreign subclass of PPEError is not the engine's own", () => {
+  it('is wrapped by the safety net, by identity, never handed to the caller', async () => {
+    class Foreign extends errors.PPEError {
+      constructor() {
+        super('mine', 'FOREIGN');
+        this.name = 'Foreign';
+      }
+    }
+    const foreign = new Foreign();
+    const spy = vi.spyOn(SnapshotManager.prototype, 'exists').mockRejectedValue(foreign);
+    try {
+      const adapter = new InMemorySnapshotAdapter();
+      const withAdapter = new PPEEngine({
+        plugins: [],
+        dsls: [],
+        strict: false,
+        snapshot: adapter,
+      });
+      const error = await withAdapter.evaluate([], makeInput()).catch((e: unknown) => e);
+      expect(error).not.toBe(foreign);
+      expect(error).not.toBeInstanceOf(Foreign);
+      expect(error).toBeInstanceOf(errors.UnexpectedEngineError);
+      assertDeepFrozen(error, 'wrapped');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('an engine error is recognised by identity: a forged copy is not', () => {
+    const real = new errors.ValidationError('x', []);
+    const forged = Object.create(Object.getPrototypeOf(real) as object) as Error;
+    expect(errors.UnexpectedEngineError.wrap(real)).toBe(real);
+    expect(errors.UnexpectedEngineError.wrap(forged)).not.toBe(forged);
+  });
+});
+
+describe('AI6: the bounds and pointers the round added', () => {
+  it('a hook-added rule failing its checksum in throw mode carries no /rules/ pointer', async () => {
+    const added = { ...makeRule({ id: 'added', model: 'tax' }), checksum: 'f'.repeat(64) };
+    const plugin = {
+      name: 'adder',
+      version: '1.0.0',
+      onInit: (context: { modelRegistry: { register(m: StubModel): void } }) =>
+        context.modelRegistry.register(new StubModel('tax', 10)),
+      beforeEvaluate: (input: unknown, rules: readonly unknown[]) => ({
+        input,
+        rules: [...rules, added],
+      }),
+    } as never;
+    const error = (await new PPEEngine({
+      plugins: [plugin],
+      dsls: [],
+      strict: false,
+      onChecksumMismatch: 'throw',
+    })
+      .evaluate([makeRule({ id: 'tax', model: 'tax' })], makeInput())
+      .catch((e: unknown) => e)) as errors.PluginHookError;
+    expect(error).toBeInstanceOf(errors.PluginHookError);
+    expect(error.message).toContain('Checksum mismatch for rule added@1');
+    expect(error.message).not.toContain('/rules/');
+    expect(JSON.stringify(error.cause)).not.toContain('/rules/');
+  });
+
+  it('a huge unknown option key and a huge rule id are clipped', async () => {
+    let configError: errors.EngineConfigError | undefined;
+    try {
+      new PPEEngine({ plugins: [], dsls: [], ['k'.repeat(100_000)]: 1 } as never);
+    } catch (error) {
+      configError = error as errors.EngineConfigError;
+    }
+    expect(configError).toBeInstanceOf(errors.EngineConfigError);
+    expect((configError as errors.EngineConfigError).path.length).toBeLessThan(300);
+    expect((configError as Error).message.length).toBeLessThan(700);
+
+    const checksum = new errors.ChecksumMismatchError('r'.repeat(5000) + '@1', '/rules/0');
+    expect(checksum.rule.length).toBeLessThan(300);
+    expect(checksum.message.length).toBeLessThan(400);
+  });
+});

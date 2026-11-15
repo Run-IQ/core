@@ -14,3 +14,20 @@ export function markEngineError(cls: { prototype: object }): void {
 export function isEngineErrorPrototype(prototype: unknown): boolean {
   return typeof prototype === 'object' && prototype !== null && ENGINE_PROTOTYPES.has(prototype);
 }
+
+/**
+ * The errors the engine created: each is added here, by identity, when it is built, and only when
+ * the class being built is one the engine marked. `instanceof` is never the test: a caller or a
+ * plugin can subclass `PPEError`, and its object is not the engine's.
+ */
+const ENGINE_INSTANCES = new WeakSet<object>();
+
+/** Records `error` as the engine's own when `newTarget` is a class the engine marked. */
+export function recordEngineInstance(error: object, newTarget: { prototype: object }): void {
+  if (ENGINE_PROTOTYPES.has(newTarget.prototype)) ENGINE_INSTANCES.add(error);
+}
+
+/** True for an error the engine itself created (never for a foreign subclass of `PPEError`). */
+export function isEngineError(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && ENGINE_INSTANCES.has(value);
+}

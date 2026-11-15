@@ -1,3 +1,4 @@
+import { clipText } from './utils/weight.js';
 import { ValidationError } from './errors/ValidationError.js';
 
 /**
@@ -128,7 +129,7 @@ export function resolveLimits(given?: EngineLimitsInput): Readonly<EngineLimits>
   const out: EngineLimits = { ...DEFAULT_LIMITS };
   for (const [key, value] of Object.entries(given)) {
     if (!Object.hasOwn(DEFAULT_LIMITS, key)) {
-      reasons.push(`unknown limit: ${key}`);
+      reasons.push(`unknown limit: ${clipText(key, 128, '... [clipped]')}`);
       continue;
     }
     if (value === undefined) continue;
