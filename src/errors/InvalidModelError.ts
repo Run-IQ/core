@@ -9,6 +9,9 @@ export class InvalidModelError extends PPEError {
   ) {
     super(`Model "${modelName}" declares an invalid output: ${issues.join('; ')}`, 'INVALID_MODEL');
     this.name = 'InvalidModelError';
+    this.issues = Object.freeze([...issues]);
+    // Frozen at creation: what the caller receives cannot be changed (B74).
+    Object.freeze(this);
   }
 }
 

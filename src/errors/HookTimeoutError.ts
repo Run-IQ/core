@@ -10,6 +10,8 @@ export class HookTimeoutError extends PPEError {
   ) {
     super(`plugin ${pluginName} hook ${hook} timed out after ${timeoutMs} ms`, 'HOOK_TIMEOUT');
     this.name = 'HookTimeoutError';
+    // Frozen at creation: what the caller receives cannot be changed (B74).
+    Object.freeze(this);
   }
 }
 

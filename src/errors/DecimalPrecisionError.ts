@@ -18,6 +18,8 @@ export class DecimalPrecisionError extends PPEError {
       'DECIMAL_PRECISION',
     );
     this.name = 'DecimalPrecisionError';
+    // Frozen at creation: what the caller receives cannot be changed (B74).
+    Object.freeze(this);
   }
 }
 

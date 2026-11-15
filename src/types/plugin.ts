@@ -163,8 +163,9 @@ export interface PPEPlugin {
    *   `ModelNotFoundError`, `OutputNotFiniteError`, conflicts...): called on every plugin, in
    *   registration order. No later hook runs and nothing is saved. If `onError`
    *   throws, or returns a promise, its failure is never dropped and never replaces the original:
-   *   the caller still receives the evaluation's own error, with the first failure of an
-   *   `onError` attached as `onErrorFailure` (a `PluginHookError`, `hook: 'onError'`, text only).
+   *   the caller still receives the evaluation's own error, with every failure of an
+   *   `onError` attached to it as `onErrorFailures`, a frozen list in plugin order (each a
+   *   `PluginHookError`, `hook: 'onError'`, text only).
    * - Not called for `PipelineTimeoutError`, nor for anything that happens after it: the
    *   pipeline still running is aborted at its next step (no further hook, no save, no
    *   `onError`).

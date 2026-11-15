@@ -10,6 +10,8 @@ export class FrozenViewWriteError extends PPEError {
   constructor(readonly key: string) {
     super(`wrote to its input: ${key}`, 'FROZEN_VIEW_WRITE');
     this.name = 'FrozenViewWriteError';
+    // Frozen at creation: what the caller receives cannot be changed (B74).
+    Object.freeze(this);
   }
 }
 

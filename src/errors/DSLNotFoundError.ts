@@ -5,6 +5,8 @@ export class DSLNotFoundError extends PPEError {
   constructor(public readonly dslName: string) {
     super(`DSL evaluator "${dslName}" not found in DSLRegistry`, 'DSL_NOT_FOUND');
     this.name = 'DSLNotFoundError';
+    // Frozen at creation: what the caller receives cannot be changed (B74).
+    Object.freeze(this);
   }
 }
 

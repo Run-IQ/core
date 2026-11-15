@@ -11,6 +11,9 @@ export class RuleConflictError extends PPEError {
       'RULE_CONFLICT',
     );
     this.name = 'RuleConflictError';
+    this.ruleIds = Object.freeze([...ruleIds]);
+    // Frozen at creation: what the caller receives cannot be changed (B74).
+    Object.freeze(this);
   }
 }
 

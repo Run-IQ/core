@@ -1,3 +1,4 @@
+import { faultOf } from '../engine/pluginPort.js';
 import { PPEError } from './PPEError.js';
 import { markEngineError } from './engineError.js';
 
@@ -5,7 +6,10 @@ export class SnapshotFailureError extends PPEError {
   constructor(original: unknown) {
     super('Snapshot save failed in strict mode', 'SNAPSHOT_FAILURE');
     this.name = 'SnapshotFailureError';
-    this.cause = original;
+    // The adapter's error is held as bounded text (name, message, code), never as the object.
+    this.cause = Object.freeze({ ...faultOf(original) });
+    // Frozen at creation: what the caller receives cannot be changed (B74).
+    Object.freeze(this);
   }
 }
 

@@ -283,7 +283,7 @@ export class PPEEngine {
         } catch (thrown) {
           // A failing `onError` is never dropped, and never replaces the original error: the
           // caller receives that one, unchanged, and the first failure of an `onError` is
-          // attached to it as `onErrorFailure`, a `PluginHookError` with `hook: 'onError'` held
+          // attached to its `onErrorFailures` list, each a `PluginHookError` with `hook: 'onError'` held
           // as bounded text (B59, B60).
           attachOnErrorFailure(error, new PluginHookError(plugin.name, 'onError', thrown));
         }
@@ -631,29 +631,12 @@ const ABSENT_INPUT: EvaluationInput = Object.freeze({
 });
 
 /**
- * The input as a hook gets it: the engine's frozen data, and its own copies of the dates of
- * `meta` (a frozen `Date` can still be written with `setTime`).
+ * The input as a hook gets it: the engine's own frozen copy, as it is. The engine holds no `Date`
+ * (`meta.effectiveDate` and every `meta.dates.<name>` are canonical strings), so there is nothing to
+ * copy: no hook can move a date, and no date is a shared object.
  */
 function hookView(input: EvaluationInput): EvaluationInput {
-  const { effectiveDate, dates } = input.meta;
-  const meta = {
-    ...input.meta,
-    // Held as a string by the engine; a `Date` (a hook's own input) is copied, never shared.
-    ...(effectiveDate instanceof Date ? { effectiveDate: new Date(effectiveDate.getTime()) } : {}),
-    ...(dates === undefined
-      ? {}
-      : {
-          dates: Object.freeze(
-            Object.fromEntries(
-              Object.entries(dates).map(([name, date]) => [
-                name,
-                date instanceof Date ? new Date(date.getTime()) : date,
-              ]),
-            ),
-          ),
-        }),
-  };
-  return Object.freeze({ ...input, meta: Object.freeze(meta) });
+  return input;
 }
 
 /** The number of rules given, read once; an unreadable list is a `ValidationError`. */

@@ -350,7 +350,10 @@ describe('B59, B60, AE9: a failing onError is attached to the original error', (
     const error = await failure(engine, [tax(1, 'a'), tax(1, 'b')]);
     expect(error).toBeInstanceOf(EngineLimitError);
     expect(error).toMatchObject({ limit: 'maxRules', max: 1, actual: 2 });
-    const attached = (error as { onErrorFailure?: PluginHookError }).onErrorFailure;
+    const failures = (error as { onErrorFailures: PluginHookError[] }).onErrorFailures;
+    expect(failures).toHaveLength(1);
+    expect(Object.isFrozen(failures)).toBe(true);
+    const attached = failures[0];
     expect(attached).toBeInstanceOf(PluginHookError);
     expect(attached).toMatchObject({ plugin: 'noisy', hook: 'onError' });
     expect((attached?.cause as { message: string }).message).toBe('onError crash');
@@ -363,14 +366,30 @@ describe('B59, B60, AE9: a failing onError is attached to the original error', (
       limits: { maxRules: 1 },
     });
     const error = await failure(engine, [tax(1, 'a'), tax(1, 'b')]);
-    const attached = (error as { onErrorFailure?: PluginHookError }).onErrorFailure;
+    const attached = (error as { onErrorFailures: PluginHookError[] }).onErrorFailures[0];
     expect(attached).toMatchObject({ plugin: 'async', hook: 'onError' });
     expect((attached?.cause as { message: string }).message).toContain('returned a promise');
   });
 
-  it('an error nobody failed on has no onErrorFailure', async () => {
+  it('two failing onError hooks: both are kept, in plugin order (K8)', async () => {
+    const failing = (name: string, message: string): PPEPlugin =>
+      pluginWith(name, {
+        onError: () => {
+          throw new Error(message);
+        },
+      });
+    const engine = build([failing('first', 'one'), failing('second', 'two')], {
+      limits: { maxRules: 1 },
+    });
+    const error = await failure(engine, [tax(1, 'a'), tax(1, 'b')]);
+    const failures = (error as { onErrorFailures: PluginHookError[] }).onErrorFailures;
+    expect(failures.map((f) => f.plugin)).toEqual(['first', 'second']);
+    expect(failures.map((f) => (f.cause as { message: string }).message)).toEqual(['one', 'two']);
+  });
+
+  it('an error nobody failed on has an empty onErrorFailures', async () => {
     const error = await failure(build([], { limits: { maxRules: 1 } }), [tax(1, 'a'), tax(1, 'b')]);
-    expect((error as { onErrorFailure?: unknown }).onErrorFailure).toBeUndefined();
+    expect((error as { onErrorFailures: unknown[] }).onErrorFailures).toEqual([]);
   });
 });
 

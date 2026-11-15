@@ -16,6 +16,9 @@ export class OutputNotFiniteError extends PPEError {
       'OUTPUT_NOT_FINITE',
     );
     this.name = 'OutputNotFiniteError';
+    this.contributors = Object.freeze([...contributors]);
+    // Frozen at creation: what the caller receives cannot be changed (B74).
+    Object.freeze(this);
   }
 }
 

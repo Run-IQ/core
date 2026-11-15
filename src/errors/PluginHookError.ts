@@ -17,7 +17,7 @@ export type HookName = 'onInit' | 'beforeEvaluate' | 'afterEvaluate' | 'onError'
  * engine would have to refuse, discard or correct (rules removed without a skip, a state that is
  * not JSON, engine-owned fields changed). `onError` is called on every plugin, nothing is saved.
  * The error is frozen at creation. A failing `onError` is never dropped: the first failure is
- * attached to the original error, which the caller still receives, as `onErrorFailure`.
+ * attached to the original error, which the caller still receives, in its `onErrorFailures`.
  */
 export class PluginHookError extends PPEError {
   constructor(

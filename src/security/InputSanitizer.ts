@@ -217,10 +217,14 @@ export class InputSanitizer {
     // The engine holds no `Date`: a `meta.effectiveDate` is kept, and recorded, as the canonical
     // string of `dates.effective` (the instant it names, or the civil date), whatever form it was
     // given in. A hook is handed that string, and a view shows a `Date` only where one is asked for.
-    const finalMeta: Record<string, unknown> =
-      metaCopy['effectiveDate'] === undefined
-        ? metaCopy
-        : { ...metaCopy, effectiveDate: canonical.dates['effective'] };
+    // The same holds for every named date: `meta.dates` is the canonical strings of `normalizeMeta`.
+    const finalMeta: Record<string, unknown> = {
+      ...metaCopy,
+      ...(metaCopy['effectiveDate'] === undefined
+        ? {}
+        : { effectiveDate: canonical.dates['effective'] }),
+      ...(metaCopy['dates'] === undefined ? {} : { dates: Object.freeze({ ...canonical.dates }) }),
+    };
     Object.freeze(finalMeta);
 
     return {

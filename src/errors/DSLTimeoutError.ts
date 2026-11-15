@@ -8,6 +8,8 @@ export class DSLTimeoutError extends PPEError {
   ) {
     super(`DSL "${dslName}" evaluation timed out after ${timeoutMs}ms`, 'DSL_TIMEOUT');
     this.name = 'DSLTimeoutError';
+    // Frozen at creation: what the caller receives cannot be changed (B74).
+    Object.freeze(this);
   }
 }
 

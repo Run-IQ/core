@@ -8,6 +8,8 @@ export class DSLEvaluationError extends PPEError {
   ) {
     super(`DSL "${dslName}" evaluation failed: ${String(originalError)}`, 'DSL_EVALUATION_ERROR');
     this.name = 'DSLEvaluationError';
+    // Frozen at creation: what the caller receives cannot be changed (B74).
+    Object.freeze(this);
   }
 }
 

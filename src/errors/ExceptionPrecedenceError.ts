@@ -18,6 +18,8 @@ export class ExceptionPrecedenceError extends PPEError {
       'EXCEPTION_PRECEDENCE',
     );
     this.name = 'ExceptionPrecedenceError';
+    // Frozen at creation: what the caller receives cannot be changed (B74).
+    Object.freeze(this);
   }
 }
 

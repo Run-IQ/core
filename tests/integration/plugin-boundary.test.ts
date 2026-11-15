@@ -519,44 +519,66 @@ describe("R12: a model that writes into its arguments is that rule's error", () 
 });
 
 describe('R13 and R16: what a hook is handed is a view', () => {
-  it("beforeEvaluate moving the dates of its view fails (meta is the caller's), and does not move the caller's", async () => {
+  it("beforeEvaluate changing a date of meta is refused as a change of meta, and the caller's dates stay", async () => {
     const dates = { facture: new Date('2025-01-01T00:00:00Z') };
+    const effectiveDate = new Date('2024-06-01T00:00:00Z');
     const built = build([
       pluginWith('h', {
-        beforeEvaluate: (input, rules) => {
-          (input.meta.dates?.['facture'] as Date).setTime(0);
-          // The engine hands out its string, not a `Date`: moving it is not possible.
-          (input.meta.effectiveDate as unknown as Date).setTime(0);
-          return { input, rules };
-        },
+        beforeEvaluate: (input, rules) => ({
+          input: {
+            ...input,
+            meta: {
+              ...input.meta,
+              dates: { ...input.meta.dates, facture: '1970-01-01T00:00:00.000Z' },
+            },
+          },
+          rules,
+        }),
       }),
     ]);
-    const effectiveDate = new Date('2024-06-01T00:00:00Z');
     const error = await failure(
       built,
       [tax()],
       makeInput({ meta: { tenantId: 't', dates, effectiveDate } }),
     );
     expect(error).toBeInstanceOf(PluginHookError);
+    // Refused by the check of `meta` itself, not by a write into a frozen view.
+    expect(((error as PluginHookError).cause as { message: string }).message).toMatch(/meta/);
     expect(dates.facture.toISOString()).toBe('2025-01-01T00:00:00.000Z');
     expect(effectiveDate.toISOString()).toBe('2024-06-01T00:00:00.000Z');
   });
 
-  it('afterEvaluate gets its own copy of meta.dates: moving it changes the record not', async () => {
+  it('the hooks see, and the record holds, the dates of meta as canonical strings (AG3)', async () => {
+    const seen: unknown[] = [];
     const built = build([
       pluginWith('h', {
+        beforeEvaluate: (input, rules) => {
+          seen.push(input.meta.dates?.['facture'], input.meta.dates?.['effective']);
+          return { input, rules };
+        },
         afterEvaluate: (input, _result) => {
-          (input.meta.dates?.['facture'] as Date).setTime(0);
+          seen.push(input.meta.dates?.['facture']);
           return undefined;
         },
       }),
     ]);
     await built.engine.evaluate(
       [tax()],
-      makeInput({ meta: { tenantId: 't', dates: { facture: new Date('2025-01-01T00:00:00Z') } } }),
+      makeInput({
+        meta: {
+          tenantId: 't',
+          dates: { facture: new Date('2025-01-01T00:00:00Z'), effective: '2024-06-01' },
+        },
+      }),
     );
-    const recorded = built.saved[0]!.inputSnapshot.meta.dates?.['facture'];
-    expect((recorded as Date).toISOString()).toBe('2025-01-01T00:00:00.000Z');
+    expect(seen).toEqual(['2025-01-01T00:00:00.000Z', '2024-06-01', '2025-01-01T00:00:00.000Z']);
+    expect(built.saved[0]?.inputSnapshot.meta.dates).toEqual({
+      facture: '2025-01-01T00:00:00.000Z',
+      effective: '2024-06-01',
+    });
+    for (const value of Object.values(built.saved[0]?.inputSnapshot.meta.dates ?? {})) {
+      expect(typeof value).toBe('string');
+    }
   });
 
   it('the view is frozen at its root and at meta', async () => {

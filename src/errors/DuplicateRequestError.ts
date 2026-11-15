@@ -12,6 +12,8 @@ export class DuplicateRequestError extends PPEError {
       'DUPLICATE_REQUEST',
     );
     this.name = 'DuplicateRequestError';
+    // Frozen at creation: what the caller receives cannot be changed (B74).
+    Object.freeze(this);
   }
 }
 
