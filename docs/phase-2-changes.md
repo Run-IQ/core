@@ -46,7 +46,7 @@ strings and write-trapping views, never a `Date` object.
   with an exact object now has the two new members.
 - **New for DSLs and models:** `DSLEvaluator.evaluateTruth`, `TruthValue`, `TruthResult`;
   `capabilities` is validated at registration with a strict key list (`exactDecimals`, `threeValued`,
-  `limits`; a DSL with `threeValued: true` must have `evaluateTruth`); `undetermined(missing, reason?)`
+  `limits`, a plain object of identifier names with positive safe integers, frozen; a DSL with `threeValued: true` must have `evaluateTruth`); `undetermined(missing, reason?)`
   and `isUndetermined` for a model that cannot compute for want of facts.
 - **Exports:** `RuleState`, `PendingReason`, `PendingRule`, `ERROR_CAUSES` and `ErrorCause` (spec's, the
   same frozen object), `TruthValue`, `TruthResult`, `UndeterminedResult`, `PluginSkip`.

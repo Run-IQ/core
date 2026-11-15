@@ -22,6 +22,8 @@ interface Declared {
  * it again.
  */
 /** The keys a DSL's `capabilities` may have (a strict list: `exactDecimals`, `threeValued`, `limits`). */
+/** The name of one of a DSL's own bounds: an identifier (`maxNodes`, `maxDepth`). */
+const LIMIT_NAME = /^[a-z][A-Za-z0-9]{0,63}$/;
 const CAPABILITY_KEYS = ['exactDecimals', 'threeValued', 'limits'] as const;
 
 /**
@@ -50,11 +52,24 @@ function validateCapabilities(dsl: string, capabilities: DSLEvaluator['capabilit
     throw named('capabilities.threeValued', 'must be true or false');
   }
   const limits = declared['limits'];
-  if (
-    limits !== undefined &&
-    (typeof limits !== 'object' || limits === null || Array.isArray(limits))
-  ) {
-    throw named('capabilities.limits', 'must be an object');
+  if (limits !== undefined) {
+    if (typeof limits !== 'object' || limits === null || Array.isArray(limits)) {
+      throw named('capabilities.limits', 'must be an object');
+    }
+    // A plain record of the DSL's own bounds: names as identifiers (`maxNodes`), each value a
+    // positive safe integer. Core does not know the names; anything else is refused with its path.
+    for (const [key, value] of Object.entries(limits as Record<string, unknown>)) {
+      if (!LIMIT_NAME.test(key)) {
+        throw named(
+          `capabilities.limits.${key}`,
+          'is not a valid name (letters and digits, starting with a letter)',
+        );
+      }
+      if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+        throw named(`capabilities.limits.${key}`, 'must be a positive safe integer');
+      }
+    }
+    Object.freeze(limits);
   }
 }
 

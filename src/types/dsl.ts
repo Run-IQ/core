@@ -28,7 +28,7 @@ export interface DSLCapabilities {
    * registration is refused otherwise.
    */
   readonly threeValued?: boolean | undefined;
-  /** The DSL's own bounds, as a plain record (the keys are the DSL's; the engine does not read them). */
+  /** The DSL's own bounds: identifier names (`maxNodes`) with positive safe integers; core does not know the names. */
   readonly limits?: Readonly<Record<string, unknown>> | undefined;
 }
 

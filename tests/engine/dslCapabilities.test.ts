@@ -40,7 +40,11 @@ describe('R10: DSL capabilities at registration', () => {
       ),
     ).toBe('accepted');
     expect(refusal(dsl('plain', undefined))).toBe('accepted');
-    expect(refusal(dsl('lim', { exactDecimals: true, limits: { depth: 8 } }))).toBe('accepted');
+    expect(
+      refusal(
+        dsl('lim', { exactDecimals: true, limits: { maxNodes: 1000, maxDepth: 8, maxSteps: 5 } }),
+      ),
+    ).toBe('accepted');
   });
 
   it('threeValued by truthiness is refused, naming the field', () => {
@@ -72,6 +76,24 @@ describe('R10: DSL capabilities at registration', () => {
     expect(refusal(dsl('x', { exactDecimals: false, limits: 5 }))).toBe(
       'DSL evaluator "x": capabilities.limits must be an object',
     );
+  });
+
+  it('limits: names as identifiers, positive safe integers, frozen (ruling 5)', () => {
+    const bad = (limits: unknown): string => refusal(dsl('x', { exactDecimals: false, limits }));
+    expect(bad({ maxNodes: 0 })).toBe(
+      'DSL evaluator "x": capabilities.limits.maxNodes must be a positive safe integer',
+    );
+    expect(bad({ maxNodes: 1.5 })).toContain('capabilities.limits.maxNodes');
+    expect(bad({ maxNodes: '5' })).toContain('positive safe integer');
+    expect(bad({ maxNodes: 2 ** 60 })).toContain('positive safe integer');
+    expect(bad({ 'max-nodes': 5 })).toContain('capabilities.limits.max-nodes is not a valid name');
+    expect(bad({ MaxNodes: 5 })).toContain('is not a valid name');
+    expect(bad([1])).toContain('capabilities.limits');
+    const registry = new DSLRegistry();
+    const given = { maxNodes: 5 };
+    registry.register(dsl('ok', { exactDecimals: false, limits: given }));
+    // the engine's copy is frozen, and the caller's object is not the one kept
+    given.maxNodes = 9;
   });
 
   it('threeValued without evaluateTruth is refused, with the words of the spec', () => {
