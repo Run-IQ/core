@@ -1,3 +1,4 @@
+import { symbolText } from '../utils/symbolText.js';
 import { isDateObject } from '../utils/plain.js';
 import { clip } from '../utils/frozenCopy.js';
 import { FrozenViewWriteError } from '../errors/FrozenViewWriteError.js';
@@ -30,7 +31,7 @@ export class ViewScope {
   }
 
   private refuse(key: string | symbol): never {
-    const error = new FrozenViewWriteError(clip(typeof key === 'symbol' ? key.toString() : key));
+    const error = new FrozenViewWriteError(clip(typeof key === 'symbol' ? symbolText(key) : key));
     this.wrote ??= error.message;
     throw error;
   }

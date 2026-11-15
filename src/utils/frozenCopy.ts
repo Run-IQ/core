@@ -126,7 +126,14 @@ function copy(value: unknown, depth: number, state: State): unknown {
       for (const key of ['name', 'message', 'stack'] as const) {
         let item: unknown;
         try {
-          item = (value as unknown as Record<string, unknown>)[key];
+          // `stack` only as an own data string (an engine error has one, set when it was sealed):
+          // never by `[[Get]]`, which would run a plugin's `Error.prepareStackTrace`.
+          if (key === 'stack') {
+            const own = Object.getOwnPropertyDescriptor(value, 'stack');
+            item = own !== undefined && 'value' in own ? own.value : undefined;
+          } else {
+            item = (value as unknown as Record<string, unknown>)[key];
+          }
         } catch {
           item = '[unreadable]';
         }

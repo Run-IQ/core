@@ -1,3 +1,4 @@
+import { symbolText } from '../utils/symbolText.js';
 // The port to plugin code: the only place where the engine calls a function a plugin gave, and
 // where it reads a thrown value. Everything made by plugin code is touched here, in the reader
 // (`reading`), or once at registration (`registering`), and nowhere else. A test (a plugin whose
@@ -139,10 +140,7 @@ export function faultOf(thrown: unknown): PluginFault {
     let shown: string;
     try {
       // A symbol through the captured description getter: no `Symbol.prototype.toString` lookup.
-      shown =
-        typeof thrown === 'symbol'
-          ? `Symbol(${(Reflect.apply(symbolDescription, thrown, []) as string | undefined) ?? ''})`
-          : String(thrown);
+      shown = typeof thrown === 'symbol' ? symbolText(thrown) : String(thrown);
     } catch {
       shown = '(unprintable)';
     }
@@ -182,9 +180,6 @@ type Fn = (...args: never[]) => unknown;
 // The intrinsics the port adopts a promise with, captured when this module loads (before any
 // plugin): never the `then` or the `constructor` of the value itself.
 const promiseThen = Promise.prototype.then;
-const symbolDescription = Object.getOwnPropertyDescriptor(Symbol.prototype, 'description')?.get as (
-  this: symbol,
-) => string | undefined;
 const noop = (): void => undefined;
 
 /** True for a thenable that is not a native promise: an object or function with a `then` function. */

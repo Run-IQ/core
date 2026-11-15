@@ -1,3 +1,4 @@
+import { symbolText } from '../utils/symbolText.js';
 import { types } from 'node:util';
 import { raiseLimit } from '../errors/EngineLimitError.js';
 import type { EngineLimits } from '../limits.js';
@@ -187,7 +188,7 @@ export class InputCopier {
       const index = typeof own === 'string' && /^(0|[1-9]\d*)$/.test(own) ? Number(own) : -1;
       if (index < 0 || index >= length) {
         this.reasons.push(
-          `${pointer} has an extra key: ${typeof own === 'symbol' ? own.toString() : clip(own)}`,
+          `${pointer} has an extra key: ${typeof own === 'symbol' ? symbolText(own) : clip(own)}`,
         );
         return;
       }
@@ -318,7 +319,7 @@ export class InputCopier {
           keys = [];
           for (const own of Reflect.ownKeys(value)) {
             if (typeof own === 'symbol') {
-              this.reasons.push(`${at()} has a symbol key: ${own.toString()}`);
+              this.reasons.push(`${at()} has a symbol key: ${symbolText(own)}`);
             } else if (!Object.prototype.propertyIsEnumerable.call(value, own)) {
               this.reasons.push(`${at()}/${escapeSegment(own)} is not enumerable`);
             } else keys.push(own);
@@ -399,7 +400,7 @@ export function listKeys(value: object, pointer: string, reasons: string[]): str
   const keys: string[] = [];
   for (const key of Reflect.ownKeys(value)) {
     if (typeof key === 'symbol') {
-      reasons.push(`${pointer === '' ? 'input' : pointer} has a symbol key: ${key.toString()}`);
+      reasons.push(`${pointer === '' ? 'input' : pointer} has a symbol key: ${symbolText(key)}`);
     } else if (!Object.prototype.propertyIsEnumerable.call(value, key)) {
       reasons.push(`${pointer}/${escapeSegment(key)} is not enumerable`);
     } else {

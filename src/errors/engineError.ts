@@ -34,8 +34,46 @@ export function sealEngineError(
   newTarget: unknown,
   Self: { prototype: object },
 ): void {
+  fixStack(error);
   Object.freeze(error);
   if (newTarget === Self) ENGINE_INSTANCES.add(error);
+}
+
+/**
+ * Makes `stack` an own data string. V8 formats the trace lazily, through `Error.prepareStackTrace`
+ * (a plugin can set it, and what it returns is any object, run at the first read): so it is read
+ * here, once, with `prepareStackTrace` set aside for that synchronous read and restored in `finally`,
+ * and an answer that is not a string is replaced by `name: message`. A frozen engine error thus
+ * never carries a plugin's object, and no plugin hook runs when the error is copied later.
+ */
+function fixStack(error: object): void {
+  const saved = Object.getOwnPropertyDescriptor(Error, 'prepareStackTrace');
+  let stack: unknown;
+  try {
+    if (saved !== undefined && !Reflect.deleteProperty(Error, 'prepareStackTrace')) {
+      // Not configurable (a plugin made it so): set aside by assignment when it is writable.
+      Reflect.set(Error, 'prepareStackTrace', undefined);
+    }
+    stack = (error as { stack?: unknown }).stack;
+  } catch {
+    stack = undefined;
+  } finally {
+    if (saved !== undefined) {
+      if (saved.configurable === true) Object.defineProperty(Error, 'prepareStackTrace', saved);
+      else Reflect.set(Error, 'prepareStackTrace', saved.value);
+    }
+  }
+  const named = error as { name?: unknown; message?: unknown };
+  const text =
+    typeof stack === 'string'
+      ? stack
+      : `${typeof named.name === 'string' ? named.name : 'Error'}: ${typeof named.message === 'string' ? named.message : ''}`;
+  Object.defineProperty(error, 'stack', {
+    value: text,
+    writable: false,
+    enumerable: false,
+    configurable: false,
+  });
 }
 
 /** True for an error the engine itself created (never for a foreign subclass of `PPEError`). */

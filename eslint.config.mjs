@@ -27,6 +27,12 @@ export default defineConfig(
           selector: "BinaryExpression[operator='instanceof']",
           message: 'instanceof is forbidden in src/: tell a value by identity or by a brand check.',
         },
+        {
+          // AL4: a symbol is described by `symbolText`; `.toString()` looks up a method a plugin can patch.
+          selector: "CallExpression[arguments.length=0][callee.property.name='toString']",
+          message:
+            '.toString() is forbidden in src/: describe a symbol with symbolText (src/utils/symbolText.ts).',
+        },
       ],
     },
   },

@@ -1,3 +1,4 @@
+import { symbolText } from '../utils/symbolText.js';
 import type { UnsealedResult } from '../types/result.js';
 import { describeValue, findNonJson } from '../utils/json.js';
 import type { EngineLimits } from '../limits.js';
@@ -53,7 +54,7 @@ function accept(
   for (const key of Reflect.ownKeys(returned)) {
     if (key !== 'annotations') {
       throw refuse(
-        `a field other than annotations: ${clip(typeof key === 'symbol' ? key.toString() : key)}`,
+        `a field other than annotations: ${clip(typeof key === 'symbol' ? symbolText(key) : key)}`,
       );
     }
   }
