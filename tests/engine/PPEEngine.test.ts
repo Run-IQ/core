@@ -274,6 +274,8 @@ describe('PPEEngine', () => {
           combine: 'union',
           value: ['declare', 'register'],
           contributors: ['o2', 'o1'],
+          status: 'determined',
+          pending: [],
         },
         risk: {
           name: 'risk',
@@ -281,6 +283,8 @@ describe('PPEEngine', () => {
           combine: 'highestPriority',
           value: 'high',
           contributors: ['hi'],
+          status: 'determined',
+          pending: [],
         },
         value: {
           name: 'value',
@@ -288,6 +292,8 @@ describe('PPEEngine', () => {
           combine: 'sum',
           value: 0.2,
           contributors: ['v1', 'v2'],
+          status: 'determined',
+          pending: [],
         },
       });
       expect(Object.keys(result.outputs)).toEqual(['obligations', 'risk', 'value']);
@@ -308,6 +314,8 @@ describe('PPEEngine', () => {
         combine: 'sum',
         value: 0,
         contributors: [],
+        status: 'determined',
+        pending: [],
       });
     });
 
@@ -333,6 +341,8 @@ describe('PPEEngine', () => {
         combine: 'highestPriority',
         value: 'high',
         contributors: ['X'],
+        status: 'determined',
+        pending: [],
       });
       expect(result.value).toBe(10);
       expect(result.appliedRules.map((r) => r.id)).toEqual(['v']);
@@ -493,6 +503,8 @@ describe('PPEEngine', () => {
         combine: 'sum',
         value: '2.2',
         contributors: ['X'],
+        status: 'determined',
+        pending: [],
       });
       expect(result.trace.steps.map((s) => [s.ruleId, s.contribution])).toEqual([['X', '2.25']]);
     });
@@ -614,8 +626,18 @@ describe('PPEEngine', () => {
             combine: 'union',
             value: ['b', 'a', 'c'],
             contributors: ['d1', 'o'],
+            status: 'determined',
+            pending: [],
           },
-          value: { name: 'value', type: 'number', combine: 'sum', value: 0.1, contributors: ['v'] },
+          value: {
+            name: 'value',
+            type: 'number',
+            combine: 'sum',
+            value: 0.1,
+            contributors: ['v'],
+            status: 'determined',
+            pending: [],
+          },
         },
         outputNames: ['obligations', 'value'],
         applied: ['d1', 'o', 'v'],

@@ -156,7 +156,12 @@ export class ExceptionProcessor {
 
       const mismatch = this.findOutputMismatch(rule, exceptions, ordered);
       if (mismatch !== undefined) {
-        excluded.set(rule, { rule, reason: 'OUTPUT_MISMATCH', detail: mismatch });
+        excluded.set(rule, {
+          rule,
+          reason: 'OUTPUT_MISMATCH',
+          detail: mismatch,
+          proofDetail: `OUTPUT_MISMATCH: ${ruleLabel(rule)} declares an exception output that differs from the rules it targets`,
+        });
         continue;
       }
 
@@ -171,10 +176,12 @@ export class ExceptionProcessor {
             ruleLabel(precedent),
           );
         }
+        const conflict = `inhibits ${ruleLabel(precedent)}, which takes precedence and already fired`;
         excluded.set(rule, {
           rule,
           reason: 'RULE_CONFLICT',
-          detail: `inhibits ${ruleLabel(precedent)}, which takes precedence and already fired`,
+          detail: conflict,
+          proofDetail: conflict,
         });
         continue;
       }
@@ -200,10 +207,12 @@ export class ExceptionProcessor {
         } else if (exception.kind === 'inhibit') {
           for (const target of carrier.targets.get(index) ?? []) {
             if (excluded.has(target)) continue;
+            const inhibited = `inhibited by ${ruleLabel(rule)}`;
             excluded.set(target, {
               rule: target,
               reason: 'INHIBITED',
-              detail: `inhibited by ${ruleLabel(rule)}`,
+              detail: inhibited,
+              proofDetail: inhibited,
             });
             inhibitedBy.set(target, { carrier: rule, index });
           }
@@ -238,12 +247,14 @@ export class ExceptionProcessor {
       });
       for (const target of affected) {
         const inhibitor = inhibitedBy.get(target)?.carrier;
+        const shortCircuitedDetail =
+          `output ${output} short-circuited by ${ruleLabel(carrier)}` +
+          (inhibitor === undefined ? '' : `; also inhibited by ${ruleLabel(inhibitor)}`);
         final.set(target, {
           rule: target,
           reason: 'SHORT_CIRCUITED',
-          detail:
-            `output ${output} short-circuited by ${ruleLabel(carrier)}` +
-            (inhibitor === undefined ? '' : `; also inhibited by ${ruleLabel(inhibitor)}`),
+          detail: shortCircuitedDetail,
+          proofDetail: shortCircuitedDetail,
         });
       }
       shortCircuited.set(output, affected);
@@ -277,10 +288,16 @@ export class ExceptionProcessor {
       const refusal = this.refuseParams(target, params);
       if (refusal !== undefined) {
         const by = [...new Set(patches.map((p) => ruleLabel(p.carrier)))].join(', ');
+        // The proof text names the model, the rules and the cause, never the model's words (D-40).
+        const proofDetail =
+          refusal.reason === 'INVALID_PARAMS'
+            ? `INVALID_PARAMS: model ${target.model} refused the params of ${ruleLabel(target)} after substitution by ${by}`
+            : `MODEL_ERROR: model ${target.model} of ${ruleLabel(target)} broke its contract in validateParams after substitution by ${by}`;
         final.set(target, {
           rule: target,
           reason: refusal.reason,
           detail: `after substitution by ${by}: ${refusal.detail}`,
+          proofDetail,
         });
         continue;
       }

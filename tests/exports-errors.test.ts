@@ -38,6 +38,7 @@ const callables: Array<[string, (argument: unknown) => unknown]> = [
   ['buildContext', (a) => core.buildContext(a as never, a as never)],
   ['formatPointer', (a) => core.formatPointer(a as never)],
   ['parsePointer', (a) => core.parsePointer(a as never)],
+  ['undetermined', (a) => core.undetermined(a as never)],
   ['ModelRegistry.register', (a) => new core.ModelRegistry().register(a as never)],
   ['ModelRegistry.get', (a) => new core.ModelRegistry().get(a as never)],
   ['ModelRegistry.describe', (a) => new core.ModelRegistry().describe(a as never)],
@@ -68,6 +69,7 @@ describe('AJ: no exported data helper reads its argument before the inbound copi
       'buildContext',
       'formatPointer',
       'parsePointer',
+      'undetermined',
     ]) {
       expect(text, name).toMatch(new RegExp(`guard\\('${name}', ${name}Impl, true\\)`));
     }
@@ -76,7 +78,9 @@ describe('AJ: no exported data helper reads its argument before the inbound copi
 
 describe('AI7: the exported helpers throw engine errors only', () => {
   it('covers every function the package exports (a new export fails this until it is listed)', () => {
-    const exempt = new Set(['PPEEngine']); // its errors are tested through the engine
+    // PPEEngine: its errors are tested through the engine. isUndetermined: a plugin-side check that
+    // never throws, by R11 (a Proxy or a revoked Proxy gives false, with no trap run).
+    const exempt = new Set(['PPEEngine', 'isUndetermined']);
     const functions = Object.entries(core)
       .filter(([, value]) => typeof value === 'function')
       .filter(([, value]) => !((value as { prototype?: unknown }).prototype instanceof Error))

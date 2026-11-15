@@ -40,6 +40,8 @@ describe('OutputCombiner', () => {
         combine: 'count',
         value: 2,
         contributors: ['a', 'b', 'c'],
+        status: 'determined',
+        pending: [],
       });
     });
 
@@ -60,6 +62,7 @@ describe('OutputCombiner', () => {
       expect(skipped).toEqual([
         {
           rule: b,
+          proofDetail: expect.any(String),
           reason: 'OUTPUT_MISMATCH',
           detail:
             'output flags: value 1 does not match type number: a count takes a boolean (true is counted)',
@@ -102,6 +105,8 @@ describe('OutputCombiner', () => {
         combine: 'max',
         value: 'high',
         contributors: ['a', 'b', 'c'],
+        status: 'determined',
+        pending: [],
       });
       expect(outputOf({ ...RANKED, combine: 'min' }, values).output?.value).toBe('low');
       expect(
@@ -168,6 +173,8 @@ describe('OutputCombiner', () => {
         combine: 'sum',
         value: 0.3,
         contributors: ['a', 'b'],
+        status: 'determined',
+        pending: [],
       });
     });
 
@@ -190,6 +197,8 @@ describe('OutputCombiner', () => {
         combine: 'max',
         value: 0.30000000000000004,
         contributors: ['a', 'b', 'c'],
+        status: 'determined',
+        pending: [],
       });
       expect(
         OutputCombiner.combine('low', NUMBER('min'), contributions, 'throw').output?.value,
@@ -212,6 +221,8 @@ describe('OutputCombiner', () => {
         combine: 'highestPriority',
         value: 'high',
         contributors: ['high'],
+        status: 'determined',
+        pending: [],
       });
     });
 
@@ -245,6 +256,7 @@ describe('OutputCombiner', () => {
       expect(skipped).toEqual([
         {
           rule: b,
+          proofDetail: expect.any(String),
           reason: 'RULE_CONFLICT',
           detail: 'output risk: tied with a@1 at priority 500; the lowest id@version wins',
         },
@@ -300,6 +312,8 @@ describe('OutputCombiner', () => {
         combine: 'union',
         value: ['y', 'z', 'x', { j: 2, k: 1 }, 'w'],
         contributors: ['b', 'a', 'c', 'd'],
+        status: 'determined',
+        pending: [],
       });
     });
 
@@ -316,6 +330,7 @@ describe('OutputCombiner', () => {
       expect(skipped).toEqual([
         {
           rule: bad,
+          proofDetail: expect.any(String),
           reason: 'OUTPUT_MISMATCH',
           detail: 'output obligations: value "x" does not match type list',
         },
@@ -357,6 +372,7 @@ describe('OutputCombiner', () => {
       expect(risk.skipped).toEqual([
         {
           rule: medium,
+          proofDetail: expect.any(String),
           reason: 'OUTPUT_MISMATCH',
           detail: 'output risk: value "severe" does not match type enum (low, medium, high)',
         },
@@ -371,6 +387,7 @@ describe('OutputCombiner', () => {
       expect(sum.skipped).toEqual([
         {
           rule: text,
+          proofDetail: expect.any(String),
           reason: 'OUTPUT_MISMATCH',
           detail: 'output value: value "2" does not match type number',
         },
@@ -438,11 +455,13 @@ describe('OutputCombiner', () => {
       expect(skipped).toEqual([
         {
           rule: i,
+          proofDetail: expect.any(String),
           reason: 'OUTPUT_MISMATCH',
           detail: 'output value: value -Infinity does not match type number',
         },
         {
           rule: n,
+          proofDetail: expect.any(String),
           reason: 'OUTPUT_MISMATCH',
           detail: 'output value: value NaN does not match type number',
         },
@@ -505,6 +524,8 @@ describe('OutputCombiner', () => {
         combine: 'sum',
         value: '24.5',
         contributors: ['a', 'b', 'c'],
+        status: 'determined',
+        pending: [],
       });
       expect(recorded).toStrictEqual(
         new Map([
@@ -533,12 +554,33 @@ describe('OutputCombiner', () => {
         'does not match type decimal: expected a decimal string (an optional "-", digits, ' +
         'an optional "." and digits, no exponent) or a safe integer';
       expect(skipped).toEqual([
-        { rule: e, reason: 'OUTPUT_MISMATCH', detail: `output amount: value "1e3" ${expected}` },
-        { rule: f, reason: 'OUTPUT_MISMATCH', detail: `output amount: value 0.1 ${expected}` },
-        { rule: n, reason: 'OUTPUT_MISMATCH', detail: `output amount: value null ${expected}` },
-        { rule: t, reason: 'OUTPUT_MISMATCH', detail: `output amount: value "abc" ${expected}` },
+        {
+          rule: e,
+          proofDetail: expect.any(String),
+          reason: 'OUTPUT_MISMATCH',
+          detail: `output amount: value "1e3" ${expected}`,
+        },
+        {
+          rule: f,
+          proofDetail: expect.any(String),
+          reason: 'OUTPUT_MISMATCH',
+          detail: `output amount: value 0.1 ${expected}`,
+        },
+        {
+          rule: n,
+          proofDetail: expect.any(String),
+          reason: 'OUTPUT_MISMATCH',
+          detail: `output amount: value null ${expected}`,
+        },
+        {
+          rule: t,
+          proofDetail: expect.any(String),
+          reason: 'OUTPUT_MISMATCH',
+          detail: `output amount: value "abc" ${expected}`,
+        },
         {
           rule: u,
+          proofDetail: expect.any(String),
           reason: 'OUTPUT_MISMATCH',
           detail: `output amount: value 9007199254740992 ${expected}`,
         },
@@ -577,6 +619,8 @@ describe('OutputCombiner', () => {
           combine: 'max',
           value: '12345678901234567890.2',
           contributors: ['a', 'b', 'c'],
+          status: 'determined',
+          pending: [],
         });
         expect(OutputCombiner.combine('m', DECIMAL('min'), order, 'throw').output?.value).toBe(
           '12345678901234567890.1',
@@ -916,6 +960,8 @@ describe('OutputCombiner', () => {
           combine: 'sum',
           value: '12.5',
           contributors: ['X'],
+          status: 'determined',
+          pending: [],
         },
         recorded: { value: '12.5' },
       });
@@ -943,6 +989,8 @@ describe('OutputCombiner', () => {
             combine: 'sum',
             value: '1.01',
             contributors: ['X'],
+            status: 'determined',
+            pending: [],
           },
           recorded: { value: '1.005' },
         });
@@ -984,7 +1032,15 @@ describe('OutputCombiner', () => {
           2.7,
         ),
       ).toStrictEqual({
-        output: { name: 'n', type: 'number', combine: 'sum', value: 2, contributors: ['X'] },
+        output: {
+          name: 'n',
+          type: 'number',
+          combine: 'sum',
+          value: 2,
+          contributors: ['X'],
+          status: 'determined',
+          pending: [],
+        },
         recorded: { value: 2.7 },
       });
       expect(

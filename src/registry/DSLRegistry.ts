@@ -13,6 +13,7 @@ interface Declared {
   readonly evaluate: Fn;
   readonly listVariables: Fn | undefined;
   readonly compute: Fn | undefined;
+  readonly evaluateTruth: Fn | undefined;
 }
 
 /**
@@ -20,6 +21,58 @@ interface Declared {
  * `version`, its `capabilities` and its functions); the engine keeps those copies and never reads
  * it again.
  */
+/** The keys a DSL's `capabilities` may have (a strict list: `exactDecimals`, `threeValued`, `limits`). */
+/** The name of one of a DSL's own bounds: an identifier (`maxNodes`, `maxDepth`). */
+const LIMIT_NAME = /^[a-z][A-Za-z0-9]{0,63}$/;
+const CAPABILITY_KEYS = ['exactDecimals', 'threeValued', 'limits'] as const;
+
+/**
+ * Checks what a DSL promises, once, on the engine's own copy: a plain object whose `exactDecimals`
+ * is `true` or `false`, whose `threeValued`, when present, is `true` or `false`, whose `limits`, when
+ * present, is a plain object, and with no other key. A shape that is anything else refuses the
+ * registration, naming the DSL and the field.
+ */
+function validateCapabilities(dsl: string, capabilities: DSLEvaluator['capabilities']): void {
+  if (capabilities === undefined) return;
+  const named = (field: string, problem: string): Error =>
+    new TypeError(`DSL evaluator "${dsl}": ${field} ${problem}`);
+  const declared = capabilities as unknown as Record<string, unknown>;
+  if (typeof declared !== 'object' || declared === null || Array.isArray(declared)) {
+    throw named('capabilities', 'must be an object');
+  }
+  for (const key of Object.keys(declared)) {
+    if (!(CAPABILITY_KEYS as readonly string[]).includes(key)) {
+      throw named(`capabilities.${key}`, 'is not a known capability');
+    }
+  }
+  if (typeof declared['exactDecimals'] !== 'boolean') {
+    throw named('capabilities.exactDecimals', 'must be true or false');
+  }
+  if (declared['threeValued'] !== undefined && typeof declared['threeValued'] !== 'boolean') {
+    throw named('capabilities.threeValued', 'must be true or false');
+  }
+  const limits = declared['limits'];
+  if (limits !== undefined) {
+    if (typeof limits !== 'object' || limits === null || Array.isArray(limits)) {
+      throw named('capabilities.limits', 'must be an object');
+    }
+    // A plain record of the DSL's own bounds: names as identifiers (`maxNodes`), each value a
+    // positive safe integer. Core does not know the names; anything else is refused with its path.
+    for (const [key, value] of Object.entries(limits as Record<string, unknown>)) {
+      if (!LIMIT_NAME.test(key)) {
+        throw named(
+          `capabilities.limits.${key}`,
+          'is not a valid name (letters and digits, starting with a letter)',
+        );
+      }
+      if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+        throw named(`capabilities.limits.${key}`, 'must be a positive safe integer');
+      }
+    }
+    Object.freeze(limits);
+  }
+}
+
 export class DSLRegistry {
   private readonly evaluators = new Map<string, DSLEvaluator>();
   private readonly declared = new Map<string, Declared>();
@@ -39,11 +92,25 @@ export class DSLRegistry {
         given === undefined
           ? undefined
           : (copyDeclaration(given, dsl, '/capabilities') as DSLEvaluator['capabilities']);
+      validateCapabilities(dsl, capabilities);
+      const truth: unknown = evaluator.evaluateTruth; // read once
+      if (capabilities?.threeValued === true && typeof truth !== 'function') {
+        throw new TypeError(
+          `DSL evaluator "${dsl}": evaluateTruth must be a function when capabilities.threeValued is true`,
+        );
+      }
       const functionOf = (key: keyof DSLEvaluator, required: boolean): Fn | undefined => {
         const fn: unknown = evaluator[key];
         if (typeof fn === 'function') return fn as Fn;
         if (required || fn !== undefined) {
           throw new TypeError(`DSL evaluator "${dsl}": ${String(key)} must be a function`);
+        }
+        return undefined;
+      };
+      const truthOf = (given: unknown): Fn | undefined => {
+        if (typeof given === 'function') return given as Fn;
+        if (given !== undefined) {
+          throw new TypeError(`DSL evaluator "${dsl}": evaluateTruth must be a function`);
         }
         return undefined;
       };
@@ -54,6 +121,8 @@ export class DSLRegistry {
         evaluate: functionOf('evaluate', true) as Fn,
         listVariables: functionOf('listVariables', false),
         compute: functionOf('compute', false),
+        // Read once, like `evaluate`; a three-valued DSL must have one (checked above).
+        evaluateTruth: truthOf(truth),
       });
     });
   }

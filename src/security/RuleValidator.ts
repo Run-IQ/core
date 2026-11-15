@@ -1,3 +1,4 @@
+import { clip } from '../utils/frozenCopy.js';
 import { isSpecError } from '../utils/brand.js';
 import { refusalsOf } from '../engine/pluginBoundary.js';
 import { askValidateParams, defaultCrossing } from '../engine/pluginBoundary.js';
@@ -31,6 +32,11 @@ export interface RuleValidationResult {
  *
  * With `onChecksumMismatch: 'throw'`, the first two throw instead of skipping the rule.
  */
+/** The places of the rule the refusals name (the text before the first space of each), without duplicates. */
+function pointersOf(refusals: readonly string[]): string {
+  return [...new Set(refusals.map((refusal) => clip(refusal.split(' ')[0] ?? '')))].join(', ');
+}
+
 export class RuleValidator {
   constructor(
     private readonly modelRegistry: ModelRegistry,
@@ -72,6 +78,8 @@ export class RuleValidator {
         rule,
         reason: 'INVALID_RULE',
         detail: `Invalid rule ${ruleLabel(rule)}: ${refusals.join('; ')}`,
+        // The rule's label only: the pointers of the refusals can quote a plugin's keys.
+        proofDetail: `INVALID_RULE: rule ${ruleLabel(rule)} is malformed at ${pointersOf(refusals)}`,
       };
     }
 
@@ -85,7 +93,12 @@ export class RuleValidator {
       if (this.onChecksumMismatch === 'throw') {
         throw new ValidationError(detail, [detail]);
       }
-      return { rule, reason: 'INVALID_RULE', detail };
+      return {
+        rule,
+        reason: 'INVALID_RULE',
+        detail,
+        proofDetail: `INVALID_RULE: rule ${String(rule.id)}@${String(rule.version)} is malformed (${error.code})`,
+      };
     }
 
     if (!intact) {
@@ -96,6 +109,7 @@ export class RuleValidator {
         rule,
         reason: 'CHECKSUM_MISMATCH',
         detail: `Checksum mismatch for rule ${ruleLabel(rule)}`,
+        proofDetail: `CHECKSUM_MISMATCH: the checksum of ${ruleLabel(rule)} does not match its content`,
       };
     }
 
@@ -111,11 +125,23 @@ export class RuleValidator {
         this.crossing,
         UnexpectedEngineError.foreign,
       );
-      if (verdict.kind === 'error') return { rule, reason: 'MODEL_ERROR', detail: verdict.detail };
+      if (verdict.kind === 'error') {
+        return {
+          rule,
+          reason: 'MODEL_ERROR',
+          detail: verdict.detail,
+          proofDetail: `MODEL_ERROR: model ${rule.model} of ${ruleLabel(rule)} broke its contract in validateParams`,
+        };
+      }
       if (verdict.kind === 'invalid') {
         const errors = verdict.errors === '' ? 'the model gave no error' : verdict.errors;
         const detail = `Invalid params for rule ${ruleLabel(rule)} (model ${rule.model}): ${errors}`;
-        return { rule, reason: 'INVALID_PARAMS', detail };
+        return {
+          rule,
+          reason: 'INVALID_PARAMS',
+          detail,
+          proofDetail: `INVALID_PARAMS: model ${rule.model} refused the params of ${ruleLabel(rule)}`,
+        };
       }
     }
 

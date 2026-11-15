@@ -17,6 +17,7 @@ import {
 import { readsOf as readsOfImpl } from './context/reads.js';
 import { buildContext as buildContextImpl } from './context/buildContext.js';
 import { formatPointer as formatPointerImpl, parsePointer as parsePointerImpl } from '@run-iq/spec';
+import { undetermined as undeterminedImpl } from './engine/undetermined.js';
 import { guard, guardMethods } from './errors/guard.js';
 
 /**
@@ -38,6 +39,8 @@ export const readsOf = guard('readsOf', readsOfImpl, [0]);
 export const buildContext = guard('buildContext', buildContextImpl, true);
 export const formatPointer = guard('formatPointer', formatPointerImpl, true);
 export const parsePointer = guard('parsePointer', parsePointerImpl, true);
+// A model builds it from its own data: the arguments are copied and a bad one is an engine error.
+export const undetermined = guard('undetermined', undeterminedImpl, true);
 
 // The registries the package exports: subclasses whose methods are guarded, with their public names.
 const MODEL_REGISTRIES = new WeakSet<object>();

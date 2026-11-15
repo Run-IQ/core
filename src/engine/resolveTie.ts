@@ -38,10 +38,13 @@ export function resolveTie(
       winner.priority,
     );
   }
+  const detail = `tied with ${winner.id}@${winner.version} at priority ${winner.priority}; the lowest id@version wins`;
+  // Labels and a priority only: the proof text is the detail.
   const losers: SkippedRule[] = losersRules.map((rule) => ({
     rule,
     reason: 'RULE_CONFLICT',
-    detail: `tied with ${winner.id}@${winner.version} at priority ${winner.priority}; the lowest id@version wins`,
+    detail,
+    proofDetail: detail,
   }));
   return { winner, losers };
 }

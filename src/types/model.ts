@@ -1,3 +1,4 @@
+import type { UndeterminedResult } from '../engine/undetermined.js';
 import type { JsonPointer, OutputDeclaration } from '@run-iq/spec';
 import type { Rule } from './rule.js';
 import type { OutputValue } from './output.js';
@@ -55,7 +56,7 @@ export interface CalculationModel<V extends OutputValue = number> {
     input: Record<string, unknown>,
     matchedRule: Readonly<Rule>,
     params: unknown,
-  ): V | CalculationOutput<V>;
+  ): V | CalculationOutput<V> | UndeterminedResult;
 
   describeParams?(): Record<string, ParamDescriptor>;
 

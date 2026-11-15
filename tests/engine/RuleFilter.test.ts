@@ -164,6 +164,7 @@ describe('RuleFilter', () => {
       expect(result.skipped).toEqual([
         {
           rule,
+          proofDetail: expect.any(String),
           reason: 'INACTIVE_DATE',
           detail:
             'window [2024-01-01T00:00:00.000Z, 2024-06-01T00:00:00.000Z), evaluated at 2024-06-01T00:00:00.000Z',
@@ -204,6 +205,7 @@ describe('RuleFilter', () => {
       expect(result.skipped).toEqual([
         {
           rule: bad,
+          proofDetail: expect.any(String),
           reason: 'INVALID_RULE',
           detail:
             'Invalid rule bad@1: INVALID_DATE: effectiveUntil must be a Date, a civil date YYYY-MM-DD or an instant YYYY-MM-DDTHH:MM:SS[.sss] with Z or ±HH:MM, in the years 0000 to 9999; got an invalid Date',
@@ -229,6 +231,7 @@ describe('RuleFilter', () => {
       expect(result.skipped).toEqual([
         {
           rule: paris,
+          proofDetail: expect.any(String),
           reason: 'INVALID_RULE',
           detail:
             'Invalid rule paris@1: INVALID_DATE: isEffectiveAt knows UTC and ±HH:MM offsets only: use windowContains with a calendar for "Europe/Paris"',
@@ -258,6 +261,7 @@ describe('RuleFilter', () => {
       expect(until.skipped).toEqual([
         {
           rule,
+          proofDetail: expect.any(String),
           reason: 'INACTIVE_DATE',
           detail: 'window [2025-01-01, 2025-06-01), evaluated at 2025-06-01T00:00:00.000Z',
         },
@@ -268,6 +272,7 @@ describe('RuleFilter', () => {
         new Date('2024-12-31T23:59:59.999Z'),
       );
       expect(before.skipped[0]).toMatchObject({
+        proofDetail: expect.any(String),
         reason: 'INACTIVE_DATE',
         detail: 'window [2025-01-01, 2025-06-01), evaluated at 2024-12-31T23:59:59.999Z',
       });
@@ -320,7 +325,12 @@ describe('RuleFilter', () => {
       const result = await createFilter().filter([rule], input, at);
       expect(result.passed).toEqual([]);
       expect(result.skipped).toEqual([
-        { rule, reason: 'DIMENSION_MISMATCH', detail: 'country: rule BJ, input TG' },
+        {
+          rule,
+          proofDetail: expect.any(String),
+          reason: 'DIMENSION_MISMATCH',
+          detail: 'country: rule BJ, input TG',
+        },
       ]);
     });
 
@@ -333,7 +343,12 @@ describe('RuleFilter', () => {
       const input = makeInput({ meta: { tenantId: 't', dimensions: { country: 'TG' } } });
       const result = await createFilter().filter([rule], input, at);
       expect(result.skipped).toEqual([
-        { rule, reason: 'DIMENSION_MISMATCH', detail: 'region: rule X, input has no region' },
+        {
+          rule,
+          proofDetail: expect.any(String),
+          reason: 'DIMENSION_MISMATCH',
+          detail: 'region: rule X, input has no region',
+        },
       ]);
     });
 
@@ -361,6 +376,7 @@ describe('RuleFilter', () => {
         expect(refused.skipped).toEqual([
           {
             rule,
+            proofDetail: expect.any(String),
             reason: 'DIMENSION_MISMATCH',
             detail: 'country: rule {"anyOf":["TG","BJ"]}, input CI',
           },
@@ -388,6 +404,7 @@ describe('RuleFilter', () => {
         expect(mixed.skipped).toEqual([
           {
             rule: all,
+            proofDetail: expect.any(String),
             reason: 'DIMENSION_MISMATCH',
             detail: 'zone: rule {"anyOf":["FR","US"],"match":"all"}, input [DE, FR]',
           },
@@ -442,6 +459,7 @@ describe('RuleFilter', () => {
         expect(result.skipped).toEqual([
           {
             rule,
+            proofDetail: expect.any(String),
             reason: 'INVALID_RULE',
             detail:
               'Invalid rule r1@1: dimension country: INVALID_REFERENTIAL: unknown referential ue',
@@ -799,6 +817,7 @@ describe('RuleFilter', () => {
       const rule = makeRule({ id: 'r1', model: 'm', condition: { dsl: 'broken', value: 'x' } });
       const result = await filter.filter([rule], makeInput(), at);
       expect(result.skipped[0]).toMatchObject({
+        proofDetail: expect.any(String),
         reason: 'DSL_ERROR',
         detail: 'invalid expression',
       });
@@ -812,6 +831,7 @@ describe('RuleFilter', () => {
       });
       const result = await createFilter().filter([rule], makeInput(), at);
       expect(result.skipped[0]).toMatchObject({
+        proofDetail: expect.any(String),
         reason: 'DSL_NOT_FOUND',
         detail: 'DSL not found: unknown_dsl',
       });

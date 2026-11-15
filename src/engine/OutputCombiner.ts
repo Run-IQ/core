@@ -213,6 +213,7 @@ export const OutputCombiner = {
           rule,
           reason: 'OUTPUT_MISMATCH',
           detail: `output ${name}: ${describeMismatch(contribution.value, declaration, true)}`,
+          proofDetail: `OUTPUT_MISMATCH: the contribution of ${ruleLabel(rule)} to output ${name} does not match its declaration`,
         });
         continue;
       }
@@ -299,7 +300,9 @@ export const OutputCombiner = {
         type: declaration.type,
         combine: declaration.combine,
         value,
+        status: 'determined',
         contributors: idsOf(contributors),
+        pending: [],
       },
       skipped,
       recorded,
@@ -334,7 +337,9 @@ export const OutputCombiner = {
         type: declaration.type,
         combine: declaration.combine,
         value: finish(name, declaration, recorded.value, atOutput),
+        status: 'determined',
         contributors: [rule.id],
+        pending: [],
       },
       recorded,
     };

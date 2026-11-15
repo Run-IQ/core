@@ -82,7 +82,9 @@ const emptyDefaultOutput = (): DecisionOutput => ({
   type: DEFAULT_OUTPUT_DECLARATION.type,
   combine: DEFAULT_OUTPUT_DECLARATION.combine,
   value: 0,
+  status: 'determined',
   contributors: [],
+  pending: [],
 });
 
 /**
@@ -104,6 +106,11 @@ const emptyDefaultOutput = (): DecisionOutput => ({
  * Applied rules, breakdown items and trace steps are by priority descending, then id@version,
  * then output name, whatever the order of `rules`.
  */
+/** The proof text of a model that wrote into its arguments: the model and the rule, never the pointer it wrote to. */
+function writeProof(rule: Rule): string {
+  return `MODEL_ERROR: model ${rule.model} of ${ruleLabel(rule)} wrote to its input`;
+}
+
 export class ExecutionPipeline {
   constructor(
     private readonly modelRegistry: ModelRegistry,
@@ -154,10 +161,12 @@ export class ExecutionPipeline {
       } else if (sameRule(rule, shortCircuit.rule)) {
         applied.push(rule);
       } else {
+        const shortCircuited = `output ${name} short-circuited by ${ruleLabel(shortCircuit.rule)}`;
         skipped.push({
           rule,
           reason: 'SHORT_CIRCUITED',
-          detail: `output ${name} short-circuited by ${ruleLabel(shortCircuit.rule)}`,
+          detail: shortCircuited,
+          proofDetail: shortCircuited,
         });
       }
     }
@@ -171,6 +180,7 @@ export class ExecutionPipeline {
             rule,
             reason: 'OUTPUT_MISMATCH',
             detail: `output ${name} must be a number: ${ruleLabel(rule)} declares it ${describeDeclaration(declaration)}`,
+            proofDetail: `OUTPUT_MISMATCH: output ${name} must be a number and ${ruleLabel(rule)} declares another type`,
           });
         } else {
           declared.push({ rule, declaration });
@@ -190,6 +200,7 @@ export class ExecutionPipeline {
             rule,
             reason: 'OUTPUT_MISMATCH',
             detail: `rules feeding output ${name} declare it differently: ${described}`,
+            proofDetail: `OUTPUT_MISMATCH: the rules feeding output ${name} declare it differently`,
           });
         }
         continue;
@@ -212,13 +223,23 @@ export class ExecutionPipeline {
           );
         } catch (error) {
           if (views.wrote === undefined) throw UnexpectedEngineError.foreign(error);
-          skipped.push({ rule, reason: 'MODEL_ERROR', detail: views.wrote });
+          skipped.push({
+            rule,
+            reason: 'MODEL_ERROR',
+            detail: views.wrote,
+            proofDetail: writeProof(rule),
+          });
           continue;
         }
         // A refused write taints the call even when the model caught the error and returned
         // normally: the slot of the call is set, so the rule is excluded (AE4).
         if (views.wrote !== undefined) {
-          skipped.push({ rule, reason: 'MODEL_ERROR', detail: views.wrote });
+          skipped.push({
+            rule,
+            reason: 'MODEL_ERROR',
+            detail: views.wrote,
+            proofDetail: writeProof(rule),
+          });
           continue;
         }
         // What the model returns is data the engine copies once, bounded (`maxRuleLeaves` nodes,
@@ -238,12 +259,22 @@ export class ExecutionPipeline {
           // An output past a bound of one value is that rule's fault (a fault stops at what it
           // touches); the budget of the whole evaluation is the engine's (B68).
           if (isRaisedLimit(error) && PER_VALUE_LIMITS.has(error.limit)) {
-            skipped.push({ rule, reason: 'MODEL_ERROR', detail: clipFault(error.message) });
+            skipped.push({
+              rule,
+              reason: 'MODEL_ERROR',
+              detail: clipFault(error.message),
+              proofDetail: `MODEL_ERROR: model ${rule.model} of ${ruleLabel(rule)} returned a value past a size limit`,
+            });
             continue;
           }
           const causes = isReadFailure(error) ? causesOf(error) : [];
           if (views.wrote !== undefined) {
-            skipped.push({ rule, reason: 'MODEL_ERROR', detail: views.wrote });
+            skipped.push({
+              rule,
+              reason: 'MODEL_ERROR',
+              detail: views.wrote,
+              proofDetail: writeProof(rule),
+            });
             continue;
           }
           if (causes.length > 0) throw UnexpectedEngineError.foreign(causes[0]);
@@ -251,13 +282,19 @@ export class ExecutionPipeline {
             rule,
             reason: 'OUTPUT_MISMATCH',
             detail: `output ${name}: the model returned a value that cannot be copied: ${clip(describeThrown(error))}`,
+            proofDetail: `OUTPUT_MISMATCH: output ${name} of ${ruleLabel(rule)} cannot be copied`,
           });
           continue;
         }
         // A write made while the engine read the output (a getter of it) and caught by the model
         // taints the call as well: the slot is set, so the rule is excluded (AG2).
         if (views.wrote !== undefined) {
-          skipped.push({ rule, reason: 'MODEL_ERROR', detail: views.wrote });
+          skipped.push({
+            rule,
+            reason: 'MODEL_ERROR',
+            detail: views.wrote,
+            proofDetail: writeProof(rule),
+          });
           continue;
         }
         const durationMs = Math.round((performance.now() - start) * 100) / 100;
@@ -267,6 +304,7 @@ export class ExecutionPipeline {
             rule,
             reason: 'OUTPUT_MISMATCH',
             detail: `output ${name}: the value is not JSON at ${findNonJson(value) ?? '$'}`,
+            proofDetail: `OUTPUT_MISMATCH: output ${name} of ${ruleLabel(rule)} is not JSON`,
           });
           continue;
         }

@@ -1,6 +1,6 @@
 import type { JsonValue } from '@run-iq/spec';
 import type { EvaluationInput } from './input.js';
-import type { UnsealedResult, SkippedRule } from './result.js';
+import type { UnsealedResult, PluginSkip } from './result.js';
 import type { Rule } from './rule.js';
 import type { CalculationModel } from './model.js';
 import type { OutputValue } from './output.js';
@@ -57,7 +57,7 @@ export interface AfterEvaluateResult {
 export interface BeforeEvaluateResult {
   readonly input: EvaluationInput;
   readonly rules: ReadonlyArray<Rule>;
-  readonly skipped?: ReadonlyArray<SkippedRule>;
+  readonly skipped?: ReadonlyArray<PluginSkip>;
   /**
    * The plugin's own state for this evaluation, kept in `EvaluationResult.pluginState[name]` and
    * visible to `afterEvaluate`.
