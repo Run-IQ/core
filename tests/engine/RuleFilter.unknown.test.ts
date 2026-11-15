@@ -41,6 +41,7 @@ describe('RuleFilter: a dimension that spec cannot decide', () => {
     expect(result.skipped).toEqual([
       {
         rule,
+        proofDetail: expect.any(String),
         reason: 'DIMENSION_MISMATCH',
         detail: 'country: rule TG, input TG (unknown: code "x" not valid at "2024-06-01")',
       },

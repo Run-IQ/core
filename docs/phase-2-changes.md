@@ -27,6 +27,30 @@ The engine holds no `Date`. Every date in a rule (`effectiveFrom`, `effectiveUnt
 checksum unchanged, and an invalid `Date` is refused with its pointer. Models and DSLs receive those
 strings and write-trapping views, never a `Date` object.
 
+## 9M1, sub-PR 1: outcome types and texts
+
+- **Removed, no backward compatibility (ruling 22):** the skip reason `CONDITION_TIMEOUT` is gone from
+  `SkipReason`. `DSLTimeoutError` goes with it, in the hand-back change (see below): its class and
+  its export are still there while the 9L inventory tests that list every exported class are not
+  touched. `timeout.dsl` is measured and reported as a pending `ERROR` with the cause `TIMEOUT` in
+  sub-PR 2.
+- **Deprecated for plugins:** `DSL_ERROR`, `DSL_NOT_FOUND`, `INVALID_PARAMS`, `CHECKSUM_MISMATCH`,
+  `INVALID_RULE`, `OUTPUT_MISMATCH` and `MODEL_ERROR` stay in `SkipReason` and are marked
+  `@deprecated`: core reports each as a pending `ERROR` from sub-PR 2 on. A plugin skips with
+  `PLUGIN` only.
+- **New in the result types:** `SkippedRule.proofDetail` (required: the engine's own text, built from
+  labels, names, pointers, codes and the rule's own bounds, never an input value and never a plugin's
+  words), `PluginSkip` (what a hook returns: no `proofDetail`), `PendingRule` and the result fields
+  `pendingRules` and `readsUndeclared`, `DecisionOutput.status`, `value?` and `pending`. Every output is
+  `determined` with `pending: []` in this sub-PR. A migration: a test that compared a skip or an output
+  with an exact object now has the two new members.
+- **New for DSLs and models:** `DSLEvaluator.evaluateTruth`, `TruthValue`, `TruthResult`;
+  `capabilities` is validated at registration with a strict key list (`exactDecimals`, `threeValued`,
+  `limits`; a DSL with `threeValued: true` must have `evaluateTruth`); `undetermined(missing, reason?)`
+  and `isUndetermined` for a model that cannot compute for want of facts.
+- **Exports:** `RuleState`, `PendingReason`, `PendingRule`, `ERROR_CAUSES` and `ErrorCause` (spec's, the
+  same frozen object), `TruthValue`, `TruthResult`, `UndeterminedResult`, `PluginSkip`.
+
 ## Open items for later tasks
 
 - G-1 bench figure (D-26), measured by `bench/g1.mjs` (`npm run build`, then `node bench/g1.mjs`): 100 000 transactions, one `evaluate` each, against 20 rules, with the default limits (this shape reaches none of them) and every guard of the boundary on. **114.8 s in total, 1.148 ms per transaction, 871 transactions per second, peak memory 127 MiB** (2 000 000 rule evaluations), on a shared cloud virtual machine (Intel Xeon @ 2.10 GHz, 4 cores, 16 GiB, linux x64) with Node v20.19.0. The audit's own run on another machine gave 0.688 ms per transaction and a 135 MB peak. This measures 100 000 separate evaluations; the single-evaluation form over a collection (the plan's G-1) is measured again in Task 9R1, when collections exist. One run, one machine: the figure is a measurement, not a guarantee.

@@ -5,7 +5,7 @@ import { refusal } from './pluginPort.js';
 import type { EngineLimits } from '../limits.js';
 import type { BeforeEvaluateResult } from '../types/plugin.js';
 import type { Rule } from '../types/rule.js';
-import type { SkippedRule } from '../types/result.js';
+import type { PluginSkip } from '../types/result.js';
 import { describeValue, findNonJson } from '../utils/json.js';
 import { isObject } from '../utils/values.js';
 
@@ -28,7 +28,7 @@ export interface BeforeEvaluateReading {
   /** The returned rules: new frozen copies, at most `maxRules`, each bounded on its own. */
   readonly rules: readonly Rule[];
   /** The plugin's skips, each with a plugin reason and a `detail` (`skipped by plugin <name>`). */
-  readonly skipped: readonly SkippedRule[];
+  readonly skipped: readonly PluginSkip[];
   /** The JSON state to keep, when the plugin returned one. */
   readonly state?: JsonValue | undefined;
 }
@@ -90,7 +90,7 @@ function readResult(
     if (isErrorNamed(error, 'TypeError')) throw refuse(describeThrown(error));
     throw error;
   }
-  const skipped: SkippedRule[] = records.map((record) => {
+  const skipped: PluginSkip[] = records.map((record) => {
     const { rule, reason, detail } = record;
     if (!isObject(rule) || typeof reason !== 'string') throw refuse('a malformed skipped');
     if (detail !== undefined && typeof detail !== 'string') throw refuse('a malformed skipped');
@@ -102,7 +102,7 @@ function readResult(
     }
     // justification: `rule` is an object and `reason` a string in the plugin set (checked above);
     // the ledger checks `rule` as a rule.
-    return { rule: rule as Rule, reason: reason as SkippedRule['reason'], detail };
+    return { rule: rule as Rule, reason: reason as PluginSkip['reason'], detail };
   });
 
   // justification: typed as JSON only to be handed to `findNonJson` on the next line, which checks

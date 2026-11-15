@@ -40,7 +40,14 @@ import type {
   OutputDeclaration,
   OutputType,
   OutputValue,
+  PendingReason,
+  PendingRule,
+  PluginSkip,
   PPEPlugin,
+  RuleState,
+  TruthResult,
+  TruthValue,
+  UndeterminedResult,
   PluginContext,
   Rule,
   SkippedRule,
@@ -57,6 +64,7 @@ import type {
   FactAssertion,
   JsonPointer as SpecJsonPointer,
   JsonValue,
+  OutputStatus,
   OutputDeclaration as SpecOutputDeclaration,
   OutputType as SpecOutputType,
 } from '@run-iq/spec';
@@ -114,7 +122,7 @@ describe('CalculationModel (outputs)', () => {
       OutputDeclaration | undefined
     >();
     expectTypeOf<ReturnType<CalculationModel<string[]>['calculate']>>().toEqualTypeOf<
-      string[] | CalculationOutput<string[]>
+      string[] | CalculationOutput<string[]> | UndeterminedResult
     >();
   });
 
@@ -175,8 +183,10 @@ describe('EvaluationResult (decision)', () => {
       readonly name: string;
       readonly type: OutputType;
       readonly combine: CombineStrategy;
-      readonly value: JsonValue;
+      readonly status: OutputStatus;
+      readonly value?: JsonValue;
       readonly contributors: readonly string[];
+      readonly pending: readonly string[];
     }>();
   });
 
@@ -261,7 +271,11 @@ describe('DecisionStore and FactEncoder', () => {
 
 describe('the transitional aliases are exactly the Omit of spec and result types', () => {
   it('UnsealedResult is EvaluationResult without proof and fromStore (Task 10 deletes it)', () => {
-    expectTypeOf<UnsealedResult>().toEqualTypeOf<Omit<EvaluationResult, 'proof' | 'fromStore'>>();
+    // The two lists of 9M1 are optional here until the engine fills them (hand-back of PPEEngine.ts).
+    expectTypeOf<UnsealedResult>().toEqualTypeOf<
+      Omit<EvaluationResult, 'proof' | 'fromStore' | 'pendingRules' | 'readsUndeclared'> &
+        Partial<Pick<EvaluationResult, 'pendingRules' | 'readsUndeclared'>>
+    >();
     expectTypeOf<UnsealedResult>().not.toHaveProperty('proof');
     expectTypeOf<UnsealedResult>().not.toHaveProperty('fromStore');
     expectTypeOf<UnsealedResult['outputs']>().toEqualTypeOf<EvaluationResult['outputs']>();
@@ -340,5 +354,79 @@ describe('what 9L adds to the public surface', () => {
     >();
     expectTypeOf<PPEEngineConfig['limits']>().toEqualTypeOf<EngineLimitsInput | undefined>();
     expectTypeOf<PPEEngineConfig['inputSeed']>().toEqualTypeOf<InputSeedConfig | undefined>();
+  });
+});
+
+describe('9M1 sub-PR 1 (MC7): outcome types', () => {
+  it('R1: the rule states and the pending reasons are exactly the two unions', () => {
+    expectTypeOf<RuleState>().toEqualTypeOf<'applied' | 'skipped' | 'pending'>();
+    expectTypeOf<PendingReason>().toEqualTypeOf<
+      'UNDETERMINED' | 'ERROR' | 'AMBIGUOUS_ORDER' | 'PENDING_CARRIER' | 'PENDING_DOMINANT'
+    >();
+  });
+
+  it('R3: a pending rule', () => {
+    expectTypeOf<PendingRule>().toEqualTypeOf<{
+      readonly rule: Rule;
+      readonly reason: PendingReason;
+      readonly detail: string;
+      readonly proofDetail: string;
+      readonly missing: readonly JsonPointer[];
+    }>();
+    expectTypeOf<PendingRule>().not.toHaveProperty('stratum');
+    expectTypeOf<PendingRule>().not.toHaveProperty('subject');
+  });
+
+  it('R4: the result lists (required on the result, optional on the unsealed one for now)', () => {
+    expectTypeOf<EvaluationResult['pendingRules']>().toEqualTypeOf<readonly PendingRule[]>();
+    expectTypeOf<EvaluationResult['readsUndeclared']>().toEqualTypeOf<readonly string[]>();
+  });
+
+  it('R6: an output has a status, an optional value and a list of pending rules', () => {
+    expectTypeOf<DecisionOutput['status']>().toEqualTypeOf<OutputStatus>();
+    expectTypeOf<DecisionOutput['pending']>().toEqualTypeOf<readonly string[]>();
+    expectTypeOf<DecisionOutput>().toHaveProperty('value');
+    const undetermined: DecisionOutput = {
+      name: 'fee',
+      type: 'number',
+      combine: 'sum',
+      status: 'undetermined',
+      contributors: [],
+      pending: ['R1'],
+    };
+    expectTypeOf(undetermined.value).toEqualTypeOf<JsonValue | undefined>();
+  });
+
+  it('R8: a plugin skip has no proofDetail, a skipped rule requires it', () => {
+    expectTypeOf<PluginSkip>().toEqualTypeOf<{
+      readonly rule: Rule;
+      readonly reason: SkipReason;
+      readonly detail?: string | undefined;
+    }>();
+    expectTypeOf<PluginSkip>().not.toHaveProperty('proofDetail');
+    expectTypeOf<SkippedRule['proofDetail']>().toEqualTypeOf<string>();
+    expectTypeOf<NonNullable<BeforeEvaluateResult['skipped']>>().toEqualTypeOf<
+      ReadonlyArray<PluginSkip>
+    >();
+    // @ts-expect-error a skipped rule without its proofDetail does not compile
+    const missing: SkippedRule = { rule: {} as Rule, reason: 'CONDITION_FALSE' };
+    void missing;
+  });
+
+  it('R10: a three-valued DSL', () => {
+    expectTypeOf<TruthValue>().toEqualTypeOf<boolean | 'unknown'>();
+    expectTypeOf<TruthResult['value']>().toEqualTypeOf<TruthValue>();
+    expectTypeOf<NonNullable<DSLEvaluator['evaluateTruth']>>().toEqualTypeOf<
+      (expression: unknown, context: Record<string, unknown>) => TruthResult
+    >();
+    expectTypeOf<DSLCapabilities['threeValued']>().toEqualTypeOf<boolean | undefined>();
+  });
+
+  it('R11: a model may answer undetermined', () => {
+    expectTypeOf<UndeterminedResult>().toEqualTypeOf<{
+      readonly missing: readonly string[];
+      readonly reason?: string;
+    }>();
+    expectTypeOf<UndeterminedResult>().toMatchTypeOf<ReturnType<CalculationModel['calculate']>>();
   });
 });

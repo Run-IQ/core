@@ -40,7 +40,7 @@ export interface FilterResult {
   readonly diagnostics: readonly Diagnostic[];
 }
 
-type Exclusion = Pick<SkippedRule, 'reason'> & { readonly detail: string };
+type Exclusion = Pick<SkippedRule, 'reason' | 'proofDetail'> & { readonly detail: string };
 
 /** Where a rule is filtered: the canonical meta, and the context its conditions are given. */
 interface Scope {
@@ -103,6 +103,11 @@ function invalidRule(rule: Rule, error: SpecError, where = ''): Exclusion {
   return {
     reason: 'INVALID_RULE',
     detail: `Invalid rule ${rule.id}@${rule.version}: ${where}${error.code}: ${error.message}`,
+    // Spec's code, never its message (which can quote a value): D-40.
+    proofDetail:
+      where === ''
+        ? `INVALID_RULE: rule ${rule.id}@${rule.version} has an invalid window (${error.code})`
+        : `INVALID_RULE: rule ${rule.id}@${rule.version} has an invalid dimension ${where.replace(/^dimension /, '').replace(/: $/, '')} (${error.code})`,
   };
 }
 
@@ -147,7 +152,12 @@ export class RuleFilter {
     for (const rule of rules) {
       const exclusion = await this.checkRule(rule, scope, now, missing, diagnostics);
       if (exclusion) {
-        skipped.push({ rule, reason: exclusion.reason, detail: exclusion.detail });
+        skipped.push({
+          rule,
+          reason: exclusion.reason,
+          detail: exclusion.detail,
+          proofDetail: exclusion.proofDetail,
+        });
       } else {
         passed.push(rule);
       }
@@ -178,6 +188,8 @@ export class RuleFilter {
       return {
         reason: 'INACTIVE_DATE',
         detail: `window [${formatDate(rule.effectiveFrom)}, ${until}), evaluated at ${formatDate(now)}`,
+        // The rule's own bounds and the place of the date, never the date of the input.
+        proofDetail: `window [${formatDate(rule.effectiveFrom)}, ${rule.effectiveUntil === null ? '∞' : formatDate(rule.effectiveUntil)}) does not contain /$dates/effective (UTC)`,
       };
     }
 
@@ -189,6 +201,7 @@ export class RuleFilter {
         return {
           reason: 'TAG_MISMATCH',
           detail: `rule tags [${rule.tags.join(', ')}], input tags [${inputTags.join(', ')}]`,
+          proofDetail: `tags: rule [${rule.tags.join(', ')}], input /meta/tags`,
         };
       }
     }
@@ -203,7 +216,11 @@ export class RuleFilter {
         const actual = Object.hasOwn(inputDimensions, key) ? inputDimensions[key] : undefined;
         const rulePart = `${key}: rule ${describeSpec(spec)}`;
         if (actual === undefined) {
-          return { reason: 'DIMENSION_MISMATCH', detail: `${rulePart}, input has no ${key}` };
+          return {
+            reason: 'DIMENSION_MISMATCH',
+            detail: `${rulePart}, input has no ${key}`,
+            proofDetail: `${rulePart}, input /$dimensions/${key}`,
+          };
         }
         let match: ReturnType<typeof matchDimension>;
         try {
@@ -222,6 +239,7 @@ export class RuleFilter {
           return {
             reason: 'DIMENSION_MISMATCH',
             detail: `${rulePart}, input ${describeInput(actual)}${unknown}`,
+            proofDetail: `${rulePart}, input /$dimensions/${key}`,
           };
         }
       }
@@ -231,7 +249,11 @@ export class RuleFilter {
     if (rule.condition) {
       const evaluator = this.dslRegistry.get(rule.condition.dsl);
       if (!evaluator) {
-        return { reason: 'DSL_NOT_FOUND', detail: `DSL not found: ${rule.condition.dsl}` };
+        return {
+          reason: 'DSL_NOT_FOUND',
+          detail: `DSL not found: ${rule.condition.dsl}`,
+          proofDetail: `DSL_NOT_FOUND: DSL ${rule.condition.dsl} is not registered`,
+        };
       }
 
       // The reads only feed missingFacts: a listVariables that does not conform never changes the
@@ -261,7 +283,11 @@ export class RuleFilter {
         // taints the call too (AG2).
         if (views.wrote !== undefined) throw new Error(views.wrote);
         if (!holds) {
-          return { reason: 'CONDITION_FALSE', detail: 'condition evaluated to false' };
+          return {
+            reason: 'CONDITION_FALSE',
+            detail: 'condition evaluated to false',
+            proofDetail: 'condition evaluated to false',
+          };
         }
       } catch (error) {
         // A verdict past a bound of one value is that rule's fault; every other bound is the
@@ -278,7 +304,12 @@ export class RuleFilter {
         const detail = clipFault(views.wrote ?? text ?? describeThrown(error));
         // The text of a plugin's fault is in the record: it is weighed like the rest.
         this.crossing.budget.addText(detail);
-        return { reason: 'DSL_ERROR', detail };
+        return {
+          reason: 'DSL_ERROR',
+          detail,
+          // The cause and the DSL's name, never the message or the verdict text of the DSL.
+          proofDetail: `DSL_ERROR: the condition of ${ruleLabel(rule)} failed in DSL ${rule.condition.dsl}`,
+        };
       }
     }
 

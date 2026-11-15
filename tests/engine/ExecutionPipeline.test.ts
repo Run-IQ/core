@@ -39,6 +39,8 @@ describe('ExecutionPipeline', () => {
         combine: 'sum',
         value: 300,
         contributors: ['r1', 'r2'],
+        status: 'determined',
+        pending: [],
       },
     });
     expect(result.applied.map((r) => r.id)).toEqual(['r1', 'r2']);
@@ -60,7 +62,15 @@ describe('ExecutionPipeline', () => {
     const result = pipelineWith().execute([], makeInput(), new TraceBuilder(), NONE, 1);
     expect(result).toEqual({
       outputs: {
-        value: { name: 'value', type: 'number', combine: 'sum', value: 0, contributors: [] },
+        value: {
+          name: 'value',
+          type: 'number',
+          combine: 'sum',
+          value: 0,
+          contributors: [],
+          status: 'determined',
+          pending: [],
+        },
       },
       breakdown: [],
       applied: [],
@@ -118,6 +128,8 @@ describe('ExecutionPipeline', () => {
       combine: 'highestPriority',
       value: 'high',
       contributors: ['r2'],
+      status: 'determined',
+      pending: [],
     });
   });
 
@@ -160,8 +172,8 @@ describe('ExecutionPipeline', () => {
         'rules feeding output risk declare it differently: ' +
         'a@1 enum/highestPriority (low, high); b@1 string/highestPriority';
       expect(result.skipped).toEqual([
-        { rule: a, reason: 'OUTPUT_MISMATCH', detail },
-        { rule: b, reason: 'OUTPUT_MISMATCH', detail },
+        { rule: a, proofDetail: expect.any(String), reason: 'OUTPUT_MISMATCH', detail },
+        { rule: b, proofDetail: expect.any(String), reason: 'OUTPUT_MISMATCH', detail },
       ]);
       expect(Object.keys(result.outputs)).toEqual(['value']);
       expect(result.applied.map((r) => r.id)).toEqual(['v']);
@@ -201,6 +213,7 @@ describe('ExecutionPipeline', () => {
       expect(result.skipped).toEqual([
         {
           rule: b,
+          proofDetail: expect.any(String),
           reason: 'OUTPUT_MISMATCH',
           detail: 'output risk: value "unknown" does not match type enum (low, high)',
         },
@@ -224,17 +237,27 @@ describe('ExecutionPipeline', () => {
       expect(result.skipped).toEqual([
         {
           rule: a,
+          proofDetail: expect.any(String),
           reason: 'OUTPUT_MISMATCH',
           detail: 'output terms: the value is not JSON at $.at (Date)',
         },
         {
           rule: n,
+          proofDetail: expect.any(String),
           reason: 'OUTPUT_MISMATCH',
           detail: 'output value: the value is not JSON at $ (NaN)',
         },
       ]);
       expect(result.outputs).toEqual({
-        value: { name: 'value', type: 'number', combine: 'sum', value: 0, contributors: [] },
+        value: {
+          name: 'value',
+          type: 'number',
+          combine: 'sum',
+          value: 0,
+          contributors: [],
+          status: 'determined',
+          pending: [],
+        },
       });
     });
 
@@ -269,11 +292,24 @@ describe('ExecutionPipeline', () => {
         priority: 9000,
         sourceRef: 'decree 7',
         exceptions: [
-          { kind: 'shortCircuit', output: 'risk', value: 'high', reason: 'blacklisted' },
+          {
+            kind: 'shortCircuit',
+            output: 'risk',
+            value: 'high',
+            reason: 'blacklisted',
+          },
         ],
       });
       const shortCircuits = new Map<string, ShortCircuit>([
-        ['risk', { rule: carrier, value: 'high', reason: 'blacklisted', declaration: RISK }],
+        [
+          'risk',
+          {
+            rule: carrier,
+            value: 'high',
+            reason: 'blacklisted',
+            declaration: RISK,
+          },
+        ],
       ]);
       const trace = new TraceBuilder();
       const result = pipeline.execute(
@@ -290,8 +326,18 @@ describe('ExecutionPipeline', () => {
           combine: 'highestPriority',
           value: 'high',
           contributors: ['X'],
+          status: 'determined',
+          pending: [],
         },
-        value: { name: 'value', type: 'number', combine: 'sum', value: 10, contributors: ['v'] },
+        value: {
+          name: 'value',
+          type: 'number',
+          combine: 'sum',
+          value: 10,
+          contributors: ['v'],
+          status: 'determined',
+          pending: [],
+        },
       });
       expect(result.applied.map((r) => r.id)).toEqual(['v']);
       expect(result.breakdown).toEqual([
@@ -347,6 +393,8 @@ describe('ExecutionPipeline', () => {
         combine: 'highestPriority',
         value: 'high',
         contributors: ['C'],
+        status: 'determined',
+        pending: [],
       });
       expect(result.applied).toEqual([carrier]);
       expect(result.breakdown).toEqual([
@@ -382,6 +430,8 @@ describe('ExecutionPipeline', () => {
         combine: 'sum',
         value: 10,
         contributors: ['C'],
+        status: 'determined',
+        pending: [],
       });
       expect(result.outputs['risk']?.contributors).toEqual(['C']);
       expect(result.applied).toEqual([carrier]);
@@ -409,7 +459,12 @@ describe('ExecutionPipeline', () => {
         1,
       );
       expect(result.skipped).toEqual([
-        { rule: stray, reason: 'SHORT_CIRCUITED', detail: 'output value short-circuited by X@1' },
+        {
+          rule: stray,
+          proofDetail: expect.any(String),
+          reason: 'SHORT_CIRCUITED',
+          detail: 'output value short-circuited by X@1',
+        },
       ]);
       expect(result.outputs['value']).toEqual({
         name: 'value',
@@ -417,6 +472,8 @@ describe('ExecutionPipeline', () => {
         combine: 'sum',
         value: 5,
         contributors: ['X'],
+        status: 'determined',
+        pending: [],
       });
     });
   });
@@ -442,7 +499,9 @@ describe('ExecutionPipeline', () => {
           NONE,
           1,
         );
-        expect(result.skipped).toEqual([{ rule: x, reason: 'OUTPUT_MISMATCH', detail }]);
+        expect(result.skipped).toEqual([
+          { rule: x, proofDetail: expect.any(String), reason: 'OUTPUT_MISMATCH', detail },
+        ]);
         expect(result.outputs.value.value).toBe(2);
       }
     });
@@ -462,6 +521,7 @@ describe('ExecutionPipeline', () => {
       expect(holey.execute([rule], makeInput(), new TraceBuilder(), NONE, 1).skipped).toEqual([
         {
           rule,
+          proofDetail: expect.any(String),
           reason: 'OUTPUT_MISMATCH',
           detail:
             'output o: the model returned a value that cannot be copied: output o/a/b/1 is not JSON: undefined',
@@ -484,6 +544,7 @@ describe('ExecutionPipeline', () => {
     expect(result.skipped).toEqual([
       {
         rule: a,
+        proofDetail: expect.any(String),
         reason: 'OUTPUT_MISMATCH',
         detail: 'output value must be a number: a@1 declares it boolean/all',
       },
@@ -539,6 +600,8 @@ describe('ExecutionPipeline', () => {
         combine: 'sum',
         value: '3.51',
         contributors: ['a', 'b'],
+        status: 'determined',
+        pending: [],
       });
       expect(result.breakdown).toStrictEqual([
         {
@@ -660,6 +723,7 @@ describe('ExecutionPipeline', () => {
       expect(result.skipped).toEqual([
         {
           rule: a,
+          proofDetail: expect.any(String),
           reason: 'OUTPUT_MISMATCH',
           detail: 'output value must be a number: a@1 declares it decimal/sum',
         },
@@ -722,6 +786,8 @@ describe('ExecutionPipeline', () => {
         combine: 'sum',
         value: '1.01',
         contributors: ['X'],
+        status: 'determined',
+        pending: [],
       });
       expect(result.breakdown).toStrictEqual([
         {

@@ -37,11 +37,9 @@ export class DominanceResolver {
       kept.push(winner);
       for (const rule of members) {
         if (rule.priority < top) {
-          skipped.push({
-            rule,
-            reason: 'DOMINATED',
-            detail: `dominated by ${winner.id}@${winner.version} (priority ${winner.priority}) in group ${group}`,
-          });
+          const detail = `dominated by ${winner.id}@${winner.version} (priority ${winner.priority}) in group ${group}`;
+          // Labels, priorities and the group name only: the proof text is the detail.
+          skipped.push({ rule, reason: 'DOMINATED', detail, proofDetail: detail });
         }
       }
     }

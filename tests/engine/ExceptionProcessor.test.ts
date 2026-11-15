@@ -118,7 +118,12 @@ describe('ExceptionProcessor', () => {
 
       expect(result.rules).toEqual([]);
       expect(result.skipped).toEqual([
-        { rule: b, reason: 'INHIBITED', detail: 'inhibited by X@1' },
+        {
+          rule: b,
+          proofDetail: expect.any(String),
+          reason: 'INHIBITED',
+          detail: 'inhibited by X@1',
+        },
       ]);
       const expected: UnsettledException[] = [
         { ruleId: 'X', version: 1, kind: 'inhibit', affected: [{ ruleId: 'B' }] },
@@ -135,7 +140,12 @@ describe('ExceptionProcessor', () => {
 
       expect(result.rules).toEqual([b]);
       expect(result.skipped).toEqual([
-        { rule: a, reason: 'INHIBITED', detail: 'inhibited by C@1' },
+        {
+          rule: a,
+          proofDetail: expect.any(String),
+          reason: 'INHIBITED',
+          detail: 'inhibited by C@1',
+        },
       ]);
       expect(result.applied).toEqual([
         { ruleId: 'C', version: 1, kind: 'inhibit', affected: [{ ruleId: 'A' }] },
@@ -148,7 +158,12 @@ describe('ExceptionProcessor', () => {
       const result = processor.apply([low, high], 'throw');
       expect(result.rules).toEqual([high]);
       expect(result.skipped).toEqual([
-        { rule: low, reason: 'INHIBITED', detail: 'inhibited by b@1' },
+        {
+          rule: low,
+          proofDetail: expect.any(String),
+          reason: 'INHIBITED',
+          detail: 'inhibited by b@1',
+        },
       ]);
     });
 
@@ -158,7 +173,12 @@ describe('ExceptionProcessor', () => {
       const forward = processor.apply([a, b], 'throw');
       expect(forward.rules).toEqual([a]);
       expect(forward.skipped).toEqual([
-        { rule: b, reason: 'INHIBITED', detail: 'inhibited by a@1' },
+        {
+          rule: b,
+          proofDetail: expect.any(String),
+          reason: 'INHIBITED',
+          detail: 'inhibited by a@1',
+        },
       ]);
       expect(forward.applied).toEqual([
         { ruleId: 'a', version: 1, kind: 'inhibit', affected: [{ ruleId: 'b' }] },
@@ -179,7 +199,12 @@ describe('ExceptionProcessor', () => {
       const result = processor.apply([q, p, k], 'throw');
       expect(result.rules).toEqual([k, q]);
       expect(result.skipped).toEqual([
-        { rule: p, reason: 'INHIBITED', detail: 'inhibited by K@1' },
+        {
+          rule: p,
+          proofDetail: expect.any(String),
+          reason: 'INHIBITED',
+          detail: 'inhibited by K@1',
+        },
       ]);
     });
 
@@ -190,7 +215,12 @@ describe('ExceptionProcessor', () => {
       const result = processor.apply([x, y, b], 'throw');
       expect(result.rules).toEqual([]);
       expect(result.skipped).toEqual([
-        { rule: b, reason: 'INHIBITED', detail: 'inhibited by X@1' },
+        {
+          rule: b,
+          proofDetail: expect.any(String),
+          reason: 'INHIBITED',
+          detail: 'inhibited by X@1',
+        },
       ]);
       expect(result.applied).toEqual([
         { ruleId: 'X', version: 1, kind: 'inhibit', affected: [{ ruleId: 'B' }] },
@@ -204,7 +234,12 @@ describe('ExceptionProcessor', () => {
       const b = makeRule({ id: 'B', model: 'm' });
       const result = processor.apply([b, y, x], 'throw');
       expect(result.skipped).toEqual([
-        { rule: b, reason: 'INHIBITED', detail: 'inhibited by X@1' },
+        {
+          rule: b,
+          proofDetail: expect.any(String),
+          reason: 'INHIBITED',
+          detail: 'inhibited by X@1',
+        },
       ]);
       expect(result.applied).toEqual([
         { ruleId: 'X', version: 1, kind: 'inhibit', affected: [{ ruleId: 'B' }] },
@@ -219,7 +254,12 @@ describe('ExceptionProcessor', () => {
       const result = processor.apply([h, l], 'throw');
       expect(result.rules).toEqual([]);
       expect(result.skipped).toEqual([
-        { rule: h, reason: 'INHIBITED', detail: 'inhibited by L@1' },
+        {
+          rule: h,
+          proofDetail: expect.any(String),
+          reason: 'INHIBITED',
+          detail: 'inhibited by L@1',
+        },
       ]);
       expect(result.applied).toEqual([
         { ruleId: 'L', version: 1, kind: 'inhibit', affected: [{ ruleId: 'H' }] },
@@ -257,10 +297,16 @@ describe('ExceptionProcessor', () => {
         expect(expected.skipped).toEqual([
           {
             rule: i,
+            proofDetail: expect.any(String),
             reason: 'RULE_CONFLICT',
             detail: 'inhibits SC@1, which takes precedence and already fired',
           },
-          { rule: v, reason: 'SHORT_CIRCUITED', detail: 'output value short-circuited by SC@1' },
+          {
+            rule: v,
+            proofDetail: expect.any(String),
+            reason: 'SHORT_CIRCUITED',
+            detail: 'output value short-circuited by SC@1',
+          },
         ]);
         expect(expected.applied).toEqual([
           {
@@ -282,9 +328,15 @@ describe('ExceptionProcessor', () => {
         const expected = processor.apply([d1, d2, d3], 'first');
         expect(expected.rules).toEqual([d1]);
         expect(expected.skipped).toEqual([
-          { rule: d2, reason: 'INHIBITED', detail: 'inhibited by d1@1' },
+          {
+            rule: d2,
+            proofDetail: expect.any(String),
+            reason: 'INHIBITED',
+            detail: 'inhibited by d1@1',
+          },
           {
             rule: d3,
+            proofDetail: expect.any(String),
             reason: 'RULE_CONFLICT',
             detail: 'inhibits d1@1, which takes precedence and already fired',
           },
@@ -324,7 +376,12 @@ describe('ExceptionProcessor', () => {
       const result = processor.apply([b, k], 'throw');
       expect(result.rules).toEqual([k]);
       expect(result.skipped).toEqual([
-        { rule: b, reason: 'INHIBITED', detail: 'inhibited by K@1' },
+        {
+          rule: b,
+          proofDetail: expect.any(String),
+          reason: 'INHIBITED',
+          detail: 'inhibited by K@1',
+        },
       ]);
     });
 
@@ -438,6 +495,7 @@ describe('ExceptionProcessor', () => {
       expect(result.skipped).toEqual([
         {
           rule: t,
+          proofDetail: expect.any(String),
           reason: 'INVALID_PARAMS',
           detail: 'after substitution by S@1: rate must be a number; see the model docs',
         },
@@ -455,6 +513,7 @@ describe('ExceptionProcessor', () => {
       expect(result.skipped).toEqual([
         {
           rule: t,
+          proofDetail: expect.any(String),
           reason: 'INVALID_PARAMS',
           detail: 'after substitution by B@1, A@1: rate must be a number; see the model docs',
         },
@@ -468,7 +527,12 @@ describe('ExceptionProcessor', () => {
       const result = processor.apply([t, s, i], 'throw');
       expect(result.rules).toEqual([]);
       expect(result.skipped).toEqual([
-        { rule: t, reason: 'INHIBITED', detail: 'inhibited by I@1' },
+        {
+          rule: t,
+          proofDetail: expect.any(String),
+          reason: 'INHIBITED',
+          detail: 'inhibited by I@1',
+        },
       ]);
       expect(result.applied).toEqual([
         { ruleId: 'S', version: 1, kind: 'substitute', affected: [] },
@@ -485,7 +549,12 @@ describe('ExceptionProcessor', () => {
         const result = processor.apply(order, 'throw');
         expect(result.rules).toEqual([]);
         expect(result.skipped).toEqual([
-          { rule: t, reason: 'INHIBITED', detail: 'inhibited by X@1' },
+          {
+            rule: t,
+            proofDetail: expect.any(String),
+            reason: 'INHIBITED',
+            detail: 'inhibited by X@1',
+          },
         ]);
         expect(result.applied).toEqual([
           { ruleId: 'X', version: 1, kind: 'inhibit', affected: [{ ruleId: 'T' }] },
@@ -546,6 +615,7 @@ describe('ExceptionProcessor', () => {
       expect(expected.skipped).toEqual([
         {
           rule: b,
+          proofDetail: expect.any(String),
           reason: 'RULE_CONFLICT',
           detail: 'tied with A@1 at priority 5000; the lowest id@version wins',
         },
@@ -565,7 +635,12 @@ describe('ExceptionProcessor', () => {
 
     it('excludes only the rules of the short-circuited output', () => {
       const sc = carrier('SC', 9000, [
-        { kind: 'shortCircuit', output: 'riskLevel', value: 'high', reason: 'blacklisted' },
+        {
+          kind: 'shortCircuit',
+          output: 'riskLevel',
+          value: 'high',
+          reason: 'blacklisted',
+        },
       ]);
       const r1 = risk('R1');
       const v1 = makeRule({ id: 'V1', model: 'm' });
@@ -575,12 +650,21 @@ describe('ExceptionProcessor', () => {
       expect(result.skipped).toEqual([
         {
           rule: r1,
+          proofDetail: expect.any(String),
           reason: 'SHORT_CIRCUITED',
           detail: 'output riskLevel short-circuited by SC@1',
         },
       ]);
       expect([...result.shortCircuits.entries()]).toEqual([
-        ['riskLevel', { rule: sc, value: 'high', reason: 'blacklisted', declaration: RISK }],
+        [
+          'riskLevel',
+          {
+            rule: sc,
+            value: 'high',
+            reason: 'blacklisted',
+            declaration: RISK,
+          },
+        ],
       ]);
       expect(result.applied).toEqual([
         {
@@ -618,7 +702,12 @@ describe('ExceptionProcessor', () => {
       const result = processor.apply([v, k], 'throw');
       expect(result.rules).toEqual([k]);
       expect(result.skipped).toEqual([
-        { rule: v, reason: 'SHORT_CIRCUITED', detail: 'output value short-circuited by K@1' },
+        {
+          rule: v,
+          proofDetail: expect.any(String),
+          reason: 'SHORT_CIRCUITED',
+          detail: 'output value short-circuited by K@1',
+        },
       ]);
     });
 
@@ -639,6 +728,7 @@ describe('ExceptionProcessor', () => {
       expect(result.skipped).toEqual([
         {
           rule: r1,
+          proofDetail: expect.any(String),
           reason: 'SHORT_CIRCUITED',
           detail: 'output riskLevel short-circuited by SC-high@1',
         },
@@ -666,7 +756,12 @@ describe('ExceptionProcessor', () => {
       expect(result.rules).toEqual([r1]);
       expect(result.shortCircuits.size).toBe(0);
       expect(result.skipped).toEqual([
-        { rule: sc, reason: 'INHIBITED', detail: 'inhibited by I@1' },
+        {
+          rule: sc,
+          proofDetail: expect.any(String),
+          reason: 'INHIBITED',
+          detail: 'inhibited by I@1',
+        },
       ]);
     });
 
@@ -680,6 +775,7 @@ describe('ExceptionProcessor', () => {
       expect(result.skipped).toEqual([
         {
           rule: r1,
+          proofDetail: expect.any(String),
           reason: 'SHORT_CIRCUITED',
           detail: 'output riskLevel short-circuited by SC@1; also inhibited by I@1',
         },
@@ -735,11 +831,13 @@ describe('ExceptionProcessor', () => {
       expect(expected.skipped).toEqual([
         {
           rule: b,
+          proofDetail: expect.any(String),
           reason: 'RULE_CONFLICT',
           detail: 'tied with sc-a@1 at priority 9000; the lowest id@version wins',
         },
         {
           rule: r1,
+          proofDetail: expect.any(String),
           reason: 'SHORT_CIRCUITED',
           detail: 'output riskLevel short-circuited by sc-a@1',
         },
@@ -771,6 +869,7 @@ describe('ExceptionProcessor', () => {
       expect(result.skipped).toEqual([
         {
           rule: sc,
+          proofDetail: expect.any(String),
           reason: 'OUTPUT_MISMATCH',
           detail:
             'shortCircuit of SC@1 on output riskLevel: value "medium" does not match type enum (low, high)',
@@ -784,6 +883,7 @@ describe('ExceptionProcessor', () => {
       expect(processor.apply([bad], 'throw').skipped).toEqual([
         {
           rule: bad,
+          proofDetail: expect.any(String),
           reason: 'OUTPUT_MISMATCH',
           detail: 'shortCircuit of SC@1 on output value: value "x" does not match type number',
         },
@@ -800,6 +900,7 @@ describe('ExceptionProcessor', () => {
       expect(result.skipped).toEqual([
         {
           rule: sc,
+          proofDetail: expect.any(String),
           reason: 'OUTPUT_MISMATCH',
           detail: 'shortCircuit of SC@1 on output flags: no rule in play declares output flags',
         },
@@ -818,6 +919,7 @@ describe('ExceptionProcessor', () => {
       expect(result.skipped).toEqual([
         {
           rule: sc,
+          proofDetail: expect.any(String),
           reason: 'OUTPUT_MISMATCH',
           detail:
             'shortCircuit of SC@1 on output riskLevel: the rules feeding it declare it differently (enum/highestPriority (low, high), number/sum)',
@@ -906,6 +1008,7 @@ describe('ExceptionProcessor short-circuits on decimal outputs (R38)', () => {
       expect(result.skipped).toEqual([
         {
           rule: sc,
+          proofDetail: expect.any(String),
           reason: 'OUTPUT_MISMATCH',
           detail: `shortCircuit of SC@1 on output amount: value ${written} ${expected}`,
         },

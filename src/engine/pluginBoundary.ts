@@ -2,7 +2,7 @@ import { isSpecError } from '../utils/brand.js';
 import { types } from 'node:util';
 import { verifyRuleChecksum } from '@run-iq/spec';
 import type { Rule } from '../types/rule.js';
-import type { SkippedRule } from '../types/result.js';
+import type { PluginSkip, SkippedRule } from '../types/result.js';
 import type { EngineLimits } from '../limits.js';
 import { DEFAULT_LIMITS } from '../limits.js';
 import type { PPEPlugin } from '../types/plugin.js';
@@ -432,7 +432,7 @@ export interface LedgerOutcome {
 /** What a hook returned, once read and bounded. */
 export interface ReturnedRules {
   readonly rules: readonly Rule[];
-  readonly skipped: readonly SkippedRule[];
+  readonly skipped: readonly PluginSkip[];
 }
 
 /**
@@ -596,6 +596,8 @@ export class RuleLedger {
           reason: skip.reason,
           // The plugin's name is always in the record, prefixed by the engine.
           detail: `plugin ${pluginName}: ${skip.detail ?? 'skipped'}`,
+          // The plugin's name only, never its words: the proof text is the engine's (D-40).
+          proofDetail: `skipped by plugin ${pluginName}`,
         }),
       );
     }
@@ -895,6 +897,8 @@ export const CROSSING_POINTS: Readonly<Record<PluginCallback, CrossingPoint>> = 
     reads:
       'readsOf: the answer through readBounded (text against the one budget); a throw is a problem naming it',
   },
+  // Registered and checked (a three-valued DSL must have it); nothing calls it until 9M1 sub-PR 4.
+  'DSLEvaluator.evaluateTruth': { called: false, contract: 'none', reads: 'nothing calls it yet' },
   'DSLEvaluator.compute': { called: false, contract: 'none', reads: 'nothing calls it' },
   'DSLEvaluator.describeSyntax': { called: false, contract: 'none', reads: 'nothing calls it' },
 };

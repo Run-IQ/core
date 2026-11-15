@@ -3,27 +3,40 @@ import type { Rule } from './rule.js';
 import type { EvaluationTrace } from './trace.js';
 import type { DecisionOutput } from './output.js';
 import type { Diagnostic } from './diagnostic.js';
+import type { PendingRule } from '../engine/ruleOutcome.js';
 
 export type SkipReason =
   /** `meta.effectiveDate` is outside the half-open window `[effectiveFrom, effectiveUntil)`. */
   | 'INACTIVE_DATE'
   /** The rule's DSL condition evaluated to false. */
   | 'CONDITION_FALSE'
-  /** The rule's DSL condition exceeded `timeout.dsl`. */
-  | 'CONDITION_TIMEOUT'
-  /** The rule's DSL condition threw. */
+  /**
+   * The rule's DSL condition threw.
+   * @deprecated core reports it as a pending ERROR (`PendingRule`), never as an exclusion; the
+   * reason stays in the type for the skips plugins return.
+   */
   | 'DSL_ERROR'
-  /** No DSL evaluator is registered for the rule's `condition.dsl`. */
+  /**
+   * No DSL evaluator is registered for the rule's `condition.dsl`.
+   * @deprecated core reports it as a pending ERROR, never as an exclusion.
+   */
   | 'DSL_NOT_FOUND'
-  /** The rule's `checksum` differs from the checksum of its content. */
+  /**
+   * The rule's `checksum` differs from the checksum of its content.
+   * @deprecated core reports it as a pending ERROR, never as an exclusion.
+   */
   | 'CHECKSUM_MISMATCH'
   /**
    * Malformed rule, checksum unverifiable: invalid or zone-less date, `effectiveUntil <=
    * effectiveFrom`, absent or non-string `checksum`, non-integer `version`, non-JSON value...
    * `detail` names the rule (`id@version`) and the reason.
+   * @deprecated core reports it as a pending ERROR, never as an exclusion.
    */
   | 'INVALID_RULE'
-  /** A registered model refused the rule's params. */
+  /**
+   * A registered model refused the rule's params.
+   * @deprecated core reports it as a pending ERROR, never as an exclusion.
+   */
   | 'INVALID_PARAMS'
   /** The rule's tags do not intersect the input's `meta.tags`. */
   | 'TAG_MISMATCH'
@@ -38,6 +51,7 @@ export type SkipReason =
   /**
    * The rule's output declaration differs from another rule's for the same output, or the value it
    * computed does not match the declared type; `detail` says which.
+   * @deprecated core reports it as a pending ERROR, never as an exclusion.
    */
   | 'OUTPUT_MISMATCH'
   /**
@@ -64,6 +78,7 @@ export type SkipReason =
   /**
    * A model wrote into its frozen arguments (the rule, its params or the input): that rule is
    * excluded and `detail` says `wrote to its input: ...`.
+   * @deprecated core reports it as a pending ERROR, never as an exclusion.
    */
   | 'MODEL_ERROR';
 
@@ -88,8 +103,24 @@ export interface SkippedRule {
   readonly reason: SkipReason;
   /**
    * Why, when the reason alone does not say it (e.g. the `SpecError` of an `INVALID_RULE`). The
-   * engine always sets it; it stays optional for the skips plugins return.
+   * engine always sets it; it stays optional for the skips plugins return (`PluginSkip`).
    */
+  readonly detail?: string | undefined;
+  /**
+   * The engine's own text for the proof (D-40): built from labels, names, pointers, codes and the
+   * rule's own bounds only, never from an input value or from text a plugin produced. Required:
+   * every skip the engine records has one.
+   */
+  readonly proofDetail: string;
+}
+
+/**
+ * What a plugin returns as a skip from `beforeEvaluate`: the rule, the reason (`PLUGIN` only) and
+ * its own words. It carries no `proofDetail`: the engine writes `skipped by plugin <name>`.
+ */
+export interface PluginSkip {
+  readonly rule: Rule;
+  readonly reason: SkipReason;
   readonly detail?: string | undefined;
 }
 
@@ -102,6 +133,17 @@ export interface EvaluationResult {
   readonly breakdown: readonly BreakdownItem[];
   readonly appliedRules: readonly Rule[];
   readonly skippedRules: readonly SkippedRule[];
+  /**
+   * The rules whose decision the engine does not know, sorted by `id@version`: each with its
+   * reason, its raw `detail`, its `proofDetail` and the facts it lacks. A rule is in exactly one of
+   * `appliedRules`, `skippedRules` and `pendingRules`. Frozen; `afterEvaluate` cannot change it.
+   */
+  readonly pendingRules: readonly PendingRule[];
+  /**
+   * The labels (`id@version`) of the rules whose reads are not declared (D-39), sorted by
+   * `id@version`, each once. Frozen.
+   */
+  readonly readsUndeclared: readonly string[];
   readonly trace: EvaluationTrace;
   /** What went wrong without stopping the evaluation (hook errors...). */
   readonly diagnostics: readonly Diagnostic[];
@@ -130,4 +172,12 @@ export interface EvaluationResult {
  * and its `fromStore`. Derived from `EvaluationResult`, so every other member stays in sync; Task
  * 10 deletes this alias and the engine returns `EvaluationResult`.
  */
-export type UnsealedResult = Omit<EvaluationResult, 'proof' | 'fromStore'>;
+export type UnsealedResult = Omit<
+  EvaluationResult,
+  'proof' | 'fromStore' | 'pendingRules' | 'readsUndeclared'
+> &
+  /**
+   * In this stacked change the engine does not fill the two lists yet (`PPEEngine.ts` is not
+   * touched until the hand-back): they are optional here and required on `EvaluationResult`.
+   */
+  Partial<Pick<EvaluationResult, 'pendingRules' | 'readsUndeclared'>>;

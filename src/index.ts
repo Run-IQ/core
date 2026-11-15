@@ -8,8 +8,14 @@ export type {
   BreakdownItem,
   SkippedRule,
   SkipReason,
+  PluginSkip,
 } from './types/result.js';
 export type { OutputValue, DecisionOutput } from './types/output.js';
+export type { RuleState, PendingReason, PendingRule } from './engine/ruleOutcome.js';
+export { ERROR_CAUSES } from '@run-iq/spec';
+export type { ErrorCause } from '@run-iq/spec';
+export { isUndetermined } from './engine/undetermined.js';
+export type { UndeterminedResult } from './engine/undetermined.js';
 export type { Diagnostic } from './types/diagnostic.js';
 export type { DecisionStore } from './types/store.js';
 export type { OutputType, CombineStrategy, OutputDeclaration, DecisionProof } from '@run-iq/spec';
@@ -30,6 +36,8 @@ export type {
 export type {
   DSLEvaluator,
   DSLCapabilities,
+  TruthValue,
+  TruthResult,
   DSLSyntaxDoc,
   DSLOperatorDoc,
   DSLExampleDoc,
@@ -76,6 +84,7 @@ export {
   buildContext,
   formatPointer,
   parsePointer,
+  undetermined,
 } from './guardedApi.js';
 export { VERSION } from './utils/version.js';
 export { DEFAULT_LIMITS } from './limits.js';

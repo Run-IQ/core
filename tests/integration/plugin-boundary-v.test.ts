@@ -166,7 +166,7 @@ describe('V1: the declarations a model gives are copied when it is registered', 
   });
 
   it("Vj3: an evaluator's capabilities are a frozen copy taken at registration", () => {
-    const capabilities = { pure: true };
+    const capabilities = { exactDecimals: true };
     const evaluator = {
       dsl: 'cap',
       version: '1.0.0',
@@ -175,9 +175,11 @@ describe('V1: the declarations a model gives are copied when it is registered', 
     } as unknown as DSLEvaluator;
     const registry = new DSLRegistry();
     registry.register(evaluator);
-    (capabilities as { pure: boolean }).pure = false;
+    (capabilities as { exactDecimals: boolean }).exactDecimals = false;
     const fixed = snapshotDsls(registry).get('cap');
-    expect((fixed as unknown as { capabilities: unknown }).capabilities).toEqual({ pure: true });
+    expect((fixed as unknown as { capabilities: unknown }).capabilities).toEqual({
+      exactDecimals: true,
+    });
     expect(Object.isFrozen((fixed as unknown as { capabilities: unknown }).capabilities)).toBe(
       true,
     );
