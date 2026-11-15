@@ -1,5 +1,5 @@
 import { PPEError } from './PPEError.js';
-import { checkArgs } from './args.js';
+import { str } from './args.js';
 import { markEngineError, sealEngineError } from './engineError.js';
 
 /**
@@ -9,7 +9,7 @@ import { markEngineError, sealEngineError } from './engineError.js';
  */
 export class FrozenViewWriteError extends PPEError {
   constructor(readonly key: string) {
-    checkArgs('FrozenViewWriteError', [[key, 's']]);
+    key = str('FrozenViewWriteError', 0, key);
     super(`wrote to its input: ${key}`, 'FROZEN_VIEW_WRITE');
     this.name = 'FrozenViewWriteError';
     // Frozen at creation: what the caller receives cannot be changed (B74).

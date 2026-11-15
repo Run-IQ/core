@@ -1,5 +1,7 @@
+import { types } from 'node:util';
 import { EngineConfigError } from '../errors/EngineConfigError.js';
 import { isEngineError } from '../errors/engineError.js';
+import type { ISnapshotAdapter, Snapshot } from '../types/snapshot.js';
 import { copyCallerValue } from './callerCopy.js';
 import { resolveLimits } from '../limits.js';
 import type { EngineLimits } from '../limits.js';
@@ -30,7 +32,7 @@ const MAX_DELAY_MS = 2 ** 31 - 1;
 export interface ReadConfig {
   readonly plugins: readonly unknown[];
   readonly dsls: readonly unknown[];
-  readonly snapshot: unknown;
+  readonly snapshot: ISnapshotAdapter | undefined;
   readonly strict: boolean | undefined;
   readonly timeout: { dsl?: number; hook?: number; pipeline?: number };
   readonly onConflict: 'throw' | 'first' | undefined;
@@ -108,18 +110,7 @@ function read(given: unknown): ReadConfig {
     }
   }
 
-  const snapshot = value('snapshot');
-  if (snapshot !== undefined) {
-    if (typeof snapshot !== 'object' || snapshot === null) {
-      throw new EngineConfigError('/snapshot', 'must be an adapter object');
-    }
-    const adapter = snapshot as Record<string, unknown>;
-    for (const method of ['exists', 'save'] as const) {
-      if (typeof adapter[method] !== 'function') {
-        throw new EngineConfigError(`/snapshot/${method}`, 'must be a function');
-      }
-    }
-  }
+  const snapshot = captureAdapter(value('snapshot'));
   const onSnapshotError = value('onSnapshotError');
   if (onSnapshotError !== undefined && typeof onSnapshotError !== 'function') {
     throw new EngineConfigError('/onSnapshotError', 'must be a function');
@@ -172,4 +163,43 @@ function readSeed(given: unknown): InputSeedConfig | undefined {
   } catch (error) {
     return asConfigError('/inputSeed', error);
   }
+}
+
+/** A data property that is a function, own or inherited, by descriptor: an accessor is never run. */
+function dataFunction(source: object, key: string, path: string): (...args: never[]) => unknown {
+  let holder: object | null = source;
+  for (let depth = 0; holder !== null && depth < 16; depth += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(holder, key);
+    if (descriptor !== undefined) {
+      if (!('value' in descriptor)) {
+        throw new EngineConfigError(path, 'must be a data property, not an accessor');
+      }
+      if (typeof descriptor.value !== 'function')
+        throw new EngineConfigError(path, 'must be a function');
+      return descriptor.value as (...args: never[]) => unknown;
+    }
+    holder = Object.getPrototypeOf(holder) as object | null;
+  }
+  throw new EngineConfigError(path, 'must be a function');
+}
+
+/**
+ * The snapshot adapter is a class instance by design, so it is not copied; it crosses here, once:
+ * a Proxy is refused, `exists` and `save` are captured by descriptor (own or inherited data
+ * functions, an accessor refused) and the engine keeps an object of its own that calls those
+ * captured functions on the adapter. The function checked is the function called, at every
+ * evaluation; a fault is named at `/snapshot/<method>`.
+ */
+function captureAdapter(given: unknown): ISnapshotAdapter | undefined {
+  if (given === undefined) return undefined;
+  if (typeof given !== 'object' || given === null) {
+    throw new EngineConfigError('/snapshot', 'must be an adapter object');
+  }
+  if (types.isProxy(given)) throw new EngineConfigError('/snapshot', 'must not be a Proxy');
+  const exists = dataFunction(given, 'exists', '/snapshot/exists');
+  const save = dataFunction(given, 'save', '/snapshot/save');
+  return Object.freeze({
+    exists: (requestId: string) => Reflect.apply(exists, given, [requestId]) as Promise<boolean>,
+    save: (snapshot: Snapshot) => Reflect.apply(save, given, [snapshot]) as Promise<string>,
+  }) as unknown as ISnapshotAdapter;
 }

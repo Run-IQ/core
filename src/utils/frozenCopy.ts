@@ -1,3 +1,4 @@
+import { types } from 'node:util';
 import { isEngineErrorPrototype } from '../errors/engineError.js';
 import { clipText } from './weight.js';
 
@@ -90,7 +91,7 @@ function copy(value: unknown, depth: number, state: State): unknown {
       return Object.freeze(out);
     }
     const prototype: unknown = Object.getPrototypeOf(value);
-    const isError = value instanceof Error;
+    const isError = types.isNativeError(value);
     const plain = prototype === null || prototype === Object.prototype;
     if (!isError && !plain) return describe(value);
     const keep = isError && (INTRINSIC_ERRORS.has(prototype) || isEngineErrorPrototype(prototype));

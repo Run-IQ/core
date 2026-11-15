@@ -1,5 +1,5 @@
 import { PPEError } from './PPEError.js';
-import { checkArgs } from './args.js';
+import { num, strings } from './args.js';
 import { markEngineError, sealEngineError } from './engineError.js';
 
 export class RuleConflictError extends PPEError {
@@ -7,10 +7,8 @@ export class RuleConflictError extends PPEError {
     public readonly ruleIds: readonly string[],
     public readonly priority: number,
   ) {
-    checkArgs('RuleConflictError', [
-      [ruleIds, 'S'],
-      [priority, 'n'],
-    ]);
+    ruleIds = strings('RuleConflictError', 0, ruleIds);
+    priority = num('RuleConflictError', 1, priority);
     super(
       `Rule conflict: rules [${ruleIds.join(', ')}] have the same priority ${priority}`,
       'RULE_CONFLICT',

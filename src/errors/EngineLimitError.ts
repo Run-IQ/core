@@ -1,5 +1,6 @@
 import { PPEError } from './PPEError.js';
-import { checkArgs } from './args.js';
+import { num, oneOf, optStr } from './args.js';
+import { DEFAULT_LIMITS } from '../limits.js';
 import type { EngineLimits } from '../limits.js';
 import { isEngineErrorNamed, markEngineError, sealEngineError } from './engineError.js';
 import { raised } from '../engine/trust.js';
@@ -29,13 +30,16 @@ export class EngineLimitError extends PPEError {
     pointer?: string,
     source?: string,
   ) {
-    checkArgs('EngineLimitError', [
-      [limit, 's'],
-      [max, 'n'],
-      [actual, 'n'],
-      [pointer, 's?'],
-      [source, 's?'],
-    ]);
+    limit = oneOf(
+      'EngineLimitError',
+      0,
+      limit,
+      Object.keys(DEFAULT_LIMITS) as Array<keyof EngineLimits>,
+    );
+    max = num('EngineLimitError', 1, max);
+    actual = num('EngineLimitError', 2, actual);
+    pointer = optStr('EngineLimitError', 3, pointer);
+    source = optStr('EngineLimitError', 4, source);
     // A pointer can be as long as the key that is refused: it is cut on a code point, with the
     // visible marker, as spec cuts its issue text (B92).
     const shown =

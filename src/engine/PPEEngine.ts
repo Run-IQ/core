@@ -171,7 +171,7 @@ export class PPEEngine {
       this.dominanceResolver = new DominanceResolver();
 
       this.snapshotManager = new SnapshotManager(
-        this.dryRun ? null : ((config.snapshot as ISnapshotAdapter | undefined) ?? null),
+        this.dryRun ? null : (config.snapshot ?? null),
         this.strict,
         config.onSnapshotError,
       );

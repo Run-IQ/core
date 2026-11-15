@@ -440,8 +440,8 @@ describe('AJ4: the exported classes and methods', () => {
     for (let index = 0; index < 20_000; index += 1) limits[`k${index}`] = 1;
     const error = outcome(() => core.resolveLimits(limits as never)) as errors.ValidationError;
     expect(error).toBeInstanceOf(errors.ValidationError);
-    expect(error.reasons).toHaveLength(errors.ValidationError.length === 0 ? 51 : 51);
-    expect(error.reasons[50]).toBe('... and 19950 more');
+    expect(error.reasons).toHaveLength(101);
+    expect(error.reasons[100]).toBe('... and 19900 more');
     expect(error.reasons.join('').length).toBeLessThan(2000);
   });
 });

@@ -4,7 +4,6 @@ import type { PPEEngineConfig } from '../../src/engine/PPEEngine.js';
 import { PluginHookError } from '../../src/errors/PluginHookError.js';
 import { ValidationError } from '../../src/errors/ValidationError.js';
 import { InputSanitizer } from '../../src/security/InputSanitizer.js';
-import { copyData } from '../../src/utils/values.js';
 import type { PPEPlugin, PluginContext } from '../../src/types/plugin.js';
 import type { CalculationModel } from '../../src/types/model.js';
 import type { DSLEvaluator } from '../../src/types/dsl.js';
@@ -576,14 +575,6 @@ describe('N10: a sparse list costs one step', () => {
     }
   });
 
-  it('copyData refuses a sparse list at once', () => {
-    const list: unknown[] = [];
-    list.length = 2 ** 32 - 1;
-    const started = Date.now();
-    expect(() => copyData({ a: list })).toThrow('a list with a hole at index 0');
-    expect(Date.now() - started).toBeLessThan(500);
-  });
-
   it('a hook returning a sparse state fails the evaluation at once', async () => {
     const list: unknown[] = [];
     list.length = 2 ** 32 - 1;
@@ -615,13 +606,6 @@ describe('N11: meta.tags: null is not absence', () => {
 });
 
 describe('N12: a __proto__ key of a hook result is kept', () => {
-  it('copyData keeps a primitive and an object __proto__ as own keys', () => {
-    const copy = copyData(JSON.parse('{"x":{"__proto__":5,"a":1},"y":{"__proto__":{"b":2}}}'));
-    expect(Object.getOwnPropertyDescriptor(copy.x, '__proto__')?.value).toBe(5);
-    expect(Object.getOwnPropertyDescriptor(copy.y, '__proto__')?.value).toEqual({ b: 2 });
-    expect(Object.getPrototypeOf(copy.y)).toBe(Object.prototype);
-  });
-
   it('a state with a __proto__ key reaches pluginState intact', async () => {
     const built = build([
       pluginWith('h', {

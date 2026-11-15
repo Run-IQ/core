@@ -1,5 +1,5 @@
 import { PPEError } from './PPEError.js';
-import { checkArgs } from './args.js';
+import { str } from './args.js';
 import { markEngineError, sealEngineError } from './engineError.js';
 
 /**
@@ -14,12 +14,13 @@ export class ExceptionPrecedenceError extends PPEError {
     inhibitor: string,
     target: string,
   ) {
-    checkArgs('ExceptionPrecedenceError', [
-      [inhibitorId, 's'],
-      [targetId, 's'],
-      [inhibitor, 's'],
-      [target, 's'],
-    ]);
+    // The parameter properties are assigned from these checked values right after `super`.
+    // eslint-disable-next-line no-useless-assignment
+    inhibitorId = str('ExceptionPrecedenceError', 0, inhibitorId);
+    // eslint-disable-next-line no-useless-assignment
+    targetId = str('ExceptionPrecedenceError', 1, targetId);
+    inhibitor = str('ExceptionPrecedenceError', 2, inhibitor);
+    target = str('ExceptionPrecedenceError', 3, target);
     super(
       `Exception precedence conflict: ${inhibitor} inhibits ${target}, which takes precedence and already fired`,
       'EXCEPTION_PRECEDENCE',

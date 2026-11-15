@@ -1,5 +1,6 @@
+import { isSpecError } from '../utils/brand.js';
 import { types } from 'node:util';
-import { SpecError, verifyRuleChecksum } from '@run-iq/spec';
+import { verifyRuleChecksum } from '@run-iq/spec';
 import type { Rule } from '../types/rule.js';
 import type { SkippedRule } from '../types/result.js';
 import type { EngineLimits } from '../limits.js';
@@ -71,16 +72,21 @@ export class ReadFailure extends Error {
  */
 const CAUSES = new WeakMap<object, readonly unknown[]>();
 
+/** The failed reads and malformed results the engine created, by identity (never `instanceof`). */
+const READ_FAILURES = new WeakSet<object>();
+const MALFORMED = new WeakSet<object>();
+
 /** A failed read, raised by the engine in this call, with what the properties threw. */
 function readFailure(message: string, causes: readonly unknown[]): ReadFailure {
   const failure = Object.freeze(raised(new ReadFailure(clipFault(message))));
+  READ_FAILURES.add(failure);
   CAUSES.set(failure, causes);
   return failure;
 }
 
 /** True for a failed read the engine raised in this call. */
 export function isReadFailure(value: unknown): value is ReadFailure {
-  return value instanceof ReadFailure;
+  return typeof value === 'object' && value !== null && READ_FAILURES.has(value);
 }
 
 /** What the properties threw while the failed value was read, in order (empty if nothing threw). */
@@ -399,7 +405,7 @@ function intact(rule: Rule): boolean {
   try {
     return verifyRuleChecksum(rule);
   } catch (error) {
-    if (!(error instanceof SpecError)) throw error;
+    if (!isSpecError(error)) throw error;
     return false;
   }
 }
@@ -644,12 +650,14 @@ export class MalformedResult extends Error {
 
 /** A malformed result, raised by the engine in this call. */
 function malformed(message: string): MalformedResult {
-  return Object.freeze(raised(new MalformedResult(clipFault(message))));
+  const failure = Object.freeze(raised(new MalformedResult(clipFault(message))));
+  MALFORMED.add(failure);
+  return failure;
 }
 
 /** True for a malformed result the engine raised in this call. */
 export function isMalformed(value: unknown): value is MalformedResult {
-  return value instanceof MalformedResult;
+  return typeof value === 'object' && value !== null && MALFORMED.has(value);
 }
 
 /** What the engine took from a `validateParams`. */

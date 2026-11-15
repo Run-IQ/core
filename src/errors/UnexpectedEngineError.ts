@@ -1,5 +1,5 @@
 import { PPEError } from './PPEError.js';
-import { checkArgs } from './args.js';
+import { optStr } from './args.js';
 import { describeFault, faultOf, trustedFault } from '../engine/pluginPort.js';
 import { isEngineError, markEngineError, sealEngineError } from './engineError.js';
 
@@ -13,10 +13,7 @@ export class UnexpectedEngineError extends PPEError {
   override readonly cause: unknown;
 
   constructor(cause: unknown, message?: string) {
-    checkArgs('UnexpectedEngineError', [
-      [cause, '*'],
-      [message, 's?'],
-    ]);
+    message = optStr('UnexpectedEngineError', 1, message);
     // Only text is read from a foreign thrown value (own data strings, bounded): none of its
     // conversion code (`toString`, `Symbol.toPrimitive`) is ever run.
     const engine = isEngineError(cause);

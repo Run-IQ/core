@@ -1,14 +1,11 @@
 import { faultOf } from '../engine/pluginPort.js';
 import { PPEError } from './PPEError.js';
-import { checkArgs } from './args.js';
+import { oneOf } from './args.js';
 import { markEngineError, sealEngineError } from './engineError.js';
 
 export class SnapshotFailureError extends PPEError {
   constructor(original: unknown, operation: 'save' | 'exists' = 'save') {
-    checkArgs('SnapshotFailureError', [
-      [original, '*'],
-      [operation, 's'],
-    ]);
+    operation = oneOf('SnapshotFailureError', 1, operation, ['save', 'exists'] as const);
     super(
       operation === 'save' ? 'Snapshot save failed in strict mode' : 'Snapshot exists check failed',
       'SNAPSHOT_FAILURE',

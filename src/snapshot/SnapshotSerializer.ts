@@ -1,3 +1,4 @@
+import { isErrorNamed } from '../utils/brand.js';
 import { createHash } from 'node:crypto';
 import { randomUUID } from 'node:crypto';
 import type { EvaluationInput } from '../types/input.js';
@@ -27,7 +28,7 @@ export class SnapshotSerializer {
       try {
         return structuredClone(value);
       } catch (error) {
-        if (error instanceof RangeError) return tooLong();
+        if (isErrorNamed(error, 'RangeError')) return tooLong();
         throw error;
       }
     };
@@ -61,7 +62,7 @@ export class SnapshotSerializer {
     try {
       text = JSON.stringify(snapshotWithoutChecksum);
     } catch (error) {
-      if (!(error instanceof RangeError)) throw error;
+      if (!isErrorNamed(error, 'RangeError')) throw error;
       return tooLong();
     }
     if (text.length > maxRecordLength) {

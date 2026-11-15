@@ -1,5 +1,5 @@
 import { PPEError } from './PPEError.js';
-import { checkArgs } from './args.js';
+import { optStr, str } from './args.js';
 import { markEngineError, sealEngineError } from './engineError.js';
 import { clipText } from '../utils/weight.js';
 
@@ -13,10 +13,8 @@ export class ChecksumMismatchError extends PPEError {
   public readonly pointer: string | undefined;
 
   constructor(rule: string, pointer?: string) {
-    checkArgs('ChecksumMismatchError', [
-      [rule, 's'],
-      [pointer, 's?'],
-    ]);
+    rule = str('ChecksumMismatchError', 0, rule);
+    pointer = optStr('ChecksumMismatchError', 1, pointer);
     const shown = clipText(rule, 256, '... [clipped]');
     super(
       `Checksum mismatch for rule ${shown}${pointer === undefined ? '' : ` at ${pointer}`}`,

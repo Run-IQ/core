@@ -1,3 +1,5 @@
+import { describeThrown } from '../utils/values.js';
+import { isSpecError } from '../utils/brand.js';
 import { ViewScope } from './frozenView.js';
 import { clipFault, describeFault } from './pluginPort.js';
 import type { Rule } from '../types/rule.js';
@@ -168,7 +170,7 @@ export class RuleFilter {
     } catch (error) {
       // The rule's own fault (a bound spec refuses, a civil bound with an IANA zone): it is
       // skipped; the others go on.
-      if (!(error instanceof SpecError)) throw error;
+      if (!isSpecError(error)) throw error;
       return invalidRule(rule, error);
     }
     if (!active) {
@@ -207,7 +209,7 @@ export class RuleFilter {
         try {
           match = matchDimension(spec, actual, on, NO_REFERENTIALS);
         } catch (error) {
-          if (!(error instanceof SpecError)) throw error;
+          if (!isSpecError(error)) throw error;
           // An input value spec cannot read is the input's fault: the evaluation is rejected
           // with spec's error, unchanged. Anything else is the rule's (a spec or a referential
           // it names): the rule is skipped, never counted as a mismatch.
@@ -273,9 +275,7 @@ export class RuleFilter {
         // The text of a fault is cut on a code point here too: a verdict that cannot be read gives
         // a failure that joins the reason of every property, and none of it is longer than this.
         // A refused write into a view is told by the slot of this call, not by what was thrown.
-        const detail = clipFault(
-          views.wrote ?? text ?? (error instanceof Error ? error.message : String(error)),
-        );
+        const detail = clipFault(views.wrote ?? text ?? describeThrown(error));
         // The text of a plugin's fault is in the record: it is weighed like the rest.
         this.crossing.budget.addText(detail);
         return { reason: 'DSL_ERROR', detail };

@@ -1,5 +1,5 @@
 import { PPEError } from './PPEError.js';
-import { checkArgs } from './args.js';
+import { num, str } from './args.js';
 import { markEngineError, sealEngineError } from './engineError.js';
 
 export class DSLTimeoutError extends PPEError {
@@ -7,10 +7,8 @@ export class DSLTimeoutError extends PPEError {
     public readonly dslName: string,
     public readonly timeoutMs: number,
   ) {
-    checkArgs('DSLTimeoutError', [
-      [dslName, 's'],
-      [timeoutMs, 'n'],
-    ]);
+    dslName = str('DSLTimeoutError', 0, dslName);
+    timeoutMs = num('DSLTimeoutError', 1, timeoutMs);
     super(`DSL "${dslName}" evaluation timed out after ${timeoutMs}ms`, 'DSL_TIMEOUT');
     this.name = 'DSLTimeoutError';
     // Frozen at creation: what the caller receives cannot be changed (B74).

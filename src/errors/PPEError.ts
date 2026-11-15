@@ -1,3 +1,4 @@
+import { clipText } from '../utils/weight.js';
 import { markEngineError, sealEngineError } from './engineError.js';
 /**
  * The failures of the `onError` hooks the engine attached to an error: held outside it, so that an
@@ -12,6 +13,9 @@ export function attachOnErrorFailure(error: unknown, failure: Error): void {
   if (held === undefined) ON_ERROR_FAILURES.set(error, [failure]);
   else held.push(failure);
 }
+
+/** The most characters any engine error message holds (code points, then the marker). */
+export const MAX_MESSAGE = 2048;
 
 export class PPEError extends Error {
   /**
@@ -28,8 +32,16 @@ export class PPEError extends Error {
     message: string,
     public readonly code: string,
   ) {
-    // Anything that is not a string is shown as a fixed text: no conversion of it is ever run.
-    super(typeof message === 'string' ? message : 'invalid error message');
+    // Anything that is not a string is shown as a fixed text (no conversion of it is ever run), and
+    // every message is held to one declared bound, whatever list or key it was built from (B92).
+    super(
+      typeof message === 'string'
+        ? clipText(message, MAX_MESSAGE, '... [clipped]')
+        : 'invalid error message',
+    );
+    // The code is a string too (a fixed code otherwise).
+    // eslint-disable-next-line no-useless-assignment -- the parameter property is assigned from it
+    if (typeof code !== 'string') code = 'INVALID_ARGUMENT';
     this.name = 'PPEError';
     Object.setPrototypeOf(this, new.target.prototype);
     // A subclass freezes itself once its own fields are set; a bare PPEError is complete here (B74).

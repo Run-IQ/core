@@ -1,5 +1,5 @@
 import { PPEError } from './PPEError.js';
-import { checkArgs } from './args.js';
+import { num, str } from './args.js';
 import { markEngineError, sealEngineError } from './engineError.js';
 
 /**
@@ -14,10 +14,8 @@ export class DecimalPrecisionError extends PPEError {
     /** The most digits a decimal may span. */
     public readonly limit: number,
   ) {
-    checkArgs('DecimalPrecisionError', [
-      [output, 's'],
-      [limit, 'n'],
-    ]);
+    output = str('DecimalPrecisionError', 0, output);
+    limit = num('DecimalPrecisionError', 1, limit);
     super(
       `Output ${output} holds a decimal spanning more than ${limit} digits: the decision is refused rather than rounded`,
       'DECIMAL_PRECISION',

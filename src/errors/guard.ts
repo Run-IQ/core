@@ -24,13 +24,15 @@ export function guard<F extends (...args: never[]) => unknown>(
   name: string,
   fn: F,
   /** Copy every argument through the inbound copier first (the data helpers). */
-  copyArgs = false,
+  copyArgs: boolean | readonly number[] = false,
 ): F {
   const guarded = function (this: unknown, ...args: never[]): unknown {
     try {
       const given = copyArgs
         ? args.map((argument, position) =>
-            copyCallerData(argument, `/${name}/argument${position}`, refuseArgument(name)),
+            copyArgs === true || copyArgs.includes(position)
+              ? copyCallerData(argument, `/${name}/${position}`, refuseArgument(name))
+              : argument,
           )
         : args;
       return Reflect.apply(fn, this, given);
@@ -39,19 +41,43 @@ export function guard<F extends (...args: never[]) => unknown>(
     }
   };
   Object.defineProperty(guarded, 'name', { value: fn.name || name });
+  // The arity of the implementation, so that the inventory of parameters can be generated.
+  Object.defineProperty(guarded, 'length', { value: fn.length });
   return guarded as unknown as F;
 }
 
-/** Guards the named methods of a class, in place, so that every instance throws engine errors only. */
+/**
+ * Guards the named methods of a class, in place, so that every instance throws engine errors only.
+ * `publicName` is the name the package exports the class under (the bundle may rename the local
+ * one); `brand` tells an instance the class built, so a detached call is a named error; the
+ * methods in `stringArgument` take one string and refuse anything else, named.
+ */
 export function guardMethods(
-  cls: { prototype: object; name: string },
+  cls: { prototype: object },
   names: readonly string[],
+  publicName: string,
+  brand: WeakSet<object>,
+  stringArgument: readonly string[] = [],
 ): void {
   for (const method of names) {
     const original = (cls.prototype as Record<string, unknown>)[method];
-    if (typeof original !== 'function') throw new Error(`${cls.name}.${method} is not a method`);
+    if (typeof original !== 'function') throw new Error(`${publicName}.${method} is not a method`);
+    const name = `${publicName}.${method}`;
+    const inner = guard(name, original as (...args: never[]) => unknown);
     Object.defineProperty(cls.prototype, method, {
-      value: guard(`${cls.name}.${method}`, original as (...args: never[]) => unknown),
+      value: function (this: unknown, ...args: unknown[]): unknown {
+        if (typeof this !== 'object' || this === null || !brand.has(this)) {
+          throw new ValidationError(`${name} called on something that is not a ${publicName}`, [
+            `${name} must be called on a ${publicName}`,
+          ]);
+        }
+        if (stringArgument.includes(method) && typeof args[0] !== 'string') {
+          throw new ValidationError(`${name}: argument 0 must be a string`, [
+            `/${name}/0 must be a string`,
+          ]);
+        }
+        return Reflect.apply(inner, this, args);
+      },
       writable: true,
       configurable: true,
     });

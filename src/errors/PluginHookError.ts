@@ -1,5 +1,5 @@
 import { PPEError } from './PPEError.js';
-import { checkArgs } from './args.js';
+import { oneOf, str } from './args.js';
 import { describeThrown } from '../utils/values.js';
 import { clip, frozenErrorCopy } from '../utils/frozenCopy.js';
 import { describeFault, faultOf, trustedFault } from '../engine/pluginPort.js';
@@ -30,11 +30,13 @@ export class PluginHookError extends PPEError {
     public readonly hook: HookName,
     cause: unknown,
   ) {
-    checkArgs('PluginHookError', [
-      [plugin, 's'],
-      [hook, 's'],
-      [cause, '*'],
-    ]);
+    plugin = str('PluginHookError', 0, plugin);
+    hook = oneOf('PluginHookError', 1, hook, [
+      'onInit',
+      'beforeEvaluate',
+      'afterEvaluate',
+      'onError',
+    ] as const);
     // What the plugin threw is held as text, read once (see `faultOf`). So is a limit passed while
     // reading what the plugin returned (the plugin's return is the fault: the text names the limit,
     // its maximum and the pointer) and any refusal of the engine's internal classes, which never

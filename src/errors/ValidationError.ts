@@ -1,27 +1,21 @@
 import { PPEError } from './PPEError.js';
-import { checkArgs } from './args.js';
+import { MAX_ARGUMENT_ITEMS, str, strings } from './args.js';
 import { markEngineError, sealEngineError } from './engineError.js';
 
 /** The most reasons a `ValidationError` lists; the rest are counted. */
-export const MAX_REASONS = 50;
+export const MAX_REASONS = MAX_ARGUMENT_ITEMS;
 
 export class ValidationError extends PPEError {
   public readonly reasons: readonly string[];
 
   constructor(message: string, reasons: readonly string[]) {
-    checkArgs('ValidationError', [
-      [message, 's'],
-      [reasons, 'S'],
-    ]);
+    message = str('ValidationError', 0, message, 1024);
+    reasons = strings('ValidationError', 1, reasons);
     super(message, 'VALIDATION_ERROR');
     this.name = 'ValidationError';
     // Frozen at creation, the list included: what the caller receives cannot be changed (B74).
-    // Bounded: the first MAX_REASONS, then how many more there were (a 20 000-key input gives a short list).
-    this.reasons = Object.freeze(
-      reasons.length <= MAX_REASONS
-        ? [...reasons]
-        : [...reasons.slice(0, MAX_REASONS), `... and ${reasons.length - MAX_REASONS} more`],
-    );
+    // Already bounded by `strings`: the first MAX_ARGUMENT_ITEMS, each clipped, then `... and K more`.
+    this.reasons = reasons;
     sealEngineError(this, new.target, ValidationError);
   }
 }

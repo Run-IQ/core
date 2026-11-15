@@ -1,3 +1,5 @@
+import { describeThrown } from '../utils/values.js';
+import { isErrorNamed } from '../utils/brand.js';
 import type { JsonValue } from '@run-iq/spec';
 import { refusal } from './pluginPort.js';
 import type { EngineLimits } from '../limits.js';
@@ -85,7 +87,7 @@ function readResult(
     records = readSkips(skippedIn ?? [], limits, budget, owned);
   } catch (error) {
     // A refusal of the reader says what is wrong (and where): it is kept, with the plugin named.
-    if (error instanceof TypeError) throw refuse(error.message);
+    if (isErrorNamed(error, 'TypeError')) throw refuse(describeThrown(error));
     throw error;
   }
   const skipped: SkippedRule[] = records.map((record) => {

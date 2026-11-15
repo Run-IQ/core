@@ -1,5 +1,5 @@
 import { PPEError } from './PPEError.js';
-import { checkArgs } from './args.js';
+import { str } from './args.js';
 import { markEngineError, sealEngineError } from './engineError.js';
 import { describeFault, faultOf, type PluginFault } from '../engine/pluginPort.js';
 
@@ -11,10 +11,7 @@ export class DSLEvaluationError extends PPEError {
     public readonly dslName: string,
     originalError: unknown,
   ) {
-    checkArgs('DSLEvaluationError', [
-      [dslName, 's'],
-      [originalError, '*'],
-    ]);
+    dslName = str('DSLEvaluationError', 0, dslName);
     const fault = faultOf(originalError);
     super(`DSL "${dslName}" evaluation failed: ${describeFault(fault)}`, 'DSL_EVALUATION_ERROR');
     this.originalError = Object.freeze({ ...fault });

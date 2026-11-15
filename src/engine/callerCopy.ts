@@ -1,6 +1,7 @@
 import { types } from 'node:util';
 import { EngineConfigError } from '../errors/EngineConfigError.js';
 import { isEngineError } from '../errors/engineError.js';
+import { clipText } from '../utils/weight.js';
 import { describeFault, faultOf } from './pluginPort.js';
 
 /**
@@ -26,7 +27,8 @@ const ARRAY_PROTOTYPE = Array.prototype;
 const MAX_LIST = 100_000;
 
 function child(path: string, key: string): string {
-  return `${path === '/' ? '' : path}/${key}`;
+  // The key is the caller's: clipped, so no path holds a megabyte of it.
+  return `${path === '/' ? '' : path}/${clipText(key, 128, '... [clipped]')}`;
 }
 
 export function copyCallerValue(

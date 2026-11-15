@@ -1,7 +1,8 @@
+import { isSpecError } from '../utils/brand.js';
 import { refusalsOf } from '../engine/pluginBoundary.js';
 import { askValidateParams, defaultCrossing } from '../engine/pluginBoundary.js';
 import type { Crossing } from '../engine/pluginBoundary.js';
-import { EXCEPTION_MODEL, SpecError, verifyRuleChecksum } from '@run-iq/spec';
+import { EXCEPTION_MODEL, verifyRuleChecksum } from '@run-iq/spec';
 import type { Rule } from '../types/rule.js';
 import type { SkippedRule } from '../types/result.js';
 import type { ModelRegistry } from '../registry/ModelRegistry.js';
@@ -79,7 +80,7 @@ export class RuleValidator {
     try {
       intact = verifyRuleChecksum(rule);
     } catch (error) {
-      if (!(error instanceof SpecError)) throw error;
+      if (!isSpecError(error)) throw error;
       const detail = `Invalid rule ${String(rule.id)}@${String(rule.version)}: ${error.message}`;
       if (this.onChecksumMismatch === 'throw') {
         throw new ValidationError(detail, [detail]);

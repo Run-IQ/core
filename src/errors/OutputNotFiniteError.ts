@@ -1,5 +1,5 @@
 import { PPEError } from './PPEError.js';
-import { checkArgs } from './args.js';
+import { str, strings } from './args.js';
 import { markEngineError, sealEngineError } from './engineError.js';
 
 /**
@@ -12,10 +12,8 @@ export class OutputNotFiniteError extends PPEError {
     /** The ids of the rules whose contributions were combined, by id then version. */
     public readonly contributors: readonly string[],
   ) {
-    checkArgs('OutputNotFiniteError', [
-      [output, 's'],
-      [contributors, 'S'],
-    ]);
+    output = str('OutputNotFiniteError', 0, output);
+    contributors = strings('OutputNotFiniteError', 1, contributors);
     super(
       `Output ${output} is not a finite number; contributors: ${contributors.join(', ')}`,
       'OUTPUT_NOT_FINITE',

@@ -1,5 +1,5 @@
 import { PPEError } from './PPEError.js';
-import { checkArgs } from './args.js';
+import { str } from './args.js';
 import { markEngineError, sealEngineError } from './engineError.js';
 
 /**
@@ -8,7 +8,7 @@ import { markEngineError, sealEngineError } from './engineError.js';
  */
 export class DuplicateRequestError extends PPEError {
   constructor(public readonly requestId: string) {
-    checkArgs('DuplicateRequestError', [[requestId, 's']]);
+    requestId = str('DuplicateRequestError', 0, requestId);
     super(
       `request ${requestId} was already evaluated; its stored decision is returned from Task 10`,
       'DUPLICATE_REQUEST',

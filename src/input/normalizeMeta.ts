@@ -1,4 +1,5 @@
-import { SpecError, toReferenceDate } from '@run-iq/spec';
+import { describeThrown } from '../utils/values.js';
+import { toReferenceDate } from '@run-iq/spec';
 import type { ProofInput } from '@run-iq/spec';
 import { isPlainPrototype } from '../utils/plain.js';
 import { ValidationError } from '../errors/ValidationError.js';
@@ -27,7 +28,7 @@ const sortedUnique = <T>(values: readonly T[]): T[] => [...new Set(values)].sort
 
 /** The reason a date is refused, at its name. */
 function dateReason(where: string, error: unknown): string {
-  return `${where}: ${error instanceof SpecError ? error.message : String(error)}`;
+  return `${where}: ${describeThrown(error)}`;
 }
 
 /**
