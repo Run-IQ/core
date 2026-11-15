@@ -96,8 +96,8 @@ export interface PPEPlugin {
    *   `{ rule, reason, detail? }` with the plugin reason `PLUGIN` and no other (every other
    *   `SkipReason` belongs to the engine's own stages); a `state` that is not JSON (`a state that is not JSON at $.a[1]
    *   (Date)`); a getter that throws. The engine records every skip with `detail` `plugin <name>: <your words>` (`plugin <name>: skipped` when you give none): the record always says which plugin skipped.
-   * - The hook is handed frozen data: a frozen input (with its own copies of the dates in
-   *   `meta`) and a fresh frozen list of the engine's rules. The rules are deep-frozen and hold no
+   * - The hook is handed frozen data: a frozen input (`meta.effectiveDate` and `meta.dates` are canonical
+   *   strings, never a `Date`) and a fresh frozen list of the engine's rules. The rules are deep-frozen and hold no
    *   `Date`: their bounds, `params`, `condition.value` and extension fields are strings (a `Date`
    *   in a rule is written as `YYYY-MM-DDTHH:MM:SS.sssZ` when the engine reads it), so they are
    *   handed as they are. A write throws in strict mode and has no effect otherwise. The engine

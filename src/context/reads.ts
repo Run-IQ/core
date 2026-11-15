@@ -81,6 +81,7 @@ function askListVariables(owner: { readonly listVariables?: unknown }, argument:
   const fn = guarded(() => owner.listVariables);
   if (fn === undefined) return undefined;
   if (typeof fn !== 'function') throw new TypeError('listVariables is not a function');
+  // Cast justified: typeof fn === 'function' was checked; the call goes through the port.
   return callSync(fn as (...args: never[]) => unknown, owner, [argument]);
 }
 
@@ -114,6 +115,7 @@ function computeReads(
       // The length is read ONCE, capped before one item is read, and never read again (a Proxy
       // that answers another length the second time changes nothing): the items are taken by that
       // length, each once, into a list of the engine's own.
+      // Cast justified: Array.isArray(raw) was just checked, inside the same guard.
       const length = guarded(() => (raw as unknown[]).length);
       if (!Number.isSafeInteger(length) || length < 0) {
         throw new TypeError('the list has an invalid length');
@@ -124,6 +126,7 @@ function computeReads(
       const taken: unknown[] = [];
       for (let index = 0; index < length; index += 1) {
         try {
+          // Cast justified: raw is an array (checked above); each item is read once, guarded.
           taken.push(guarded(() => (raw as unknown[])[index]));
         } catch (error) {
           throw new Error(
@@ -133,6 +136,7 @@ function computeReads(
         }
       }
       // What was taken crosses once, through the one reader: copied, bounded, its text weighed.
+      // Cast justified: `taken` is a list of the engine's own, so the reader returns a list.
       const answer = readBounded(taken, crossing.limits, `listVariables of ${source}`, {
         leafLimit: 'maxInputLeaves',
         budget: crossing.budget,
@@ -184,6 +188,7 @@ function computeReads(
         );
         continue;
       }
+      // Cast justified: the item is a string that passed the pointer checks above.
       pointers.add(item as JsonPointer);
       if (variable !== undefined && OUTPUT_VARIABLES.has(variable) && name !== undefined) {
         outputs.add(name);
