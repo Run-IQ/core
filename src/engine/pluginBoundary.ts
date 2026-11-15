@@ -1,3 +1,4 @@
+import { types } from 'node:util';
 import { SpecError, verifyRuleChecksum } from '@run-iq/spec';
 import type { Rule } from '../types/rule.js';
 import type { SkippedRule } from '../types/result.js';
@@ -11,7 +12,7 @@ import { InputCopier } from '../input/copyInput.js';
 import type { RuleValidator } from '../security/RuleValidator.js';
 import { compareRuleIdentity } from './resolveTie.js';
 import { ruleLabel } from '../utils/values.js';
-import { isPlainPrototype } from '../utils/plain.js';
+import { isArrayPrototype, isPlainPrototype } from '../utils/plain.js';
 import { ViewScope } from './frozenView.js';
 import { clip } from '../utils/frozenCopy.js';
 import { clipFault, faultFrom, reading, refusal } from './pluginPort.js';
@@ -171,6 +172,8 @@ export interface ReadOptions {
   readonly ruleMode?: boolean;
   /** Allow an `undefined` member (the default refuses it, with its pointer). */
   readonly allowUndefined?: boolean;
+  /** The value is the CALLER's own: no Proxy, no accessor, plain data only (see `InputCopier`). */
+  readonly callerSide?: boolean;
 }
 
 /**
@@ -212,6 +215,7 @@ function readOnce(
     options.datesAsStrings ?? false,
     options.ruleMode ?? false,
     options.allowUndefined !== true,
+    options.callerSide === true,
   );
   try {
     const copy = copier.copy(value, what);
@@ -252,8 +256,10 @@ export function readItems(
   what: string,
   budget: Budget,
   owned: OwnedRules,
+  /** The list is the CALLER's own: a plain list read by descriptor, no Proxy, no accessor. */
+  callerSide = false,
 ): unknown[] {
-  return guarded(() => readList(value, limits, what, budget, owned));
+  return guarded(() => readList(value, limits, what, budget, owned, callerSide));
 }
 
 function readList(
@@ -262,9 +268,24 @@ function readList(
   what: string,
   budget: Budget,
   owned: OwnedRules,
+  callerSide: boolean,
 ): unknown[] {
   if (!Array.isArray(value)) throw refusal(`${what} is not a list`);
-  const length = value.length;
+  if (callerSide) {
+    if (types.isProxy(value)) throw refusal(`${what} must not be a Proxy`);
+    if (!isArrayPrototype(Object.getPrototypeOf(value))) {
+      throw refusal(`${what} must be a plain list, not an Array subclass`);
+    }
+  }
+  let length: number;
+  if (callerSide) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, 'length');
+    const given: unknown =
+      descriptor !== undefined && 'value' in descriptor ? descriptor.value : undefined;
+    length = typeof given === 'number' ? given : -1;
+  } else {
+    length = value.length;
+  }
   if (!Number.isSafeInteger(length) || length < 0) throw refusal(`${what} has no valid length`);
   if (length > limits.maxRules) throw raiseLimit('maxRules', limits.maxRules, length);
   const items: unknown[] = [];
@@ -272,7 +293,18 @@ function readList(
     if (!Object.hasOwn(value, index)) {
       throw refusal(`${what} has a hole at index ${index}: lists must be dense`);
     }
-    const item: unknown = value[index];
+    let item: unknown;
+    if (callerSide) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, index);
+      if (descriptor === undefined) throw refusal(`${what}/${index} is not an own item`);
+      if (!('value' in descriptor)) {
+        throw refusal(`${what}/${index} must be a data property, not an accessor`);
+      }
+      if (descriptor.enumerable !== true) throw refusal(`${what}/${index} is not enumerable`);
+      item = descriptor.value;
+    } else {
+      item = value[index];
+    }
     if (typeof item === 'object' && item !== null && owned.has(item)) {
       items.push(item);
       continue;
@@ -283,8 +315,12 @@ function readList(
         budget,
         datesAsStrings: true,
         ruleMode: true,
+        callerSide,
       }),
     );
+  }
+  if (callerSide && Reflect.ownKeys(value).length !== length + 1) {
+    throw refusal(`${what} has an extra key: a list has its items and its length only`);
   }
   return items;
 }

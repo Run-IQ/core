@@ -1,8 +1,9 @@
+import { types } from 'node:util';
 import { raiseLimit } from '../errors/EngineLimitError.js';
 import type { EngineLimits } from '../limits.js';
 import { describeFault, faultOf } from '../engine/pluginPort.js';
 import { clip } from '../utils/frozenCopy.js';
-import { NotPlain, isDateObject, isPlainPrototype } from '../utils/plain.js';
+import { NotPlain, isArrayPrototype, isDateObject, isPlainPrototype } from '../utils/plain.js';
 import { toReferenceDate } from '@run-iq/spec';
 import { CHARS_PER_NODE, hasLoneSurrogate, serializedLength } from '../utils/weight.js';
 
@@ -87,6 +88,14 @@ export class InputCopier {
      * which excludes the rule for it instead; the input is checked by spec, which says the same.
      */
     private readonly refuseUndefined = false,
+    /**
+     * The values come from the CALLER (the input, the rules given to `evaluate`): a Proxy (told by
+     * `util.types.isProxy`, no trap run), an Array subclass, a class instance and a `Date` with own
+     * keys are not plain; a member is read by descriptor, own and data only (an accessor, a
+     * non-enumerable index and an extra key of a list are named and left out), so that no getter and
+     * no trap of the caller runs.
+     */
+    private readonly callerSide = false,
   ) {}
 
   private leaf(extra = 0): void {
@@ -140,6 +149,49 @@ export class InputCopier {
     this.reasons.push(`${pointer} could not be read: ${describeFault(faultOf(error))}`);
     this.thrown.push(error);
     this.leaf();
+  }
+
+  /** Places the marker that stands for a value that is not plain, as for a class instance. */
+  private markNotPlain(
+    value: unknown,
+    kind: string,
+    put: (parent: Frame | undefined, key: string | number | undefined, value: unknown) => void,
+    parent: Frame | undefined,
+    key: string | number | undefined,
+    at: () => string,
+  ): void {
+    void value;
+    if (this.ruleMode) {
+      this.refusals.push(`${at()} is not a plain object: ${kind}`);
+      put(parent, key, `<not plain: ${kind}>`);
+    } else {
+      put(parent, key, new NotPlain(kind));
+    }
+  }
+
+  /** The value of an own data property, read by descriptor: an accessor is never run. */
+  private dataMember(source: object, key: string): unknown {
+    const descriptor = Object.getOwnPropertyDescriptor(source, key);
+    if (descriptor === undefined) throw new TypeError('is not an own property');
+    if (!('value' in descriptor)) throw new TypeError('is an accessor, not a data property');
+    if (Array.isArray(source) && descriptor.enumerable !== true) {
+      throw new TypeError('is not enumerable');
+    }
+    return descriptor.value;
+  }
+
+  /** A list has index keys and `length` only: any other own key is named and refused. */
+  private refuseExtraListKeys(list: object, length: number, pointer: string): void {
+    for (const own of Reflect.ownKeys(list)) {
+      if (own === 'length') continue;
+      const index = typeof own === 'string' && /^(0|[1-9]\d*)$/.test(own) ? Number(own) : -1;
+      if (index < 0 || index >= length) {
+        this.reasons.push(
+          `${pointer} has an extra key: ${typeof own === 'symbol' ? own.toString() : clip(own)}`,
+        );
+        return;
+      }
+    }
   }
 
   /** The copy of `root`, a part of the input at `rootPointer` (`/data`, `/meta/context`). */
@@ -198,11 +250,33 @@ export class InputCopier {
       let keys: string[] | undefined;
       let length: number;
       try {
+        if (this.callerSide && types.isProxy(value)) {
+          this.leaf();
+          this.markNotPlain(value, 'a Proxy', put, parent, key, at);
+          return;
+        }
         isList = Array.isArray(value);
+        if (isList && this.callerSide && !isArrayPrototype(Object.getPrototypeOf(value))) {
+          this.leaf();
+          this.markNotPlain(value, 'an Array subclass', put, parent, key, at);
+          return;
+        }
         if (isList) {
-          // justification: `Array.isArray` passed.
-          length = (value as unknown[]).length;
+          if (this.callerSide) {
+            // The length by descriptor (an own data property of every real list).
+            const lengthDescriptor = Object.getOwnPropertyDescriptor(value, 'length');
+            const given: unknown =
+              lengthDescriptor !== undefined && 'value' in lengthDescriptor
+                ? lengthDescriptor.value
+                : undefined;
+            if (typeof given !== 'number') throw new TypeError('invalid length');
+            length = given;
+          } else {
+            // justification: `Array.isArray` passed.
+            length = (value as unknown[]).length;
+          }
           if (!Number.isSafeInteger(length) || length < 0) throw new TypeError('invalid length');
+          if (this.callerSide) this.refuseExtraListKeys(value, length, at());
         } else {
           // Plainness is decided once, from one read of the prototype.
           const prototype: unknown = Object.getPrototypeOf(value);
@@ -213,7 +287,9 @@ export class InputCopier {
             // replaced by a marker spec refuses, never kept. The brand is read only here: a plain
             // object is not a date, and a read through a Proxy is not wasted on every object.
             this.leaf();
-            if (isDateObject(value)) {
+            if (isDateObject(value) && this.callerSide && hasOwnState(value)) {
+              this.markNotPlain(value, 'a Date with own keys', put, parent, key, at);
+            } else if (isDateObject(value)) {
               // justification: `isDateObject` passed, so `getTime` returns a number.
               const time = Date.prototype.getTime.call(value) as number;
               let copy: unknown = new Date(time);
@@ -290,8 +366,9 @@ export class InputCopier {
           frame.index = frame.length;
           continue;
         }
-        member =
-          frame.keys === undefined
+        member = this.callerSide
+          ? this.dataMember(frame.src, String(memberKey))
+          : frame.keys === undefined
             ? (frame.src as unknown[])[i]
             : (frame.src as Record<string, unknown>)[memberKey as string];
       } catch (error) {
@@ -330,6 +407,11 @@ export function listKeys(value: object, pointer: string, reasons: string[]): str
     }
   }
   return keys;
+}
+
+/** A `Date` with own enumerable string keys or any symbol key carries state a copy would drop. */
+function hasOwnState(value: object): boolean {
+  return Object.keys(value).length > 0 || Object.getOwnPropertySymbols(value).length > 0;
 }
 
 /** What kind of object a prototype describes, for the marker that stands in for it. */

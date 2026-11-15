@@ -602,7 +602,7 @@ describe('R13 and R16: what a hook is handed is a view', () => {
     expect(writes).toBe(2);
   });
 
-  it('tenantId comes from the copy: a getter answering differently is read once', async () => {
+  it('a getter for tenantId is refused and never run (AK1)', async () => {
     let reads = 0;
     const meta: Record<string, unknown> = {};
     Object.defineProperty(meta, 'tenantId', {
@@ -610,9 +610,12 @@ describe('R13 and R16: what a hook is handed is a view', () => {
       get: () => (++reads === 1 ? 'first' : 'later'),
     });
     const built = build([noop]);
-    await built.engine.evaluate([tax()], makeInput({ meta: meta as never }));
-    expect(built.saved[0]!.tenantId).toBe('first');
-    expect(built.saved[0]!.inputSnapshot.meta.tenantId).toBe('first');
+    const error = await built.engine
+      .evaluate([tax()], makeInput({ meta: meta as never }))
+      .catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: 'VALIDATION_ERROR' });
+    expect(reads).toBe(0);
+    expect(built.saved).toHaveLength(0);
   });
 
   it('the skips a hook returns are frozen in the result', async () => {

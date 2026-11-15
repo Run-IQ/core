@@ -207,7 +207,7 @@ describe('N2: a hook cannot change the request', () => {
 });
 
 describe('N3: the request id is read once', () => {
-  it('a getter answering a different id at each read gives one id everywhere', async () => {
+  it('a getter for the id is refused and never run (AK1: the caller is read by descriptor)', async () => {
     const built = build([]);
     let reads = 0;
     const input = makeInput();
@@ -215,10 +215,10 @@ describe('N3: the request id is read once', () => {
       enumerable: true,
       get: () => (++reads === 1 ? 'first' : `later-${reads}`),
     });
-    const result = await built.engine.evaluate([tax()], input);
-    expect(result.requestId).toBe('first');
-    expect(await built.adapter.exists('first')).toBe(true);
-    expect(reads).toBe(1);
+    const error = await built.engine.evaluate([tax()], input).catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: 'VALIDATION_ERROR' });
+    expect(reads).toBe(0);
+    expect(await built.adapter.exists('first')).toBe(false);
   });
 });
 

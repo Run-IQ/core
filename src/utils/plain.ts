@@ -21,6 +21,19 @@ export function isPlainPrototype(proto: unknown): boolean {
   return proto === null || proto === Object.prototype || isForeignObjectPrototype(proto);
 }
 
+/** True when a list with this prototype is a plain list: `Array.prototype` of this realm or another. */
+export function isArrayPrototype(proto: unknown): boolean {
+  if (proto === Array.prototype) return true;
+  if (proto === null || typeof proto !== 'object') return false;
+  const ctor: unknown = Object.getOwnPropertyDescriptor(proto, 'constructor')?.value;
+  return (
+    typeof ctor === 'function' &&
+    ctor.name === 'Array' &&
+    (ctor as { prototype?: unknown }).prototype === proto &&
+    isForeignObjectPrototype(Object.getPrototypeOf(proto))
+  );
+}
+
 /** True for a `Date` of any realm: the brand check, not the prototype. */
 export function isDateObject(value: object): boolean {
   try {

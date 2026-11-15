@@ -1,3 +1,4 @@
+import { types } from 'node:util';
 import { canonicalize } from '@run-iq/spec';
 import type { JsonValue } from '@run-iq/spec';
 import type { Rule } from '../types/rule.js';
@@ -350,6 +351,7 @@ export class PPEEngine {
         'rules',
         new Budget('maxRuleSetNodes', this.limits.maxRuleSetNodes),
         owned,
+        true,
       ) as Rule[];
       // Two given rules with one `id@version` are refused, identical copies included: the engine
       // never guesses which of them is meant (B24).
@@ -398,9 +400,9 @@ export class PPEEngine {
    * mode: the evaluation date, as `meta.effectiveDate` or `meta.dates.effective`, must be given.
    * The caller's input and each input a `beforeEvaluate` hook returns go through here.
    */
-  private acceptInput(input: unknown): PreparedInput {
+  private acceptInput(input: unknown, callerSide = false): PreparedInput {
     assertEngine(this, 'PPEEngine.acceptInput');
-    const prepared = InputSanitizer.prepare(input, this.limits);
+    const prepared = InputSanitizer.prepare(input, this.limits, callerSide);
     if (this.strict && prepared.evaluationDate === undefined) {
       throw new ValidationError('effectiveDate is required in strict mode', [
         'meta.effectiveDate or meta.dates.effective must be provided when strict mode is enabled',
@@ -430,7 +432,7 @@ export class PPEEngine {
 
     // Step 1: Input validation. One plain copy of the input is made and checked; the hooks, the
     // rules and the models all work on it, never on the caller's object (D-5).
-    const prepared = this.acceptInput(input);
+    const prepared = this.acceptInput(input, true);
     // The request id read once, by `prepare`: the seed, the duplicate check, the result and the
     // record all use this one, never the caller's object again.
     seen.input = prepared.input;
@@ -685,17 +687,26 @@ function hookView(input: EvaluationInput): EvaluationInput {
   return input;
 }
 
-/** The number of rules given, read once; an unreadable list is a `ValidationError`. */
+/**
+ * The number of rules given, read once by descriptor; an unreadable list, a Proxy or an Array
+ * subclass is a `ValidationError`. A value that is not a list at all is told by `readItems`.
+ */
 function countRules(rules: unknown): number {
   try {
-    if (Array.isArray(rules)) return rules.length;
+    if (!Array.isArray(rules)) return 0;
+    if (types.isProxy(rules)) {
+      throw new ValidationError('Invalid rules', ['rules must not be a Proxy']);
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(rules, 'length');
+    const length: unknown =
+      descriptor !== undefined && 'value' in descriptor ? descriptor.value : undefined;
+    return typeof length === 'number' && Number.isSafeInteger(length) && length >= 0 ? length : 0;
   } catch (error) {
+    if (isEngineErrorNamed(error, 'ValidationError')) throw error;
     throw new ValidationError('Invalid rules', [
       `rules could not be read: ${describeThrown(error)}`,
     ]);
   }
-  // Not a list: `readItems` says so, as a `ValidationError`.
-  return 0;
 }
 
 /** True when two canonical metas have the same canonical form (a value without one differs). */

@@ -1,9 +1,11 @@
+import { types } from 'node:util';
 import { raiseLimit } from '../errors/EngineLimitError.js';
 import { validateProofInput } from '@run-iq/spec';
 import type { ProofInput } from '@run-iq/spec';
 import type { EvaluationInput } from '../types/input.js';
 import { isEngineErrorNamed } from '../errors/engineError.js';
 import { ValidationError } from '../errors/ValidationError.js';
+import { isPlainPrototype } from '../utils/plain.js';
 import { InputCopier, listKeys } from '../input/copyInput.js';
 import { describeThrown } from '../utils/values.js';
 import { evaluationDate, normalizeMeta } from '../input/normalizeMeta.js';
@@ -70,6 +72,25 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
   }
 };
 
+/**
+ * Why `value`, a part of the CALLER's input, is not plain: a Proxy (no trap is run to say so) or an
+ * object that is not an `Object.prototype` or null-prototype object (a class instance, a `Map`).
+ */
+function notPlainReason(value: object, path: string): string | undefined {
+  if (types.isProxy(value)) return `${path} must not be a Proxy`;
+  if (!isPlainPrototype(Object.getPrototypeOf(value))) return `${path} must be a plain object`;
+  return undefined;
+}
+
+/** An own data property of the caller's object, read by descriptor: an accessor never runs. */
+function dataProperty(source: object, key: string, path: string): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(source, key);
+  if (descriptor === undefined) return undefined;
+  if (!('value' in descriptor))
+    throw new TypeError(`${path} must be a data property, not an accessor`);
+  return descriptor.value;
+}
+
 export class InputSanitizer {
   /**
    * Checks an input and makes the plain copy the engine goes on with (`PreparedInput`): its basic
@@ -82,7 +103,12 @@ export class InputSanitizer {
    * input's digest leaves, `/data/...` and `/meta/...`), and a property that cannot be read
    * (`/data/g could not be read: boom`).
    */
-  static prepare(input: unknown, limits: Readonly<EngineLimits> = DEFAULT_LIMITS): PreparedInput {
+  static prepare(
+    input: unknown,
+    limits: Readonly<EngineLimits> = DEFAULT_LIMITS,
+    /** The input is the CALLER's own: read by descriptor, plain objects only, no Proxy. */
+    callerSide = false,
+  ): PreparedInput {
     const reasons: string[] = [];
 
     if (input === null || typeof input !== 'object') {
@@ -90,6 +116,11 @@ export class InputSanitizer {
     }
 
     const obj = input as Record<string, unknown>;
+    // The caller's own object is read by descriptor, plain objects only: no getter and no trap runs.
+    const inputProblem = callerSide ? notPlainReason(obj, 'input') : undefined;
+    if (inputProblem !== undefined) {
+      throw new ValidationError('Input must be a non-null object', [inputProblem]);
+    }
     // The input is read once: its keys are listed once (a symbol key or a non-enumerable property
     // is named, as it would vanish), then each member once. The checks and the copy below work on
     // these values, whatever a getter or a Proxy would answer to a second read.
@@ -100,9 +131,9 @@ export class InputSanitizer {
       for (const key of listKeys(obj, '', reasons)) {
         if (!INPUT_KEYS.has(key)) reasons.push(`input has an unknown key ${JSON.stringify(key)}`);
       }
-      requestId = obj['requestId'];
-      dataIn = obj['data'];
-      metaIn = obj['meta'];
+      requestId = callerSide ? dataProperty(obj, 'requestId', 'input/requestId') : obj['requestId'];
+      dataIn = callerSide ? dataProperty(obj, 'data', 'input/data') : obj['data'];
+      metaIn = callerSide ? dataProperty(obj, 'meta', 'input/meta') : obj['meta'];
     } catch (error) {
       throw new ValidationError('Invalid evaluation input', [
         `input could not be read: ${describeThrown(error)}`,
@@ -116,6 +147,10 @@ export class InputSanitizer {
       throw raiseLimit('maxStringLength', limits.maxStringLength, requestId.length, '/requestId');
     }
     if (!isRecord(dataIn)) reasons.push('data must be a non-null object');
+    else if (callerSide) {
+      const problem = notPlainReason(dataIn, '/data');
+      if (problem !== undefined) reasons.push(problem);
+    }
 
     let meta: Record<string, unknown> | undefined;
     let metaKeys: string[] = [];
@@ -123,6 +158,8 @@ export class InputSanitizer {
       reasons.push('meta must be a non-null object');
     } else {
       meta = metaIn;
+      const metaProblem = callerSide ? notPlainReason(metaIn, '/meta') : undefined;
+      if (metaProblem !== undefined) reasons.push(metaProblem);
       try {
         metaKeys = listKeys(meta, '/meta', reasons);
       } catch (error) {
@@ -141,7 +178,7 @@ export class InputSanitizer {
 
     // The one walk: copy and bounds. Each part of the input is a root at level 1 and they share
     // the count of leaves; a too large input is refused before spec reads it.
-    const copier = new InputCopier(limits);
+    const copier = new InputCopier(limits, 'maxInputLeaves', false, false, false, callerSide);
     // justification: `copy` of a plain object returns a plain object (`dataIn` is a record).
     const data = copier.copy(dataIn, '/data') as Record<string, unknown>;
     // The forbidden keys are looked for on the copy: the keys that are evaluated are the ones
@@ -157,7 +194,7 @@ export class InputSanitizer {
       copier.node();
       let member: unknown;
       try {
-        member = meta[key];
+        member = callerSide ? dataProperty(meta, key, `/meta/${key}`) : meta[key];
       } catch (error) {
         copier.unreadable(`/meta/${key}`, error);
         continue;
