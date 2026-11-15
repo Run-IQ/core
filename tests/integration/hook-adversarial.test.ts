@@ -282,8 +282,10 @@ describe('N5: the evaluation copy is frozen and private', () => {
     expect(Object.isFrozen(data.nothing)).toBe(true);
     expect(Object.isFrozen(prepared.input.meta)).toBe(true);
     expect(Object.isFrozen(prepared.input.meta.tags)).toBe(true);
+    // AE6: the engine holds no `Date`; the copy holds the canonical string, and the caller's `Date`
+    // can move without moving it.
     effective.setTime(0);
-    expect(prepared.input.meta.effectiveDate?.toISOString()).toBe('2026-01-01T00:00:00.000Z');
+    expect(prepared.input.meta.effectiveDate).toBe('2026-01-01T00:00:00.000Z');
   });
 
   it('afterEvaluate writing into the input fails the evaluation', async () => {
@@ -314,7 +316,7 @@ describe('N5: the evaluation copy is frozen and private', () => {
     expect(error).toBeInstanceOf(PluginHookError);
   });
 
-  it('a hook moving a Date of meta cannot move the date the snapshot records', async () => {
+  it('a hook cannot move the date the snapshot records, and the record holds a string (AE6)', async () => {
     const saved: Snapshot[] = [];
     const adapter: ISnapshotAdapter = {
       save: async (snapshot) => {
@@ -330,20 +332,34 @@ describe('N5: the evaluation copy is frozen and private', () => {
       [
         pluginWith('h', {
           afterEvaluate: (input, _result) => {
-            input.meta.effectiveDate?.setTime(0);
+            (input.meta as { effectiveDate?: string }).effectiveDate = '1970-01-01T00:00:00.000Z';
             return undefined;
           },
         }),
       ],
       { snapshot: adapter },
     );
-    await built.engine.evaluate(
+    const error = await built.engine
+      .evaluate(
+        [tax()],
+        makeInput({ meta: { tenantId: 't', effectiveDate: new Date('2026-01-01T00:00:00Z') } }),
+      )
+      .then(
+        () => undefined,
+        (thrown: unknown) => thrown,
+      );
+    expect(error).toBeInstanceOf(PluginHookError);
+    expect(saved).toEqual([]);
+    // Without the write, the record holds the canonical string, never a Date.
+    const clean = await build([], { snapshot: adapter }).engine.evaluate(
       [tax()],
-      makeInput({ meta: { tenantId: 't', effectiveDate: new Date('2026-01-01T00:00:00Z') } }),
+      makeInput({
+        requestId: 'r2',
+        meta: { tenantId: 't', effectiveDate: new Date('2026-01-01T00:00:00Z') },
+      }),
     );
-    expect(saved[0]?.inputSnapshot.meta.effectiveDate?.toISOString()).toBe(
-      '2026-01-01T00:00:00.000Z',
-    );
+    expect(clean.value).toBeDefined();
+    expect(saved[0]?.inputSnapshot.meta.effectiveDate).toBe('2026-01-01T00:00:00.000Z');
   });
 
   it('a DSL writing into the context fails that rule only, with the reason', async () => {

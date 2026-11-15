@@ -161,6 +161,9 @@ export class InputSanitizer {
         copier.unreadable(`/meta/${key}`, error);
         continue;
       }
+      // `undefined` is not a JSON value, and no member of `meta` is an exception: the canonical form
+      // cannot tell a member that holds it from an absent one, so it is refused with its pointer.
+      if (member === undefined) reasons.push(`/meta/${key} is not JSON: undefined`);
       Object.defineProperty(metaCopy, key, {
         value: copier.copy(member, `/meta/${key}`),
         enumerable: true,
@@ -182,8 +185,8 @@ export class InputSanitizer {
     // `undefined` is not a JSON value. In `dimensions`, `dates` and `assertions` the canonical form
     // would drop a key that holds it (or write `null` for a list item), and an input that declares
     // a dimension would then decide like one that declares none: it is refused, anywhere in them,
-    // with its pointer, like any other value that is not JSON. (A member of `meta` that is itself
-    // `undefined` is absent, as for spec.)
+    // with its pointer, like any other value that is not JSON. So is a member of `meta` that is
+    // itself `undefined` (above): there is no exception.
     for (const part of ['dimensions', 'dates', 'assertions'] as const) {
       for (const pointer of undefinedPointers(metaCopy[part], `/meta/${part}`)) {
         reasons.push(`${pointer} is not JSON: undefined`);
@@ -211,12 +214,21 @@ export class InputSanitizer {
       throw new ValidationError('Invalid evaluation input', reasons);
     }
 
+    // The engine holds no `Date`: a `meta.effectiveDate` is kept, and recorded, as the canonical
+    // string of `dates.effective` (the instant it names, or the civil date), whatever form it was
+    // given in. A hook is handed that string, and a view shows a `Date` only where one is asked for.
+    const finalMeta: Record<string, unknown> =
+      metaCopy['effectiveDate'] === undefined
+        ? metaCopy
+        : { ...metaCopy, effectiveDate: canonical.dates['effective'] };
+    Object.freeze(finalMeta);
+
     return {
       input: Object.freeze({
         requestId: requestId as string,
         data,
         // justification: `validateProofInput` accepted the canonical form of these members.
-        meta: metaCopy as unknown as EvaluationInput['meta'],
+        meta: finalMeta as unknown as EvaluationInput['meta'],
       }),
       meta: canonical,
       evaluationDate: evaluationDate(canonical),

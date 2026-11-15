@@ -378,9 +378,16 @@ describe('X4: undefined is refused inside lists of the meta too', () => {
     expect((error as ValidationError).reasons.join('; ')).toContain('hole');
   });
 
-  it('a top-level member of meta that is undefined is absent, as for spec', () => {
-    expect(prepare({ dimensions: undefined, effectiveDate: undefined })).toBeUndefined();
-  });
+  it.each(['tags', 'dimensions', 'context', 'dates', 'assertions', 'effectiveDate'])(
+    'B87: meta.%s set to undefined is refused with its pointer, no exception',
+    (member) => {
+      const error = prepare({ [member]: undefined });
+      expect(error).toBeInstanceOf(ValidationError);
+      expect((error as ValidationError).reasons).toContain(
+        `/meta/${member} is not JSON: undefined`,
+      );
+    },
+  );
 });
 
 describe('X5: the copy of a thrown value is the engine own', () => {

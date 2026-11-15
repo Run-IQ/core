@@ -20,6 +20,7 @@ import { PipelineTimeoutError } from '../errors/PipelineTimeoutError.js';
 import { UnexpectedEngineError } from '../errors/UnexpectedEngineError.js';
 import { PluginHookError } from '../errors/PluginHookError.js';
 import type { PPEError } from '../errors/PPEError.js';
+import { attachOnErrorFailure } from '../errors/PPEError.js';
 import { ModelRegistry, snapshotModels } from '../registry/ModelRegistry.js';
 import { PluginRegistry } from '../registry/PluginRegistry.js';
 import { DSLRegistry, snapshotDsls } from '../registry/DSLRegistry.js';
@@ -279,9 +280,12 @@ export class PPEEngine {
         try {
           // `onError` is synchronous: a promise it returns is a fault, and its rejection handled.
           callSync(plugin.onError, plugin.source, [told, shown]);
-        } catch {
-          // Contract of PPEPlugin.onError (B59): a failing `onError` is dropped, and the
-          // evaluation's own error reaches the caller.
+        } catch (thrown) {
+          // A failing `onError` is never dropped, and never replaces the original error: the
+          // caller receives that one, unchanged, and the first failure of an `onError` is
+          // attached to it as `onErrorFailure`, a `PluginHookError` with `hook: 'onError'` held
+          // as bounded text (B59, B60).
+          attachOnErrorFailure(error, new PluginHookError(plugin.name, 'onError', thrown));
         }
       }
       throw error;
@@ -634,7 +638,8 @@ function hookView(input: EvaluationInput): EvaluationInput {
   const { effectiveDate, dates } = input.meta;
   const meta = {
     ...input.meta,
-    ...(effectiveDate === undefined ? {} : { effectiveDate: new Date(effectiveDate.getTime()) }),
+    // Held as a string by the engine; a `Date` (a hook's own input) is copied, never shared.
+    ...(effectiveDate instanceof Date ? { effectiveDate: new Date(effectiveDate.getTime()) } : {}),
     ...(dates === undefined
       ? {}
       : {

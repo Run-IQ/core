@@ -11,7 +11,7 @@ export interface EvaluationInput {
      * The evaluation date. It is `meta.dates.effective` in the canonical input (`normalizeMeta`);
      * given with `dates.effective`, the two must name the same instant or date.
      */
-    readonly effectiveDate?: Date | undefined;
+    readonly effectiveDate?: Date | string | undefined;
     /**
      * Named dates (`effective`, `facture`...): a `Date`, a civil date `YYYY-MM-DD` or a date-time
      * with `Z` or an offset. Written canonically by `normalizeMeta`: a civil date stays civil, any

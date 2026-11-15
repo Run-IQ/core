@@ -36,6 +36,8 @@ export class PluginHookError extends PPEError {
     );
     this.name = 'PluginHookError';
     this.cause = fault === undefined ? frozenErrorCopy(cause) : Object.freeze({ ...fault });
+    // Frozen at creation (B74): a plugin cannot change what the caller receives.
+    Object.freeze(this);
   }
 
   /** The text of the fault, or a frozen copy of the public error the engine raised. */

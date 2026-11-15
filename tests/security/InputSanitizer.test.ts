@@ -154,8 +154,14 @@ describe('InputSanitizer', () => {
       expect(Object.getPrototypeOf(many)).toBe(Object.prototype);
     });
 
-    it('does not count an unknown meta key whose value is undefined', () => {
-      expect(() => InputSanitizer.validate(input({}, { date: undefined }))).not.toThrow();
+    it('refuses a meta key whose value is undefined, unknown or not (B87)', () => {
+      let reasons: readonly string[] = [];
+      try {
+        InputSanitizer.validate(input({}, { date: undefined }));
+      } catch (error) {
+        reasons = (error as { reasons: readonly string[] }).reasons;
+      }
+      expect(reasons).toContain('/meta/date is not JSON: undefined');
     });
 
     it('still accepts every key the evaluation input defines', () => {

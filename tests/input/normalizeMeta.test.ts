@@ -127,10 +127,10 @@ describe('normalizeMeta', () => {
       dimensions: Object.freeze({ pays: Object.freeze(['US', 'FR', 'US']) }),
     };
     const before = JSON.stringify(meta);
-    const beforeDate = meta.effectiveDate?.getTime();
+    const beforeDate = (meta.effectiveDate as Date).getTime();
     normalizeMeta(meta);
     expect(JSON.stringify(meta)).toBe(before);
-    expect(meta.effectiveDate?.getTime()).toBe(beforeDate);
+    expect((meta.effectiveDate as Date).getTime()).toBe(beforeDate);
     expect(meta.tags).toEqual(['b', 'a', 'b']);
   });
 });

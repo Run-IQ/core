@@ -525,7 +525,8 @@ describe('R13 and R16: what a hook is handed is a view', () => {
       pluginWith('h', {
         beforeEvaluate: (input, rules) => {
           (input.meta.dates?.['facture'] as Date).setTime(0);
-          input.meta.effectiveDate?.setTime(0);
+          // The engine hands out its string, not a `Date`: moving it is not possible.
+          (input.meta.effectiveDate as unknown as Date).setTime(0);
           return { input, rules };
         },
       }),
