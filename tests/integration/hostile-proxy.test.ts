@@ -77,8 +77,8 @@ const note = (where: string, trap: string, key?: string | symbol): void => {
 };
 
 function wrap(value: unknown, where: string): unknown {
-  // A Date (or a native promise) has internal slots: as a Proxy it would stop being one.
-  if (value instanceof Date || value instanceof Promise) return value;
+  // A Date or a native promise is wrapped too (MC4): as a Proxy it is no longer one, so the engine
+  // can only refuse it, and every access it makes is logged.
   return (typeof value === 'object' && value !== null) || typeof value === 'function'
     ? hostile(value as object, where)
     : value;
@@ -138,10 +138,10 @@ function hostile<T extends object>(target: T, where: string): T {
     },
     apply(t, thisArg, args) {
       note(where, 'apply');
-      return wrap(
-        Reflect.apply(t as unknown as (...a: unknown[]) => unknown, thisArg, args),
-        `${where}()`,
-      );
+      const answer = Reflect.apply(t as unknown as (...a: unknown[]) => unknown, thisArg, args);
+      // The promise an async hook itself returns stays native (as a Proxy it could not be
+      // awaited); every promise or Date inside what is returned is wrapped.
+      return answer instanceof Promise ? answer : wrap(answer, `${where}()`);
     },
     construct(t, args, newTarget) {
       note(where, 'construct');
@@ -519,5 +519,208 @@ describe('what the log shows', () => {
       'isExtensible',
       'ownKeys',
     ]);
+  });
+});
+
+/** Walks a result: no Date, promise, function or symbol came out of a plugin (MC4). */
+function assertPlain(value: unknown, path: string, seen = new Set<unknown>()): void {
+  if (typeof value === 'function' || typeof value === 'symbol') {
+    throw new Error(`${path} is a ${typeof value}`);
+  }
+  if (typeof value !== 'object' || value === null || seen.has(value)) return;
+  seen.add(value);
+  expect(value instanceof Date, `${path} is a Date`).toBe(false);
+  expect(value instanceof Promise, `${path} is a promise`).toBe(false);
+  expect(typeof (value as { then?: unknown }).then, `${path} is a thenable`).not.toBe('function');
+  for (const key of Reflect.ownKeys(value)) {
+    expect(typeof key, `${path} has a symbol key`).toBe('string');
+    assertPlain((value as Record<string, unknown>)[key as string], `${path}.${key}`, seen);
+  }
+}
+
+const engineWith = (plugin: PPEPlugin): PPEEngine =>
+  new PPEEngine({ plugins: [hostile(plugin, 'plugin')], dsls: [], strict: false });
+
+describe('MC4: a hostile native promise or Date, wrapped, comes out nowhere', () => {
+  const modelReturning = (output: () => unknown): PPEPlugin => ({
+    name: 'natives',
+    version: '1.0.0',
+    onInit: (context: PluginContext) => {
+      context.modelRegistry.register(
+        hostile(
+          {
+            name: 'natives',
+            version: '1.0.0',
+            validateParams: () => ({ valid: true }),
+            calculate: output,
+          } as unknown as CalculationModel,
+          'model',
+        ),
+      );
+    },
+  });
+
+  for (const [label, make] of [
+    ['a Date', () => hostile(new Date(0), 'model.date')],
+    ['a native promise', () => hostile(Promise.resolve(1), 'model.promise')],
+  ] as const) {
+    it(`${label} in a model output excludes the rule and none of it reaches the result`, async () => {
+      const result = await engineWith(modelReturning(() => ({ value: make() }))).evaluate(
+        [makeRule({ id: 'n', model: 'natives' })],
+        makeInput(),
+      );
+      expect(result.appliedRules).toEqual([]);
+      expect(result.skippedRules.map((skip) => skip.rule.id)).toEqual(['n']);
+      // (the engine's own `timestamp` is the one Date a result holds)
+      const { timestamp: _own, ...rest } = result;
+      assertPlain(rest, 'result');
+    });
+
+    it(`${label} in what a hook returns fails the evaluation`, async () => {
+      const plugin: PPEPlugin = {
+        name: 'hooked',
+        version: '1.0.0',
+        onInit: () => undefined,
+        beforeEvaluate: (input, current) =>
+          ({
+            input: { ...input, data: { held: make() } },
+            rules: current,
+          }) as never,
+      };
+      const error = await engineWith(plugin)
+        .evaluate([], makeInput())
+        .then(
+          () => undefined,
+          (caught: unknown) => caught,
+        );
+      expect(error).toBeInstanceOf(PluginHookError);
+    });
+  }
+});
+
+describe('MC2: a hostile nested engine, and values with hostile conversions', () => {
+  it('a plugin that runs a whole nested engine of its own and throws its error gives text', async () => {
+    const inner = new PPEEngine({
+      plugins: [],
+      dsls: [],
+      strict: false,
+      limits: { maxRules: 1 },
+    });
+    const plugin: PPEPlugin = {
+      name: 'nesting',
+      version: '1.0.0',
+      onInit: () => undefined,
+      beforeEvaluate: async () => {
+        // The nested engine's own error (an EngineLimitError) is thrown by the hook.
+        await inner.evaluate(
+          [makeRule({ id: 'a', model: 'x' }), makeRule({ id: 'b', model: 'x' })],
+          makeInput(),
+        );
+        return undefined as never;
+      },
+    };
+    const error = (await engineWith(plugin)
+      .evaluate([], makeInput())
+      .then(
+        () => undefined,
+        (caught: unknown) => caught,
+      )) as PluginHookError;
+    expect(error).toBeInstanceOf(PluginHookError);
+    expect(Object.getPrototypeOf(error.cause)).toBe(Object.prototype);
+    expect(error.cause).toMatchObject({ name: 'EngineLimitError' });
+  });
+
+  it('values with toJSON, valueOf, Symbol.toPrimitive and an iterator are refused and never called', async () => {
+    const calls: string[] = [];
+    const trap = (): Record<string | symbol, unknown> => ({
+      toJSON: () => {
+        calls.push('toJSON');
+        return 1;
+      },
+      valueOf: () => {
+        calls.push('valueOf');
+        return 1;
+      },
+      toString: () => {
+        calls.push('toString');
+        return 'x';
+      },
+      [Symbol.toPrimitive]: () => {
+        calls.push('toPrimitive');
+        return 1;
+      },
+      [Symbol.iterator]: function* () {
+        calls.push('iterator');
+        yield 1;
+      },
+    });
+    const kinds: Array<[string, () => unknown]> = [
+      ['a value', () => ({ value: trap() })],
+      ['a detail', () => ({ value: 7, detail: { held: trap() } })],
+      ['the whole output', () => trap()],
+    ];
+    for (const [label, output] of kinds) {
+      calls.length = 0;
+      const plugin: PPEPlugin = {
+        name: 'converting',
+        version: '1.0.0',
+        onInit: (context: PluginContext) => {
+          context.modelRegistry.register(
+            hostile(
+              {
+                name: 'converting',
+                version: '1.0.0',
+                validateParams: () => ({ valid: true }),
+                calculate: output,
+              } as unknown as CalculationModel,
+              'model',
+            ),
+          );
+        },
+      };
+      const result = await engineWith(plugin)
+        .evaluate([makeRule({ id: 'c', model: 'converting' })], makeInput())
+        .then(
+          (value) => value,
+          (caught: unknown) => caught,
+        );
+      expect(calls, `${label}: a conversion of the plugin was run`).toEqual([]);
+      if (result instanceof Error) expect(result.message).not.toContain('toJSON');
+      else expect(result.appliedRules, label).toEqual([]);
+    }
+  });
+
+  it('a DSL whose listVariables answer is an iterator is refused and not iterated', async () => {
+    const calls: string[] = [];
+    const dsl: DSLEvaluator = {
+      dsl: 'iterating',
+      version: '1.0.0',
+      evaluate: () => true,
+      listVariables: () =>
+        ({
+          [Symbol.iterator]: function* () {
+            calls.push('iterator');
+            yield '/a';
+          },
+        }) as never,
+    };
+    const engine = new PPEEngine({
+      plugins: [
+        {
+          name: 'host',
+          version: '1.0.0',
+          onInit: (context: PluginContext) =>
+            context.modelRegistry.register(new StubModel('plain', 3)),
+        },
+      ],
+      dsls: [hostile(dsl, 'dsl')],
+      strict: false,
+    });
+    const result = await engine.evaluate(
+      [makeRule({ id: 'i', model: 'plain', condition: { dsl: 'iterating', value: {} } })],
+      makeInput(),
+    );
+    expect(calls).toEqual([]);
+    expect(result.diagnostics.map((d) => d.message).join(' ')).toContain('failed');
   });
 });
