@@ -29,6 +29,8 @@ import type { PreparedInput } from '../security/InputSanitizer.js';
 import { isRaisedLimit, raiseLimit } from '../errors/EngineLimitError.js';
 import { checkDerivedSeed, readInputSeedConfig } from '../input/inputSeed.js';
 import type { InputSeedConfig } from '../input/inputSeed.js';
+import { readEngineConfig } from './engineConfig.js';
+import { EngineConfigError } from '../errors/EngineConfigError.js';
 import { resolveLimits } from '../limits.js';
 import type { EngineLimits, EngineLimitsInput } from '../limits.js';
 import { EVALUATE_OPTION_NAMES } from '../types/options.js';
@@ -49,7 +51,7 @@ import { describeThrown, ruleLabel } from '../utils/values.js';
 import { acceptAfterEvaluate } from './afterEvaluateTransition.js';
 import { readBeforeEvaluate } from './beforeEvaluateResult.js';
 import { Budget, RuleLedger, charsOfRule, readItems } from './pluginBoundary.js';
-import { callAsync, callSync, reading } from './pluginPort.js';
+import { callAsync, callSync, describeFault, faultOf, reading } from './pluginPort.js';
 import { isolate } from './trust.js';
 import type { PluginHandle } from '../registry/PluginRegistry.js';
 import type { Crossing } from './pluginBoundary.js';
@@ -131,33 +133,42 @@ export class PPEEngine {
   private readonly inputSeed: InputSeedConfig | undefined;
   private readonly onChecksumMismatch: 'throw' | 'skip';
 
-  constructor(config: PPEEngineConfig) {
+  constructor(given: PPEEngineConfig) {
+    // The options are read once and checked: an unknown key or a value of the wrong type is an
+    // `EngineConfigError` with its path, never coerced (AH6).
+    const config = readEngineConfig(given);
     this.strict = config.strict ?? true;
     this.conflictMode = config.onConflict ?? (this.strict ? 'throw' : 'first');
     this.dryRun = config.dryRun ?? false;
-    this.pipelineTimeout = config.timeout?.pipeline;
-    this.limits = resolveLimits(config.limits);
+    this.pipelineTimeout = config.timeout.pipeline;
+    this.limits = resolveLimits(config.limits as EngineLimitsInput | undefined);
     this.inputSeed = readInputSeedConfig(config.inputSeed);
 
     this.modelRegistry = new ModelRegistry();
     this.pluginRegistry = new PluginRegistry();
     this.dslRegistry = new DSLRegistry();
 
-    this.sandbox = new PluginSandbox(config.timeout?.hook ?? 500, config.timeout?.dsl ?? 100);
+    this.sandbox = new PluginSandbox(config.timeout.hook ?? 500, config.timeout.dsl ?? 100);
 
     this.onChecksumMismatch = config.onChecksumMismatch ?? 'skip';
     this.dominanceResolver = new DominanceResolver();
 
     this.snapshotManager = new SnapshotManager(
-      this.dryRun ? null : (config.snapshot ?? null),
+      this.dryRun ? null : ((config.snapshot as ISnapshotAdapter | undefined) ?? null),
       this.strict,
       config.onSnapshotError,
     );
 
     // Register DSL evaluators
-    for (const dsl of config.dsls) {
-      this.dslRegistry.register(dsl);
-    }
+    config.dsls.forEach((dsl, slot) => {
+      try {
+        this.dslRegistry.register(dsl as DSLEvaluator);
+      } catch (error) {
+        // A DSL that cannot be registered (a duplicate name, a member that is not a function) is a
+        // configuration fault, named by where it stands.
+        throw new EngineConfigError(`/dsls/${slot}`, describeFault(faultOf(error)));
+      }
+    });
 
     // Initialize plugins. Each is read once, when it is registered; from then on the engine uses
     // what it took (a name and a version it checked, the functions) and calls them through the port.
@@ -190,12 +201,17 @@ export class PPEEngine {
       // A constructor called from inside a plugin's callback raises for no read in progress.
       const restore = isolate();
       try {
-        for (const plugin of config.plugins) {
-          const handle = this.pluginRegistry.register(plugin);
+        for (const [slot, plugin] of config.plugins.entries()) {
+          let handle: PluginHandle;
+          try {
+            handle = this.pluginRegistry.register(plugin as PPEPlugin);
+          } catch (error) {
+            throw new EngineConfigError(`/plugins/${slot}`, describeFault(faultOf(error)));
+          }
           handles.push(handle);
           try {
             // `onInit` is synchronous: a promise it returns is a fault, and its rejection is handled.
-            callSync(handle.onInit, plugin, [context]);
+            callSync(handle.onInit, plugin as PPEPlugin, [context]);
           } catch (error) {
             // A throw of plugin code reaches the caller as the engine's own error, holding its text.
             throw new PluginHookError(handle.name, 'onInit', error);
@@ -273,7 +289,11 @@ export class PPEEngine {
       // What the plugins are told is not writable: one plugin cannot rewrite the attribution (the
       // `plugin`, the `message`) of a failure that the caller then receives. Nor is the input: it
       // is the engine's frozen copy, never the caller's object.
-      const told = frozenErrorCopy(UnexpectedEngineError.wrap(error)) as PPEError;
+      // What the caller receives is always an engine error: one the engine raised is itself, and
+      // anything else (a bug of the engine, a callback of the caller) is wrapped, holding its text
+      // only. `onErrorFailures` is thus always readable on it.
+      const received = UnexpectedEngineError.wrap(error);
+      const told = frozenErrorCopy(received) as PPEError;
       const shown = seen.input === undefined ? ABSENT_INPUT : hookView(seen.input);
       for (const plugin of this.plugins) {
         if (!plugin.onError) continue;
@@ -282,13 +302,13 @@ export class PPEEngine {
           callSync(plugin.onError, plugin.source, [told, shown]);
         } catch (thrown) {
           // A failing `onError` is never dropped, and never replaces the original error: the
-          // caller receives that one, unchanged, and the first failure of an `onError` is
-          // attached to its `onErrorFailures` list, each a `PluginHookError` with `hook: 'onError'` held
-          // as bounded text (B59, B60).
-          attachOnErrorFailure(error, new PluginHookError(plugin.name, 'onError', thrown));
+          // caller receives that one, unchanged, with every failure of an `onError` attached to its
+          // `onErrorFailures` list, in plugin order, each a `PluginHookError` with `hook: 'onError'`
+          // held as bounded text (B59, B60).
+          attachOnErrorFailure(received, new PluginHookError(plugin.name, 'onError', thrown));
         }
       }
-      throw error;
+      throw received;
     }
   }
 

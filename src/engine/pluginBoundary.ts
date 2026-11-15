@@ -531,7 +531,7 @@ export class RuleLedger {
       if (!validator.knowsModel(rule)) {
         fail(`added rule ${label}, whose model ${String(rule.model)} is not registered`);
       }
-      const [refused] = validator.validate([rule]).invalid;
+      const [refused] = validator.validate([rule], false).invalid;
       if (refused !== undefined) fail(`added rule ${label}: ${refused.detail ?? refused.reason}`);
       added.set(label, rule);
     }

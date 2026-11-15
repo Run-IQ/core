@@ -1,10 +1,13 @@
 // G-1 bench (D-26): 100 000 transactions, each evaluated against 20 rules, one `evaluate` call per
-// transaction, with the limits raised past the defaults. Run `npm run build`, then:
+// transaction, with the default limits (this shape reaches none of them, so none is raised). It
+// measures 100 000 SEPARATE evaluations: the single-evaluation form over a collection (G-1 of the
+// plan, `maxInstances`) is measured again in Task 9R1, when collections exist. Run `npm run build`,
+// then:
 //
 //   node bench/g1.mjs [transactions] [rules]
 //
-// It prints the machine, the Node version, the total time, the time per transaction and the
-// throughput. The figure belongs to the machine and the Node version it prints: copy all three.
+// It prints the machine, the Node version, the total time, the time per transaction, the throughput
+// and the peak memory (resident set). The figure belongs to the machine and the Node version it prints: copy all three.
 import os from 'node:os';
 import { PPEEngine, computeRuleChecksum } from '../dist/index.js';
 
@@ -43,13 +46,6 @@ const engine = new PPEEngine({
   plugins: [plugin],
   dsls: [],
   strict: false,
-  limits: {
-    maxRules: 1_000_000,
-    maxRuleSetNodes: 20_000_000,
-    maxHookLeaves: 4_000_000,
-    maxInputLeaves: 5_000_000,
-    maxTraceNodes: 100_000_000,
-  },
 });
 
 const input = (index) => ({
@@ -77,6 +73,7 @@ console.log(
       seconds: Number(seconds.toFixed(2)),
       msPerTransaction: Number(((seconds * 1000) / TRANSACTIONS).toFixed(3)),
       transactionsPerSecond: Math.round(TRANSACTIONS / seconds),
+      peakMemoryMiB: Math.round(process.resourceUsage().maxRSS / 1024),
       checksum: value,
       node: process.version,
       machine: `${os.cpus()[0]?.model ?? 'unknown cpu'}, ${os.cpus().length} cores, ${Math.round(os.totalmem() / 2 ** 30)} GiB, ${os.platform()} ${os.arch()}`,

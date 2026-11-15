@@ -8,6 +8,7 @@ import type { ModelRegistry } from '../registry/ModelRegistry.js';
 import { ValidationError } from '../errors/ValidationError.js';
 import { UnexpectedEngineError } from '../errors/UnexpectedEngineError.js';
 import { ruleLabel } from '../utils/values.js';
+import { ChecksumMismatchError } from '../errors/ChecksumMismatchError.js';
 
 export interface RuleValidationResult {
   readonly valid: readonly Rule[];
@@ -44,12 +45,13 @@ export class RuleValidator {
     return rule.model === EXCEPTION_MODEL || this.modelRegistry.has(rule.model);
   }
 
-  validate(rules: ReadonlyArray<Rule>): RuleValidationResult {
+  /** `pointers` is false for a rule a hook added: its place is not one of the caller's rules. */
+  validate(rules: ReadonlyArray<Rule>, pointers = true): RuleValidationResult {
     const valid: Rule[] = [];
     const invalid: SkippedRule[] = [];
 
-    for (const rule of rules) {
-      const skipped = this.checkRule(rule);
+    for (const [slot, rule] of rules.entries()) {
+      const skipped = this.checkRule(rule, pointers ? `/rules/${slot}` : undefined);
       if (skipped) {
         invalid.push(skipped);
       } else {
@@ -60,7 +62,7 @@ export class RuleValidator {
     return { valid, invalid };
   }
 
-  private checkRule(rule: Rule): SkippedRule | null {
+  private checkRule(rule: Rule, pointer?: string): SkippedRule | null {
     // 0. An object inside the rule was not plain when it was read: the rule is excluded for it,
     // naming where. What stands in the copy is a string, never an object the caller made up.
     const refusals = refusalsOf(rule);
@@ -87,7 +89,7 @@ export class RuleValidator {
 
     if (!intact) {
       if (this.onChecksumMismatch === 'throw') {
-        throw new Error(`Checksum mismatch for rule ${rule.id}`);
+        throw new ChecksumMismatchError(ruleLabel(rule), pointer);
       }
       return {
         rule,

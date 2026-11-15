@@ -17,3 +17,6 @@ export { DecimalPrecisionError } from './DecimalPrecisionError.js';
 export { InvalidModelError } from './InvalidModelError.js';
 export { HookTimeoutError } from './HookTimeoutError.js';
 export { UnexpectedEngineError } from './UnexpectedEngineError.js';
+export { EngineConfigError } from './EngineConfigError.js';
+export { ChecksumMismatchError } from './ChecksumMismatchError.js';
+export { CallbackError } from './CallbackError.js';

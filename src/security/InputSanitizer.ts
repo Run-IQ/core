@@ -223,7 +223,17 @@ export class InputSanitizer {
       ...(metaCopy['effectiveDate'] === undefined
         ? {}
         : { effectiveDate: canonical.dates['effective'] }),
-      ...(metaCopy['dates'] === undefined ? {} : { dates: Object.freeze({ ...canonical.dates }) }),
+      ...(metaCopy['dates'] === undefined
+        ? {}
+        : {
+            // The caller's own keys, each as its canonical string: the engine never adds an
+            // `effective` the caller did not declare in `dates` (same input, one shape).
+            dates: Object.freeze(
+              Object.fromEntries(
+                Object.keys(metaCopy['dates'] as object).map((key) => [key, canonical.dates[key]]),
+              ),
+            ),
+          }),
     };
     Object.freeze(finalMeta);
 

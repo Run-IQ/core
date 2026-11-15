@@ -335,7 +335,7 @@ describe('AE5: the errors the caller receives are frozen', () => {
 });
 
 describe('B59, B60, AE9: a failing onError is attached to the original error', () => {
-  it('onError throws during a maxRules refusal: the caller gets EngineLimitError with onErrorFailure', async () => {
+  it('onError throws during a maxRules refusal: the caller gets EngineLimitError with onErrorFailures', async () => {
     const adapter = new InMemorySnapshotAdapter();
     const engine = build(
       [
@@ -746,5 +746,43 @@ describe('K9, K17: the source of a listVariables limit, and an attributed limit 
     expect(error).toBeInstanceOf(EngineLimitError);
     expect(error).toMatchObject({ limit: 'maxHookLeaves', source: 'dsl:lv' });
     expect(Object.isFrozen(error)).toBe(true);
+  });
+});
+
+describe('AH2: meta.dates holds the keys the caller gave, as canonical strings, and no other', () => {
+  const seen = async (meta: Record<string, unknown>): Promise<unknown> => {
+    let dates: unknown = 'not called';
+    await build([
+      pluginWith('p', {
+        beforeEvaluate: (input, rules) => {
+          dates = (input.meta as { dates?: unknown }).dates;
+          return { input, rules };
+        },
+      }),
+    ]).evaluate([], makeInput({ meta: { tenantId: 't', ...meta } as never }));
+    return dates;
+  };
+
+  it('effectiveDate with dates: {} adds no effective key', async () => {
+    expect(await seen({ effectiveDate: '2024-06-01', dates: {} })).toEqual({});
+  });
+
+  it('effectiveDate with another named date adds no effective key', async () => {
+    expect(
+      await seen({
+        effectiveDate: '2024-06-01',
+        dates: { facture: new Date('2024-05-01T00:00:00Z') },
+      }),
+    ).toEqual({ facture: '2024-05-01T00:00:00.000Z' });
+  });
+
+  it('a given effective is kept, canonical', async () => {
+    expect(await seen({ dates: { effective: new Date('2024-06-01T00:00:00Z') } })).toEqual({
+      effective: '2024-06-01T00:00:00.000Z',
+    });
+  });
+
+  it('no dates given: none appears, with effectiveDate alone', async () => {
+    expect(await seen({ effectiveDate: '2024-06-01' })).toBeUndefined();
   });
 });
