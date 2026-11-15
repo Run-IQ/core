@@ -62,7 +62,8 @@ describe('hostile thrown values', () => {
     ['a number', () => 42, '42'],
     ['a symbol', () => Symbol('s'), 'Symbol(s)'],
     ['a null-prototype object', () => Object.create(null), 'Error'],
-    ['a revoked proxy', revokedProxy, 'Error'],
+    // A Proxy is described by a fixed text, with no trap run (AK9).
+    ['a revoked proxy', revokedProxy, '(a Proxy)'],
     [
       'a proxy whose getPrototypeOf throws',
       () =>
@@ -74,7 +75,7 @@ describe('hostile thrown values', () => {
             },
           },
         ),
-      'Error',
+      '(a Proxy)',
     ],
   ];
   for (const hook of ['beforeEvaluate', 'afterEvaluate'] as const) {

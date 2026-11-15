@@ -290,7 +290,8 @@ describe('a plugin made only of Proxies, in every role', () => {
       const error = (await outcomeOf(fixture({ [callback]: 'reject' }))) as PluginHookError;
       expect(error).toBeInstanceOf(PluginHookError);
       expect(Object.getPrototypeOf(error.cause)).toBe(Object.prototype);
-      expect(error.cause).toMatchObject({ name: 'RangeError', code: 'E_BOOM' });
+      // A Proxy is described by a fixed text and none of its traps runs (AK9).
+      expect(error.cause).toEqual({ name: 'Error', message: '(a Proxy)' });
     });
   }
 
@@ -639,7 +640,8 @@ describe('MC2: a hostile nested engine, and values with hostile conversions', ()
     expect(error).toBeInstanceOf(PluginHookError);
     expect(Object.getPrototypeOf(error.cause)).toBe(Object.prototype);
     expect(error.cause).toMatchObject({ name: 'UnexpectedEngineError' });
-    expect(JSON.stringify(error.cause)).toContain('inner model failed');
+    // The nested engine's own error text: the hostile Proxy it threw is a fixed text (AK9).
+    expect(JSON.stringify(error.cause)).toContain('(a Proxy)');
   });
 
   it('values with toJSON, valueOf, Symbol.toPrimitive and an iterator are refused and never called', async () => {

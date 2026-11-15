@@ -129,6 +129,8 @@ export function faultOf(thrown: unknown): PluginFault {
     if (isPluginFault(thrown)) return FAULT_TEXT.get(thrown) as PluginFault;
     if (typeof thrown === 'string') return { name: 'Error', message: clipped(thrown, 1024) };
     if ((typeof thrown === 'object' && thrown !== null) || typeof thrown === 'function') {
+      // A Proxy is described by a fixed text: none of its traps (descriptor, prototype) is run.
+      if (types.isProxy(thrown)) return { name: 'Error', message: '(a Proxy)' };
       const name = property(thrown, 'name', 128) ?? 'Error';
       const message = property(thrown, 'message', 1024) ?? '';
       const code = property(thrown, 'code', 64);
@@ -136,7 +138,11 @@ export function faultOf(thrown: unknown): PluginFault {
     }
     let shown: string;
     try {
-      shown = typeof thrown === 'symbol' ? thrown.toString() : String(thrown);
+      // A symbol through the captured description getter: no `Symbol.prototype.toString` lookup.
+      shown =
+        typeof thrown === 'symbol'
+          ? `Symbol(${(Reflect.apply(symbolDescription, thrown, []) as string | undefined) ?? ''})`
+          : String(thrown);
     } catch {
       shown = '(unprintable)';
     }
@@ -176,6 +182,9 @@ type Fn = (...args: never[]) => unknown;
 // The intrinsics the port adopts a promise with, captured when this module loads (before any
 // plugin): never the `then` or the `constructor` of the value itself.
 const promiseThen = Promise.prototype.then;
+const symbolDescription = Object.getOwnPropertyDescriptor(Symbol.prototype, 'description')?.get as (
+  this: symbol,
+) => string | undefined;
 const noop = (): void => undefined;
 
 /** True for a thenable that is not a native promise: an object or function with a `then` function. */
@@ -188,10 +197,15 @@ function thenOf(value: unknown): Fn | undefined {
 }
 
 /**
- * Marks a promise or thenable the engine will not use as handled, so that its rejection is never
- * an unhandled one. A native promise (a subclass included) is handled through the captured
- * `Promise.prototype.then`, never its own `then`.
+ * Marks a promise or thenable a PLUGIN returned and the engine will not use as handled, so that its
+ * rejection is never an unhandled one. A native promise (a subclass included) is handled through the
+ * captured `Promise.prototype.then`, never its own `then`. A foreign thenable is handed a resolver
+ * and a rejecter that both neutralize what they receive (a rejected promise, a thenable inside a
+ * thenable), to a stated limit of `MAX_THENABLE_LAYERS` layers; past it, what is left is the
+ * plugin's own (B85). The CALLER's values are never called: see `callCaller`.
  */
+export const MAX_THENABLE_LAYERS = 64;
+
 export function neutralize(value: unknown, depth = 0): void {
   reading(() => {
     try {
@@ -200,18 +214,25 @@ export function neutralize(value: unknown, depth = 0): void {
         return;
       }
       const then = thenOf(value);
-      // The thenable is handed a resolver that neutralizes what it resolves with (a promise that
-      // rejects, a thenable inside a thenable), up to a bound, and a rejecter that does nothing.
       if (then !== undefined) {
-        const resolve = (inner: unknown): void => {
-          if (depth < 8) neutralize(inner, depth + 1);
+        const next = (inner: unknown): void => {
+          if (depth < MAX_THENABLE_LAYERS) neutralize(inner, depth + 1);
         };
-        Reflect.apply(then, value, [resolve, noop]);
+        Reflect.apply(then, value, [next, next]);
       }
     } catch {
       // a thenable that throws is already a fault; a Proxy over a promise cannot be reached
     }
   });
+}
+
+/** A native promise a CALLER's callback returned: handled by the captured intrinsic, nothing else. */
+function neutralizeNative(value: unknown): void {
+  try {
+    if (types.isPromise(value)) Reflect.apply(promiseThen, value, [undefined, noop]);
+  } catch {
+    // a promise that cannot be reached stays the caller's
+  }
 }
 
 /**
@@ -243,6 +264,49 @@ export function callSync(fn: Fn, thisArg: unknown, args: unknown[]): unknown {
 }
 
 /**
+ * Calls a function the CALLER gave (`onSnapshotError`, `inputSeed.derive`), synchronous by
+ * contract. A throw is a fault (text). The result is never read before it is checked: a Proxy is
+ * refused without a trap; a native promise gets the captured rejection handler and is refused; a
+ * value that has a `then` (an own or inherited data function, or an accessor, told by descriptors
+ * and never read) is refused as a thenable and never called.
+ */
+export function callCaller(fn: Fn, thisArg: unknown, args: unknown[]): unknown {
+  return reading(() => {
+    let result: unknown;
+    try {
+      result = Reflect.apply(fn, thisArg, args);
+    } catch (error) {
+      throw faultFrom(error);
+    }
+    if ((typeof result !== 'object' || result === null) && typeof result !== 'function') {
+      return result;
+    }
+    if (types.isProxy(result)) throw breach('returned a Proxy, which this callback may not return');
+    if (types.isPromise(result)) {
+      neutralizeNative(result);
+      throw breach('returned a promise, which the contract of this callback does not allow');
+    }
+    if (hasThenDescriptor(result)) {
+      throw breach('returned a thenable, which the contract of this callback does not allow');
+    }
+    return result;
+  });
+}
+
+/** True when `value` has a `then` by descriptor, own or inherited: a function, or an accessor. */
+function hasThenDescriptor(value: object): boolean {
+  let holder: object | null = value;
+  for (let depth = 0; holder !== null && depth < 16; depth += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(holder, 'then');
+    if (descriptor !== undefined) {
+      return !('value' in descriptor) || typeof descriptor.value === 'function';
+    }
+    holder = Object.getPrototypeOf(holder) as object | null;
+  }
+  return false;
+}
+
+/**
  * Calls a function whose contract allows a promise (the hooks). The value, or the rejection, is
  * taken inside the reader, and a plugin's promise is never given to the engine's own promise
  * machinery: a native promise is adopted through the captured `Promise.prototype.then`, any other
@@ -251,7 +315,11 @@ export function callSync(fn: Fn, thisArg: unknown, args: unknown[]): unknown {
  */
 export function callAsync(fn: Fn, thisArg: unknown, args: unknown[]): Promise<{ value: unknown }> {
   return new Promise((resolve, reject) => {
-    const fail = (error: unknown): void => reject(faultFrom(error));
+    const fail = (error: unknown): void => {
+      // A promise given as the reason is handled too (a native one), then reduced to text.
+      neutralize(error);
+      reject(faultFrom(error));
+    };
     const done = (value: unknown): void => {
       reading(() => {
         // A promise as a value is not one the engine will await: it is handled and left.

@@ -39,8 +39,8 @@ describe('describeThrown', () => {
   it('never throws, even on a revoked proxy', () => {
     const { proxy, revoke } = Proxy.revocable({}, {});
     revoke();
-    // A value that cannot be read says its default name, never an exception.
-    expect(describeThrown(proxy)).toBe('Error');
+    // A Proxy is described by a fixed text, no trap run (AK9).
+    expect(describeThrown(proxy)).toBe('(a Proxy)');
     expect(describeThrown(new Error('boom'))).toBe('boom');
   });
 

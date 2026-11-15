@@ -1,7 +1,7 @@
 import { types } from 'node:util';
 import { ValidationError } from '../errors/ValidationError.js';
 import { CallbackError } from '../errors/CallbackError.js';
-import { callSync } from '../engine/pluginPort.js';
+import { callCaller } from '../engine/pluginPort.js';
 
 /**
  * Where the salt of the input digest comes from (Task 10 uses it): a `secret` of at least 32
@@ -73,7 +73,7 @@ export function checkDerivedSeed(seed: InputSeedConfig | undefined, requestId: s
   try {
     // Synchronous, like the plugin hooks: a thenable is a breach, never awaited, its rejection
     // handled. A failure is held as bounded text, never converted (AI2, AI3).
-    derived = callSync(seed.derive as (...args: never[]) => unknown, undefined, [requestId]);
+    derived = callCaller(seed.derive as (...args: never[]) => unknown, undefined, [requestId]);
   } catch (error) {
     throw new CallbackError('inputSeed.derive', error);
   }

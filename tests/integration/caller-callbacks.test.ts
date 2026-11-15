@@ -66,7 +66,7 @@ describe('AI2: onSnapshotError is synchronous', () => {
       const error = await engine.evaluate(rules, makeInput()).catch((e: unknown) => e);
       expect(error).toBeInstanceOf(CallbackError);
       expect(error).toMatchObject({ callback: 'onSnapshotError' });
-      expect((error as Error).message).toContain('returned a promise');
+      expect((error as Error).message).toMatch(/returned a (promise|thenable)/);
       await settle();
       expect(unhandled).toEqual([]);
     });

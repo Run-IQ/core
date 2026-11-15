@@ -1,5 +1,5 @@
 import type { ISnapshotAdapter, Snapshot } from '../types/snapshot.js';
-import { callSync } from '../engine/pluginPort.js';
+import { callCaller } from '../engine/pluginPort.js';
 import { CallbackError } from '../errors/CallbackError.js';
 import { SnapshotFailureError } from '../errors/SnapshotFailureError.js';
 
@@ -49,7 +49,7 @@ export class SnapshotManager {
         try {
           // Synchronous, like the plugin hooks: a thenable it returns is a breach, never awaited,
           // its rejection handled, and the process never sees an unhandled one (AI2).
-          callSync(this.onSnapshotError as (...args: never[]) => unknown, undefined, [error]);
+          callCaller(this.onSnapshotError as (...args: never[]) => unknown, undefined, [error]);
         } catch (thrown) {
           throw new CallbackError('onSnapshotError', thrown);
         }
