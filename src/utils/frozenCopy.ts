@@ -20,6 +20,20 @@ const INTRINSIC_ERRORS: ReadonlySet<unknown> = new Set([
 ]);
 
 /**
+ * True when `Error.prototype` is on the prototype chain: what `instanceof Error` would say for an
+ * ordinary object, without consulting `Symbol.hasInstance` (a DOMException is no native error in
+ * every Node version, but its chain leads to `Error.prototype`).
+ */
+function chainHasErrorPrototype(start: unknown): boolean {
+  let holder: unknown = start;
+  for (let depth = 0; depth < 32 && typeof holder === 'object' && holder !== null; depth += 1) {
+    if (holder === Error.prototype) return true;
+    holder = Object.getPrototypeOf(holder);
+  }
+  return false;
+}
+
+/**
  * `text` as it is, or cut to `MAX_TEXT` characters on a code point with its length. Always
  * well-formed: a lone surrogate is replaced, whatever the length, so that no text the engine
  * writes into a record or an error can hold one.
@@ -91,7 +105,7 @@ function copy(value: unknown, depth: number, state: State): unknown {
       return Object.freeze(out);
     }
     const prototype: unknown = Object.getPrototypeOf(value);
-    const isError = types.isNativeError(value);
+    const isError = types.isNativeError(value) || chainHasErrorPrototype(prototype);
     const plain = prototype === null || prototype === Object.prototype;
     if (!isError && !plain) return describe(value);
     const keep = isError && (INTRINSIC_ERRORS.has(prototype) || isEngineErrorPrototype(prototype));
