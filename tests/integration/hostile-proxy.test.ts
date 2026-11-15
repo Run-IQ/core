@@ -534,7 +534,7 @@ function assertPlain(value: unknown, path: string, seen = new Set<unknown>()): v
   expect(typeof (value as { then?: unknown }).then, `${path} is a thenable`).not.toBe('function');
   for (const key of Reflect.ownKeys(value)) {
     expect(typeof key, `${path} has a symbol key`).toBe('string');
-    assertPlain((value as Record<string, unknown>)[key as string], `${path}.${key}`, seen);
+    assertPlain((value as Record<string, unknown>)[key as string], `${path}.${String(key)}`, seen);
   }
 }
 
@@ -572,8 +572,7 @@ describe('MC4: a hostile native promise or Date, wrapped, comes out nowhere', ()
       expect(result.appliedRules).toEqual([]);
       expect(result.skippedRules.map((skip) => skip.rule.id)).toEqual(['n']);
       // (the engine's own `timestamp` is the one Date a result holds)
-      const { timestamp: _own, ...rest } = result;
-      assertPlain(rest, 'result');
+      assertPlain({ ...result, timestamp: undefined }, 'result');
     });
 
     it(`${label} in what a hook returns fails the evaluation`, async () => {
@@ -678,7 +677,7 @@ describe('MC2: a hostile nested engine, and values with hostile conversions', ()
           );
         },
       };
-      const result = await engineWith(plugin)
+      const result: unknown = await engineWith(plugin)
         .evaluate([makeRule({ id: 'c', model: 'converting' })], makeInput())
         .then(
           (value) => value,
@@ -686,7 +685,7 @@ describe('MC2: a hostile nested engine, and values with hostile conversions', ()
         );
       expect(calls, `${label}: a conversion of the plugin was run`).toEqual([]);
       if (result instanceof Error) expect(result.message).not.toContain('toJSON');
-      else expect(result.appliedRules, label).toEqual([]);
+      else expect((result as { appliedRules: unknown }).appliedRules, label).toEqual([]);
     }
   });
 

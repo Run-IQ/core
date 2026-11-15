@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as errors from '../../src/errors/index.js';
 import { attributeLimit } from '../../src/errors/EngineLimitError.js';
+import { makeInput } from '../helpers.js';
 import { PPEEngine } from '../../src/engine/PPEEngine.js';
 
 /**
@@ -73,22 +74,25 @@ describe('AG1: every error class exported is frozen at creation', () => {
 
   it('an error that leaves evaluate is frozen, with its onErrorFailures', async () => {
     const engine = new PPEEngine({
-      models: [],
       dsls: [],
+      strict: false,
       plugins: [
         {
           name: 'p',
           version: '1.0.0',
           onInit() {},
+          beforeEvaluate() {
+            throw new Error('real');
+          },
           onError() {
             throw new Error('boom');
           },
         },
       ],
     });
-    const caught = await engine
-      .evaluate({ rules: [], input: { requestId: 'r', data: {}, meta: {} } })
-      .catch((e: unknown) => e);
+    const caught = await engine.evaluate([], makeInput()).catch((e: unknown) => e);
+    expect(caught).toBeInstanceOf(errors.PluginHookError);
+    expect((caught as errors.PPEError).onErrorFailures).toHaveLength(1);
     assertDeepFrozen(caught, 'caught');
     assertDeepFrozen((caught as errors.PPEError).onErrorFailures, 'onErrorFailures');
   });
