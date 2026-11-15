@@ -461,7 +461,7 @@ describe('ExecutionPipeline', () => {
       expect(result.skipped).toEqual([
         {
           rule: stray,
-          proofDetail: expect.any(String),
+          proofDetail: 'output value short-circuited by X@1',
           reason: 'SHORT_CIRCUITED',
           detail: 'output value short-circuited by X@1',
         },
