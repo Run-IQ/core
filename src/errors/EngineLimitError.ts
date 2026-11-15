@@ -39,6 +39,8 @@ export class EngineLimitError extends PPEError {
     this.pointer = shown;
     this.source = source;
     this.name = 'EngineLimitError';
+    // Frozen at creation (B74), like every error the caller receives.
+    Object.freeze(this);
   }
 }
 

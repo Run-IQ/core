@@ -1,5 +1,5 @@
 import { ViewScope } from './frozenView.js';
-import { clipFault } from './pluginPort.js';
+import { clipFault, describeFault } from './pluginPort.js';
 import type { Rule } from '../types/rule.js';
 import type { EvaluationInput } from '../types/input.js';
 import type { Diagnostic } from '../types/diagnostic.js';
@@ -266,12 +266,13 @@ export class RuleFilter {
         if (isRaisedLimit(error) && !PER_VALUE_LIMITS.has(error.limit)) {
           throw attributeLimit(error, `dsl:${rule.condition.dsl}`);
         }
-        const cause = error instanceof DSLEvaluationError ? error.originalError : error;
+        const text =
+          error instanceof DSLEvaluationError ? describeFault(error.originalError) : undefined;
         // The text of a fault is cut on a code point here too: a verdict that cannot be read gives
         // a failure that joins the reason of every property, and none of it is longer than this.
         // A refused write into a view is told by the slot of this call, not by what was thrown.
         const detail = clipFault(
-          views.wrote ?? (cause instanceof Error ? cause.message : String(cause)),
+          views.wrote ?? text ?? (error instanceof Error ? error.message : String(error)),
         );
         // The text of a plugin's fault is in the record: it is weighed like the rest.
         this.crossing.budget.addText(detail);

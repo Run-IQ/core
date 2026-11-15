@@ -31,6 +31,8 @@ export class PPEError extends Error {
     super(message);
     this.name = 'PPEError';
     Object.setPrototypeOf(this, new.target.prototype);
+    // A subclass freezes itself once its own fields are set; a bare PPEError is complete here (B74).
+    if (new.target === PPEError) Object.freeze(this);
   }
 }
 

@@ -15,7 +15,10 @@ export class UnexpectedEngineError extends PPEError {
   constructor(cause: unknown, message?: string) {
     super(message ?? describeThrown(cause), 'UNEXPECTED');
     this.name = 'UnexpectedEngineError';
-    this.cause = cause;
+    this.cause =
+      cause instanceof PPEError
+        ? cause
+        : Object.freeze({ ...(trustedFault(cause) ?? faultOf(cause)) });
     // Frozen at creation (B74): the cause is the text of a fault, or a frozen engine error.
     Object.freeze(this);
   }
