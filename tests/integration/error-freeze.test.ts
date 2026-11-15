@@ -67,12 +67,14 @@ describe('AG1: every error class exported is frozen at creation', () => {
     const e = new errors.SnapshotFailureError(original);
     expect(e.cause).not.toBe(original);
     expect(typeof (e.cause as { message: unknown }).message).toBe('string');
-    expect(((e.cause as { message: string }).message).length).toBeLessThanOrEqual(1100);
+    expect((e.cause as { message: string }).message.length).toBeLessThanOrEqual(1100);
     assertDeepFrozen(e, 'snapshot');
   });
 
   it('an error that leaves evaluate is frozen, with its onErrorFailures', async () => {
-    const engine = new PPEEngine({ models: [], dsls: [],
+    const engine = new PPEEngine({
+      models: [],
+      dsls: [],
       plugins: [
         {
           name: 'p',
@@ -84,7 +86,9 @@ describe('AG1: every error class exported is frozen at creation', () => {
         },
       ],
     });
-    const caught = await engine.evaluate({ rules: [], input: { requestId: 'r', data: {}, meta: {} } }).catch((e: unknown) => e);
+    const caught = await engine
+      .evaluate({ rules: [], input: { requestId: 'r', data: {}, meta: {} } })
+      .catch((e: unknown) => e);
     assertDeepFrozen(caught, 'caught');
     assertDeepFrozen((caught as errors.PPEError).onErrorFailures, 'onErrorFailures');
   });

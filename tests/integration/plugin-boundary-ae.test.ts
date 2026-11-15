@@ -533,6 +533,51 @@ describe('B33, MC9: a stolen engine error and a forged internal fault, at every 
     },
   };
 
+  // The two entries the table above does not drive: `onError` (its throw is attached to the
+  // caller's error as text) and the `evaluate` of a DSL (its throw is the rule's DSL_ERROR detail).
+  for (const [what, make] of sources) {
+    it(`${what} thrown by onError is attached as text, never itself`, async () => {
+      const thrown = await make();
+      const error = (await failure(
+        build([
+          pluginWith('p', {
+            beforeEvaluate: () => {
+              throw new Error('real');
+            },
+            onError: () => {
+              throw thrown;
+            },
+          }),
+        ]),
+        [tax()],
+      )) as PluginHookError;
+      expect(error).toBeInstanceOf(PluginHookError);
+      expect(error.onErrorFailures).toHaveLength(1);
+      const failure1 = error.onErrorFailures[0] as PluginHookError;
+      expect(failure1).not.toBe(thrown);
+      expect(failure1.message.length).toBeLessThan(1300);
+      expect(failure1.cause).not.toBe(thrown);
+      expect(failure1.cause).not.toBeInstanceOf(EngineLimitError);
+    });
+
+    it(`${what} thrown by a DSL evaluate is a bounded text in the skip, never itself`, async () => {
+      const thrown = await make();
+      const dsl: DSLEvaluator = {
+        dsl: 'thrower',
+        version: '1.0.0',
+        evaluate: () => {
+          throw thrown;
+        },
+      };
+      const result = await build([regModel(modelNamed('one', {}))], {}, [dsl]).evaluate(
+        [makeRule({ id: 'c', model: 'one', condition: { dsl: 'thrower', value: {} } })],
+        makeInput(),
+      );
+      expect(result.skippedRules[0]?.reason).toBe('DSL_ERROR');
+      expect((result.skippedRules[0]?.detail ?? '').length).toBeLessThan(1300);
+    });
+  }
+
   for (const [what, make] of sources) {
     for (const [role, run] of Object.entries(roles)) {
       it(`${what} thrown by ${role} is text, never itself`, async () => {
