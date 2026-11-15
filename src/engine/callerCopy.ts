@@ -147,9 +147,10 @@ export function copyCallerData(
     if (typeof current === 'function' || typeof current === 'symbol') {
       throw refuse(where, `a ${typeof current} is not data`);
     }
-    if (typeof current !== 'object' || current === null) return current;
+    // Every value is a node, scalars included: a list of two million zeros is as large as it looks.
     state.nodes += 1;
     if (state.nodes > MAX_COPY_NODES) throw refuse(where, 'is too large');
+    if (typeof current !== 'object' || current === null) return current;
     if (depth > MAX_COPY_DEPTH) throw refuse(where, 'is nested too deeply');
     if (types.isProxy(current)) throw refuse(where, 'must not be a Proxy');
     if (ancestors.has(current)) throw refuse(where, 'is a cycle');

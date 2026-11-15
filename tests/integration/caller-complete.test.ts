@@ -295,6 +295,7 @@ describe('the generated inventory of caller crossing points', () => {
     });
     const accessorError = outcome(() => new PPEEngine({ ...config, snapshot: throwing } as never));
     expect((accessorError as errors.EngineConfigError).path).toBe('/snapshot/exists');
+    expect((accessorError as errors.EngineConfigError).reason).toContain('accessor');
     // The function checked is the function called: replacing it later changes nothing.
     const adapter = new InMemorySnapshotAdapter();
     const engine = new PPEEngine({ ...config, snapshot: adapter });
@@ -325,6 +326,15 @@ describe("AK7: the copier's own rules", () => {
     fails(() => copyCallerData(deep, '/x'));
     const wide = new Array(2_000_001).fill(0);
     fails(() => copyCallerData(wide, '/x'));
+    // Past the node bound with no single list past the list cap: three lists of 800 000.
+    const spread = {
+      a: new Array(800_000).fill(0),
+      b: new Array(800_000).fill(0),
+      c: new Array(800_000).fill(0),
+    };
+    const refusal = outcome(() => copyCallerData(spread, '/x')) as Error;
+    expect(isEngineError(refusal)).toBe(true);
+    expect(refusal.message).toContain('is too large');
     const ok = new Array(1000).fill(0);
     expect(() => copyCallerData(ok, '/x')).not.toThrow();
   });
@@ -355,6 +365,7 @@ describe("AK7: the copier's own rules", () => {
     const error = outcome(() => core.hashParams(Symbol('s') as never));
     expect(error).toBeInstanceOf(errors.ValidationError);
     expect((error as Error).message).toContain('hashParams');
+    expect((error as errors.ValidationError).reasons[0]).toBe('/hashParams/0 a symbol is not data');
   });
 });
 
@@ -402,6 +413,13 @@ describe('AK3, AK4: the error constructors copy their lists and bound every text
       const error = outcome(make);
       expect(error).toBeInstanceOf(errors.EngineConfigError);
     }
+  });
+
+  it('a message built from many long items is clipped under one bound', () => {
+    const long = Array.from({ length: 100 }, () => 'a'.repeat(300));
+    const error = new errors.RuleConflictError(long, 1);
+    expect(error.message.length).toBeLessThanOrEqual(2200);
+    expect(error.message).toContain('[clipped]');
   });
 
   it('PPEError keeps a string code and a fixed text for a bad message', () => {
