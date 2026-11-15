@@ -107,6 +107,7 @@ export class ModelRegistry {
   }
 
   private descriptor(name: string): ModelDescriptor {
+    // justification: `register` sets `models` and `declared` together, and the name is a key of the first.
     const declared = this.declared.get(name) as Declared;
     return Object.freeze(
       declared.output === undefined

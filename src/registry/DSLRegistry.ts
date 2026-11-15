@@ -127,12 +127,14 @@ function fixEvaluator(dsl: string, evaluator: DSLEvaluator, declared: Declared):
       ? {}
       : {
           listVariables: (expression: unknown) =>
+            // justification: `callSync` returns what the plugin answered; its reader checks it.
             callSync(listVariables, evaluator, [expression]) as never,
         }),
     ...(compute === undefined
       ? {}
       : {
           compute: (expression: unknown, context: Record<string, unknown>) =>
+            // justification: as above; `compute` is inert in 9L and its answer is read by the caller.
             callSync(compute, evaluator, [expression, context]) as never,
         }),
     ...(declared.capabilities === undefined ? {} : { capabilities: declared.capabilities }),
