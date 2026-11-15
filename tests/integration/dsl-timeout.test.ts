@@ -1,75 +1,75 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import type { DSLEvaluator } from '../../src/types/dsl.js';
 import { makeRule, makeInput, StubModel, StubPlugin } from '../helpers.js';
 
-// A DSL evaluator that returns a promise disguised as boolean.
-// PluginSandbox.withTimeout wraps fn() via Promise.resolve().then(() => fn()),
-// so returning a promise works and allows the timeout race to fire.
-const slowDslEvaluator: DSLEvaluator = {
+// The contract of a DSL evaluator is synchronous (`evaluate` returns a boolean): a promise is a
+// breach, never awaited, and its rejection is handled. A DSL that is slow is the sandbox's matter
+// (phase 3): the engine does not wait for it.
+let rejections: unknown[] = [];
+const onRejection = (reason: unknown): void => {
+  rejections.push(reason);
+};
+beforeEach(() => {
+  rejections = [];
+  process.on('unhandledRejection', onRejection);
+});
+afterEach(() => {
+  process.off('unhandledRejection', onRejection);
+});
+
+const promising: DSLEvaluator = {
   dsl: 'slow-dsl',
   version: '1.0.0',
-  evaluate: (_expression: unknown, _context: Record<string, unknown>): boolean => {
-    return new Promise((resolve) => setTimeout(resolve, 300)) as unknown as boolean;
+  evaluate: (): boolean => {
+    return new Promise((_resolve, reject) =>
+      setTimeout(() => reject(new Error('late')), 20),
+    ) as never;
   },
 };
 
-describe('DSL timeout integration', () => {
-  it('skips rule with CONDITION_TIMEOUT when DSL exceeds timeout', async () => {
-    const model = new StubModel('M', 500);
-    const plugin = new StubPlugin('test', [model]);
-
+describe('a DSL that returns a promise', () => {
+  it('is excluded as DSL_ERROR, naming the breach, and its rejection is handled', async () => {
     const engine = new PPEEngine({
-      plugins: [plugin],
-      dsls: [slowDslEvaluator],
+      plugins: [new StubPlugin('test', [new StubModel('m', 500)])],
+      dsls: [promising],
       strict: false,
       timeout: { dsl: 50, hook: 500 },
     });
-
     const rule = makeRule({
       id: 'r-slow',
-      model: 'M',
+      model: 'm',
       params: {},
       condition: { dsl: 'slow-dsl', value: { always: true } },
     });
-
     const result = await engine.evaluate([rule], makeInput());
-
     expect(result.skippedRules).toHaveLength(1);
-    expect(result.skippedRules[0]!.reason).toBe('CONDITION_TIMEOUT');
+    expect(result.skippedRules[0]?.reason).toBe('DSL_ERROR');
+    expect(result.skippedRules[0]?.detail).toContain('returned a promise');
     expect(result.value).toBe(0);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(rejections).toEqual([]); // the late rejection was handled
   });
 
-  it('continues evaluating other rules after a timeout', async () => {
-    const model = new StubModel('M', 200);
-    const plugin = new StubPlugin('test', [model]);
-
+  it('continues evaluating other rules', async () => {
     const engine = new PPEEngine({
-      plugins: [plugin],
-      dsls: [slowDslEvaluator],
+      plugins: [new StubPlugin('test', [new StubModel('m', 200)])],
+      dsls: [promising],
       strict: false,
       timeout: { dsl: 50, hook: 500 },
     });
-
     const slowRule = makeRule({
       id: 'r-slow',
-      model: 'M',
+      model: 'm',
       params: {},
       condition: { dsl: 'slow-dsl', value: {} },
     });
-
-    const normalRule = makeRule({
-      id: 'r-normal',
-      model: 'M',
-      params: {},
-    });
-
+    const normalRule = makeRule({ id: 'r-normal', model: 'm', params: {} });
     const result = await engine.evaluate([slowRule, normalRule], makeInput());
-
-    expect(result.skippedRules).toHaveLength(1);
-    expect(result.skippedRules[0]!.rule.id).toBe('r-slow');
-    expect(result.appliedRules).toHaveLength(1);
-    expect(result.appliedRules[0]!.id).toBe('r-normal');
+    expect(result.skippedRules.map((skip) => [skip.rule.id, skip.reason])).toEqual([
+      ['r-slow', 'DSL_ERROR'],
+    ]);
+    expect(result.appliedRules.map((rule) => rule.id)).toEqual(['r-normal']);
     expect(result.value).toBe(200);
   });
 });

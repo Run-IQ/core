@@ -7,15 +7,15 @@ import { StubModel, ValueModel } from '../helpers.js';
 describe('ModelRegistry', () => {
   it('registers and retrieves a model', () => {
     const registry = new ModelRegistry();
-    const model = new StubModel('FLAT_RATE');
+    const model = new StubModel('flat_rate');
     registry.register(model);
-    expect(registry.get('FLAT_RATE')).toBe(model);
+    expect(registry.get('flat_rate')).toBe(model);
   });
 
   it('throws on duplicate registration', () => {
     const registry = new ModelRegistry();
-    registry.register(new StubModel('FLAT_RATE'));
-    expect(() => registry.register(new StubModel('FLAT_RATE'))).toThrow('already registered');
+    registry.register(new StubModel('flat_rate'));
+    expect(() => registry.register(new StubModel('flat_rate'))).toThrow('already registered');
   });
 
   it('throws ModelNotFoundError for unregistered model', () => {
@@ -25,15 +25,15 @@ describe('ModelRegistry', () => {
 
   it('checks existence', () => {
     const registry = new ModelRegistry();
-    registry.register(new StubModel('M'));
-    expect(registry.has('M')).toBe(true);
+    registry.register(new StubModel('m'));
+    expect(registry.has('m')).toBe(true);
     expect(registry.has('NOPE')).toBe(false);
   });
 
   describe('output declarations', () => {
     const refusal = (output: unknown): InvalidModelError => {
       // The declarations below are invalid on purpose: only JSON.parse builds them untyped.
-      const model = new ValueModel('BAD', JSON.parse(JSON.stringify(output)), {});
+      const model = new ValueModel('bad', JSON.parse(JSON.stringify(output)), {});
       try {
         new ModelRegistry().register(model);
       } catch (e) {
@@ -46,12 +46,12 @@ describe('ModelRegistry', () => {
     it('refuses a declaration spec does not accept, listing the issues', () => {
       const sum = refusal({ type: 'string', combine: 'sum' });
       expect(sum.code).toBe('INVALID_MODEL');
-      expect(sum.modelName).toBe('BAD');
+      expect(sum.modelName).toBe('bad');
       expect(sum.issues).toEqual([
         'output.combine "sum" cannot combine a string output: it applies to number, decimal',
       ]);
       expect(sum.message).toBe(
-        'Model "BAD" declares an invalid output: output.combine "sum" cannot combine a string output: it applies to number, decimal',
+        'Model "bad" declares an invalid output: output.combine "sum" cannot combine a string output: it applies to number, decimal',
       );
       expect(refusal({ type: 'number', combine: 'avg' }).issues).toEqual([
         'output.combine must be one of sum, max, min, highestPriority, union, all, any, count',
@@ -76,10 +76,10 @@ describe('ModelRegistry', () => {
 
     it('accepts a valid declaration and a model without one', () => {
       const registry = new ModelRegistry();
-      registry.register(new ValueModel('LIST', { type: 'list', combine: 'union' }, {}));
+      registry.register(new ValueModel('list', { type: 'list', combine: 'union' }, {}));
       registry.register(
         new ValueModel(
-          'TAX',
+          'tax',
           {
             type: 'decimal',
             combine: 'sum',
@@ -88,8 +88,8 @@ describe('ModelRegistry', () => {
           {},
         ),
       );
-      registry.register(new StubModel('PLAIN'));
-      expect([registry.has('LIST'), registry.has('TAX'), registry.has('PLAIN')]).toEqual([
+      registry.register(new StubModel('plain'));
+      expect([registry.has('list'), registry.has('tax'), registry.has('plain')]).toEqual([
         true,
         true,
         true,

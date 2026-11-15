@@ -7,7 +7,7 @@ describe('computeRuleChecksum', () => {
   const fullRule = {
     id: 'rule-1',
     version: 1,
-    model: 'FLAT_RATE',
+    model: 'flat_rate',
     params: { rate: 0.18 },
     priority: 100,
     effectiveFrom: new Date('2024-01-01'),
@@ -81,7 +81,7 @@ describe('computeRuleChecksum', () => {
     // Required fields only (spec: priority and effectiveFrom are required)
     const minimal = {
       id: 'r1',
-      model: 'M',
+      model: 'm',
       params: {},
       version: 1,
       priority: 100,

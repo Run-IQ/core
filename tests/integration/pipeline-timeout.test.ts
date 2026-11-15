@@ -2,42 +2,39 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import { PipelineTimeoutError } from '../../src/errors/PipelineTimeoutError.js';
 import { ValidationError } from '../../src/errors/ValidationError.js';
-import type { DSLEvaluator } from '../../src/types/dsl.js';
+import type { PPEPlugin } from '../../src/types/plugin.js';
 import { makeRule, makeInput, StubModel, StubPlugin } from '../helpers.js';
 
-// A DSL evaluator that takes a long time to evaluate
-const slowDslEvaluator: DSLEvaluator = {
-  dsl: 'slow-dsl',
+// A plugin whose hook takes a long time (a hook may be async; a DSL may not).
+const slowPlugin: PPEPlugin = {
+  name: 'slow',
   version: '1.0.0',
-  evaluate: (_expression: unknown, _context: Record<string, unknown>): boolean => {
-    return new Promise((resolve) => setTimeout(() => resolve(true), 500)) as unknown as boolean;
+  onInit: () => undefined,
+  beforeEvaluate: async (input, rules) => {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    return { input, rules };
   },
 };
 
 describe('Pipeline-level timeout', () => {
   it('throws PipelineTimeoutError when pipeline exceeds timeout', async () => {
-    const model = new StubModel('M', 100);
+    const model = new StubModel('m', 100);
     const plugin = new StubPlugin('test', [model]);
 
     const engine = new PPEEngine({
-      plugins: [plugin],
-      dsls: [slowDslEvaluator],
+      plugins: [plugin, slowPlugin],
+      dsls: [],
       strict: false,
       timeout: { dsl: 5000, hook: 5000, pipeline: 50 },
     });
 
-    const rule = makeRule({
-      id: 'r1',
-      model: 'M',
-      params: {},
-      condition: { dsl: 'slow-dsl', value: { always: true } },
-    });
+    const rule = makeRule({ id: 'r1', model: 'm', params: {} });
 
     await expect(engine.evaluate([rule], makeInput())).rejects.toThrow(PipelineTimeoutError);
   });
 
   it('succeeds when pipeline completes within timeout', async () => {
-    const model = new StubModel('M', 100);
+    const model = new StubModel('m', 100);
     const plugin = new StubPlugin('test', [model]);
 
     const engine = new PPEEngine({
@@ -47,7 +44,7 @@ describe('Pipeline-level timeout', () => {
       timeout: { pipeline: 5000 },
     });
 
-    const rule = makeRule({ id: 'r1', model: 'M', params: {} });
+    const rule = makeRule({ id: 'r1', model: 'm', params: {} });
     const result = await engine.evaluate([rule], makeInput());
 
     expect(result.value).toBe(100);
@@ -55,7 +52,7 @@ describe('Pipeline-level timeout', () => {
   });
 
   it('works without pipeline timeout configured', async () => {
-    const model = new StubModel('M', 100);
+    const model = new StubModel('m', 100);
     const plugin = new StubPlugin('test', [model]);
 
     const engine = new PPEEngine({
@@ -64,7 +61,7 @@ describe('Pipeline-level timeout', () => {
       strict: false,
     });
 
-    const rule = makeRule({ id: 'r1', model: 'M', params: {} });
+    const rule = makeRule({ id: 'r1', model: 'm', params: {} });
     const result = await engine.evaluate([rule], makeInput());
 
     expect(result.value).toBe(100);
@@ -78,7 +75,7 @@ describe('Pipeline timeout timer', () => {
 
   function engine(): PPEEngine {
     return new PPEEngine({
-      plugins: [new StubPlugin('test', [new StubModel('M', 100)])],
+      plugins: [new StubPlugin('test', [new StubModel('m', 100)])],
       dsls: [],
       strict: false,
       timeout: { pipeline: 5000 },
@@ -87,7 +84,7 @@ describe('Pipeline timeout timer', () => {
 
   it('leaves no timer pending after a successful evaluation', async () => {
     vi.useFakeTimers();
-    const result = await engine().evaluate([makeRule({ id: 'r1', model: 'M' })], makeInput());
+    const result = await engine().evaluate([makeRule({ id: 'r1', model: 'm' })], makeInput());
     expect(result.value).toBe(100);
     expect(vi.getTimerCount()).toBe(0);
   });

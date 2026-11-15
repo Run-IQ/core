@@ -3,11 +3,22 @@ import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import type { PPEPlugin, PluginContext, BeforeEvaluateResult } from '../../src/types/plugin.js';
 import type { EvaluationInput } from '../../src/types/input.js';
 import type { Rule } from '../../src/types/rule.js';
-import type { UnsealedResult } from '../../src/types/result.js';
 import type { DSLEvaluator } from '../../src/types/dsl.js';
-import { makeRule, makeInput, StubModel, StubDSL, ValueModel } from '../helpers.js';
+import {
+  makeRule,
+  makeInput,
+  StubModel,
+  InMemorySnapshotAdapter,
+  expectSameFailure,
+  expectCopyOf,
+} from '../helpers.js';
 // Imported from the package entry: both errors are public.
-import { HookTimeoutError, PPEError, UnexpectedEngineError } from '../../src/index.js';
+import {
+  HookTimeoutError,
+  PPEError,
+  PluginHookError,
+  UnexpectedEngineError,
+} from '../../src/index.js';
 
 class EnrichingPlugin implements PPEPlugin {
   readonly name: string;
@@ -38,7 +49,7 @@ class EnrichingPlugin implements PPEPlugin {
 
 describe('Chained beforeEvaluate hooks', () => {
   it('second plugin sees modifications from first plugin', async () => {
-    const model = new StubModel('M', 100);
+    const model = new StubModel('m', 100);
 
     // First plugin adds 'enrichedA' to input.data
     const pluginA = new EnrichingPlugin('plugin-a', 'enrichedA', 'fromA');
@@ -61,7 +72,7 @@ describe('Chained beforeEvaluate hooks', () => {
       strict: false,
     });
 
-    const rules = [makeRule({ id: 'r1', model: 'M', params: {} })];
+    const rules = [makeRule({ id: 'r1', model: 'm', params: {} })];
     const result = await engine.evaluate(rules, makeInput());
 
     // Both plugins' modifications should be present
@@ -104,7 +115,7 @@ describe('Chained beforeEvaluate hooks', () => {
       },
     };
 
-    const model = new StubModel('M', 50);
+    const model = new StubModel('m', 50);
     const modelPlugin: PPEPlugin = {
       name: 'model-host',
       version: '1.0.0',
@@ -119,7 +130,7 @@ describe('Chained beforeEvaluate hooks', () => {
       strict: false,
     });
 
-    const rules = [makeRule({ id: 'r1', model: 'M', params: {} })];
+    const rules = [makeRule({ id: 'r1', model: 'm', params: {} })];
     await engine.evaluate(rules, makeInput());
 
     // pluginB should have received the enrichment from pluginA
@@ -140,15 +151,32 @@ function pluginWith(name: string, hooks: Partial<PPEPlugin> = {}): PPEPlugin {
   };
 }
 
-function engineWith(plugins: PPEPlugin[], dsls: DSLEvaluator[] = []): PPEEngine {
+/** What `evaluate` rejects with, or `undefined` when it resolves. */
+async function failure(engine: PPEEngine, rules: Rule[]): Promise<unknown> {
+  return engine.evaluate(rules, makeInput()).then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+}
+
+function engineWith(
+  plugins: PPEPlugin[],
+  dsls: DSLEvaluator[] = [],
+  snapshot?: InMemorySnapshotAdapter,
+): PPEEngine {
   const host: PPEPlugin = {
     name: 'model-host',
     version: '1.0.0',
     onInit(context: PluginContext): void {
-      context.modelRegistry.register(new StubModel('M', 100));
+      context.modelRegistry.register(new StubModel('m', 100));
     },
   };
-  return new PPEEngine({ plugins: [host, ...plugins], dsls, strict: false });
+  return new PPEEngine({
+    plugins: [host, ...plugins],
+    dsls,
+    strict: false,
+    ...(snapshot === undefined ? {} : { snapshot }),
+  });
 }
 
 /**
@@ -162,23 +190,25 @@ interface MutableResult {
 }
 
 describe('Hook errors', () => {
-  it('reports a beforeEvaluate error without onError as a diagnostic and goes on', async () => {
+  it('fails the evaluation when a beforeEvaluate throws, with or without an onError', async () => {
+    const thrown = new Error('boom');
     const broken = pluginWith('broken', {
       beforeEvaluate(): BeforeEvaluateResult {
-        throw new Error('boom');
+        throw thrown;
       },
     });
-    const result = await engineWith([broken]).evaluate(
-      [makeRule({ id: 'r1', model: 'M' })],
-      makeInput(),
-    );
-    expect(result.value).toBe(100);
-    expect(result.diagnostics).toEqual([
-      { source: 'hook', plugin: 'broken', hook: 'beforeEvaluate', message: 'boom' },
-    ]);
+    const error = await failure(engineWith([broken]), [makeRule({ id: 'r1', model: 'm' })]);
+    expect(error).toBeInstanceOf(PluginHookError);
+    expect(error).toMatchObject({
+      code: 'PLUGIN_HOOK',
+      plugin: 'broken',
+      hook: 'beforeEvaluate',
+      message: 'plugin broken beforeEvaluate failed: boom',
+    });
+    expectCopyOf((error as PluginHookError).cause, thrown);
   });
 
-  it('calls onError and still reports the diagnostic', async () => {
+  it('calls onError with the PluginHookError and the input given to evaluate', async () => {
     const thrown = new Error('boom');
     const onError = vi.fn();
     const broken = pluginWith('broken', {
@@ -188,42 +218,41 @@ describe('Hook errors', () => {
       onError,
     });
     const input = makeInput();
-    const result = await engineWith([broken]).evaluate([makeRule({ id: 'r1', model: 'M' })], input);
+    const error = await engineWith([broken])
+      .evaluate([makeRule({ id: 'r1', model: 'm' })], input)
+      .then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
     expect(onError).toHaveBeenCalledTimes(1);
-    // A plain Error reaches onError wrapped (R28), with the input the hook received.
-    expect(onError).toHaveBeenCalledWith(expect.any(UnexpectedEngineError), input);
-    expect(onError.mock.calls[0]?.[0]).toMatchObject({ code: 'UNEXPECTED', cause: thrown });
-    expect(result.diagnostics).toEqual([
-      { source: 'hook', plugin: 'broken', hook: 'beforeEvaluate', message: 'boom' },
-    ]);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expectSameFailure(onError.mock.calls[0]?.[0], error);
+    // The engine's frozen copy, never the caller's own object.
+    expect(onError.mock.calls[0]?.[1]).not.toBe(input);
+    expect(onError.mock.calls[0]?.[1]).toEqual(input);
+    expect(Object.isFrozen(onError.mock.calls[0]?.[1])).toBe(true);
+    expect(error).toBeInstanceOf(PluginHookError);
+    expectCopyOf((error as PluginHookError).cause, thrown);
   });
 
-  it('reports a failing onError as a second diagnostic', async () => {
+  it('a failing onError does not hide the hook failure from the caller', async () => {
     const broken = pluginWith('broken', {
-      afterEvaluate(): UnsealedResult {
+      afterEvaluate(): undefined {
         throw new Error('boom');
       },
       onError(): void {
         throw new Error('onError crash');
       },
     });
-    const result = await engineWith([broken]).evaluate(
-      [makeRule({ id: 'r1', model: 'M' })],
-      makeInput(),
-    );
-    expect(result.value).toBe(100);
-    expect(result.diagnostics).toEqual([
-      { source: 'hook', plugin: 'broken', hook: 'afterEvaluate', message: 'boom' },
-      {
-        source: 'hook',
-        plugin: 'broken',
-        hook: 'afterEvaluate',
-        message: 'onError failed: onError crash',
-      },
-    ]);
+    const error = await failure(engineWith([broken]), [makeRule({ id: 'r1', model: 'm' })]);
+    expect(error).toBeInstanceOf(PluginHookError);
+    expect(error).toMatchObject({
+      hook: 'afterEvaluate',
+      message: 'plugin broken afterEvaluate failed: boom',
+    });
   });
 
-  it('orders diagnostics: engine first, then beforeEvaluate, then afterEvaluate, by plugin', async () => {
+  it('orders the diagnostics the engine accepts: engine first, then the plugins by registration', async () => {
     const facts: DSLEvaluator = {
       dsl: 'facts',
       version: '1.0.0',
@@ -232,25 +261,23 @@ describe('Hook errors', () => {
         throw new Error('cannot parse');
       },
     };
-    const failing = (name: string): PPEPlugin =>
+    // Each plugin adds a rule before; afterEvaluate leaves the decision as it is.
+    const adding = (name: string): PPEPlugin =>
       pluginWith(name, {
-        beforeEvaluate(): BeforeEvaluateResult {
-          throw new Error(`${name} before`);
-        },
-        afterEvaluate(): UnsealedResult {
-          throw new Error(`${name} after`);
-        },
+        beforeEvaluate: (input, rules) => ({
+          input,
+          rules: [...rules, makeRule({ id: `${name}-rule`, model: 'm' })],
+        }),
+        afterEvaluate: () => undefined,
       });
-    const result = await engineWith([failing('p1'), failing('p2')], [facts]).evaluate(
-      [makeRule({ id: 'r1', model: 'M', condition: { dsl: 'facts', value: 'x' } })],
+    const result = await engineWith([adding('p1'), adding('p2')], [facts]).evaluate(
+      [makeRule({ id: 'r1', model: 'm', condition: { dsl: 'facts', value: 'x' } })],
       makeInput(),
     );
     expect(result.diagnostics.map((d) => [d.source, d.plugin, d.hook, d.message])).toEqual([
-      ['engine', undefined, undefined, 'listVariables failed for r1@1 (facts): cannot parse'],
-      ['hook', 'p1', 'beforeEvaluate', 'p1 before'],
-      ['hook', 'p2', 'beforeEvaluate', 'p2 before'],
-      ['hook', 'p1', 'afterEvaluate', 'p1 after'],
-      ['hook', 'p2', 'afterEvaluate', 'p2 after'],
+      ['engine', undefined, undefined, 'listVariables of facts for r1@1 failed: cannot parse'],
+      ['hook', 'p1', 'beforeEvaluate', 'plugin p1 added rules: p1-rule@1'],
+      ['hook', 'p2', 'beforeEvaluate', 'plugin p2 added rules: p2-rule@1'],
     ]);
   });
 });
@@ -262,13 +289,13 @@ describe('Plugin state', () => {
       beforeEvaluate(input, rules): BeforeEvaluateResult {
         return { input, rules, state: { a: 1 } };
       },
-      afterEvaluate(_input, result): UnsealedResult {
+      afterEvaluate(_input, result): undefined {
         seen = result.pluginState['stateful'];
-        return result;
+        return undefined;
       },
     });
     const result = await engineWith([stateful]).evaluate(
-      [makeRule({ id: 'r1', model: 'M' })],
+      [makeRule({ id: 'r1', model: 'm' })],
       makeInput(),
     );
     expect(result.pluginState).toEqual({ stateful: { a: 1 } });
@@ -276,18 +303,15 @@ describe('Plugin state', () => {
     expect(result.diagnostics).toEqual([]);
   });
 
-  it('drops a non-JSON state with a diagnostic naming the path, and keeps the rest', async () => {
+  it('fails the evaluation for a state that is not JSON, naming the path', async () => {
     const valid = pluginWith('valid', {
-      beforeEvaluate(input): BeforeEvaluateResult {
-        return { input, rules: [], state: { when: null } };
+      beforeEvaluate(input, rules): BeforeEvaluateResult {
+        return { input, rules, state: { when: null } };
       },
     });
     const dated = pluginWith('dated', {
       beforeEvaluate(input, rules): BeforeEvaluateResult {
-        const result: BeforeEvaluateResult = {
-          input: { ...input, data: { ...input.data, enriched: true } },
-          rules,
-        };
+        const result: BeforeEvaluateResult = { input, rules };
         // The type forbids a Date in the state; a plugin can still return one at runtime.
         Object.defineProperty(result, 'state', {
           enumerable: true,
@@ -296,235 +320,164 @@ describe('Plugin state', () => {
         return result;
       },
     });
-    let seen: unknown;
+    let reached = false;
     const reader = pluginWith('reader', {
       beforeEvaluate(input, rules): BeforeEvaluateResult {
-        seen = input.data['enriched'];
+        reached = true;
         return { input, rules };
       },
     });
-    const result = await engineWith([valid, dated, reader]).evaluate(
-      [makeRule({ id: 'r1', model: 'M' })],
-      makeInput(),
-    );
-    expect(result.pluginState).toEqual({ valid: { when: null } });
-    expect(seen).toBe(true);
-    expect(result.appliedRules).toEqual([]);
-    expect(result.diagnostics).toEqual([
-      {
-        source: 'hook',
-        plugin: 'valid',
-        hook: 'beforeEvaluate',
-        message: 'plugin valid removed rules without a skip: r1@1',
-      },
-      {
-        source: 'hook',
-        plugin: 'dated',
-        hook: 'beforeEvaluate',
-        message: 'state is not JSON at $.list[1] (Date): state dropped',
-      },
+    const error = await failure(engineWith([valid, dated, reader]), [
+      makeRule({ id: 'r1', model: 'm' }),
     ]);
+    expect(error).toBeInstanceOf(PluginHookError);
+    expect(error).toMatchObject({ plugin: 'dated', hook: 'beforeEvaluate' });
+    expect((error as PluginHookError).cause).toMatchObject({
+      message: 'plugin dated beforeEvaluate returned a state that is not JSON at $.list[1] (Date)',
+    });
+    expect(reached).toBe(false);
   });
 });
 
-describe('afterEvaluate transitions', () => {
-  it('keeps outputs.value in sync when a plugin rewrites value, and says so', async () => {
-    const rewriting = pluginWith('fiscal', {
-      afterEvaluate(_input, result): UnsealedResult {
-        return { ...result, value: 0 };
-      },
-    });
-    const result = await engineWith([rewriting]).evaluate(
-      [makeRule({ id: 'r1', model: 'M' })],
-      makeInput(),
-    );
-    expect(result.value).toBe(0);
-    expect(result.outputs['value']).toEqual({
-      name: 'value',
-      type: 'number',
-      combine: 'sum',
-      value: 0,
-      contributors: ['r1'],
-    });
-    expect(result.diagnostics).toEqual([
-      {
-        source: 'hook',
-        plugin: 'fiscal',
-        hook: 'afterEvaluate',
-        message: 'plugin fiscal rewrote output value from 100 to 0',
-      },
-    ]);
+describe('afterEvaluate returns annotations, not a result', () => {
+  const rules1 = (): Rule[] => [makeRule({ id: 'r1', model: 'm' })];
+
+  /** The failure is a PluginHookError of the plugin, with the message of its cause. */
+  async function expectRefused(plugin: PPEPlugin, message: string): Promise<void> {
+    const error = await failure(engineWith([plugin]), rules1());
+    expect(error).toBeInstanceOf(PluginHookError);
+    expect(error).toMatchObject({ plugin: plugin.name, hook: 'afterEvaluate' });
+    expect((error as PluginHookError).cause).toMatchObject({ message });
+  }
+
+  it('accepts nothing, and the decision is untouched', async () => {
+    const plain = await engineWith([]).evaluate(rules1(), makeInput());
+    const result = await engineWith([
+      pluginWith('fiscal', { afterEvaluate: () => undefined }),
+    ]).evaluate(rules1(), makeInput({ requestId: 'r-undefined' }));
+    expect(result.meta).toBeUndefined();
+    expect(result.value).toBe(plain.value);
+    expect(result.appliedRules).toEqual(plain.appliedRules);
   });
 
-  it('names the rules a plugin adds to or removes from the applied and skipped lists', async () => {
-    const pseudo = makeRule({ id: 'SC', model: 'META_SHORT_CIRCUIT', priority: 9999 });
-    const rewriting = pluginWith('fiscal', {
-      afterEvaluate(_input, result): UnsealedResult {
-        const r2 = result.appliedRules.find((r) => r.id === 'r2')!;
-        return {
-          ...result,
-          appliedRules: [...result.appliedRules.filter((r) => r !== r2), pseudo],
-          skippedRules: [{ rule: r2, reason: 'RULE_CONFLICT' }],
-        };
-      },
-    });
-    const result = await engineWith([rewriting], [new StubDSL('never', false)]).evaluate(
-      [
-        makeRule({ id: 'r1', model: 'M' }),
-        makeRule({ id: 'r2', model: 'M' }),
-        makeRule({ id: 'gone', model: 'M', condition: { dsl: 'never', value: null } }),
-      ],
-      makeInput(),
-    );
-    expect(result.appliedRules.map((r) => r.id)).toEqual(['r1', 'SC']);
-    expect(result.diagnostics.map((d) => [d.source, d.plugin, d.hook, d.message])).toEqual([
-      ['hook', 'fiscal', 'afterEvaluate', 'plugin fiscal added applied rules: SC'],
-      ['hook', 'fiscal', 'afterEvaluate', 'plugin fiscal removed applied rules: r2'],
-      ['hook', 'fiscal', 'afterEvaluate', 'plugin fiscal added skipped rules: r2'],
-      ['hook', 'fiscal', 'afterEvaluate', 'plugin fiscal removed skipped rules: gone'],
-    ]);
+  it.each([
+    ['an empty object', {}],
+    ['annotations that are undefined', { annotations: undefined }],
+    ['empty annotations', { annotations: {} }],
+  ])('B57, AD6: %s is a plugin fault naming /annotations', async (_name, returned) => {
+    const error = await engineWith([
+      pluginWith('fiscal', { afterEvaluate: () => returned as never }),
+    ])
+      .evaluate(rules1(), makeInput({ requestId: `r-${_name}` }))
+      .then(
+        () => undefined,
+        (thrown: unknown) => thrown,
+      );
+    expect(error).toBeInstanceOf(PluginHookError);
+    expect((error as PluginHookError).hook).toBe('afterEvaluate');
+    expect(((error as PluginHookError).cause as Error).message).toMatch(/\/annotations/);
   });
 
-  it('refuses a rewritten value that is not a finite number', async () => {
-    const rewriting = pluginWith('fiscal', {
-      afterEvaluate(_input, result): UnsealedResult {
-        return { ...result, value: 'zero', appliedRules: [] };
-      },
-    });
-    const result = await engineWith([rewriting]).evaluate(
-      [makeRule({ id: 'r1', model: 'M' })],
-      makeInput(),
+  it('merges annotations into meta under the name of the plugin, and keeps those of the others', async () => {
+    const annotating = (name: string, annotations: Record<string, number>): PPEPlugin =>
+      pluginWith(name, { afterEvaluate: () => ({ annotations }) });
+    const result = await engineWith([
+      annotating('fiscal', { a: 1 }),
+      annotating('audit', { b: 2 }),
+    ]).evaluate(rules1(), makeInput());
+    expect(result.meta).toEqual({ fiscal: { a: 1 }, audit: { b: 2 } });
+    const plain = await engineWith([]).evaluate(rules1(), makeInput({ requestId: 'plain' }));
+    expect(result.value).toBe(plain.value);
+    expect(result.outputs).toEqual(plain.outputs);
+    expect(result.appliedRules).toEqual(plain.appliedRules);
+    expect(result.trace.steps).toEqual(
+      plain.trace.steps.map((step) => ({ ...step, durationMs: expect.any(Number) })),
     );
-    expect(result.value).toBe(100);
-    expect(result.appliedRules.map((r) => r.id)).toEqual(['r1']);
-    expect(result.diagnostics).toEqual([
-      {
-        source: 'hook',
-        plugin: 'fiscal',
-        hook: 'afterEvaluate',
-        message:
-          'plugin fiscal rewrote output value to "zero", not a finite number: result ignored',
-      },
-    ]);
   });
 
-  it('hands plugins a copy: in-place writes do not reach the engine records or the rules', async () => {
-    const rule = makeRule({ id: 'r1', model: 'M', params: { rate: 1 } });
+  it('fails for any field other than annotations: a rewritten value, a returned result', async () => {
+    await expectRefused(
+      pluginWith('fiscal', {
+        afterEvaluate: (_input, result) => ({ ...result, value: 0 }) as never,
+      }),
+      'plugin fiscal afterEvaluate returned a field other than annotations: requestId',
+    );
+    await expectRefused(
+      pluginWith('fiscal', { afterEvaluate: () => ({ value: 0 }) as never }),
+      'plugin fiscal afterEvaluate returned a field other than annotations: value',
+    );
+    await expectRefused(
+      pluginWith('fiscal', { afterEvaluate: () => ({ annotations: {}, meta: {} }) as never }),
+      'plugin fiscal afterEvaluate returned a field other than annotations: meta',
+    );
+  });
+
+  it('fails for a return that is not nothing or a plain object', async () => {
+    for (const [returned, described] of [
+      [42, '42'],
+      ['str', '"str"'],
+      [null, 'null'],
+      [[1], 'something that is not a plain object'],
+    ] as const) {
+      const error = await failure(
+        engineWith([pluginWith('fiscal', { afterEvaluate: () => returned as never })]),
+        rules1(),
+      );
+      expect(error).toBeInstanceOf(PluginHookError);
+      expect((error as PluginHookError).cause).toMatchObject({
+        message: expect.stringContaining('plugin fiscal afterEvaluate returned'),
+      });
+      void described;
+    }
+  });
+
+  it('fails for annotations that are not a JSON object', async () => {
+    await expectRefused(
+      pluginWith('fiscal', { afterEvaluate: () => ({ annotations: 5 }) as never }),
+      'plugin fiscal afterEvaluate returned annotations that are not an object',
+    );
+    await expectRefused(
+      pluginWith('fiscal', { afterEvaluate: () => ({ annotations: [1] }) as never }),
+      'plugin fiscal afterEvaluate returned annotations that are not an object',
+    );
+    await expectRefused(
+      pluginWith('fiscal', {
+        afterEvaluate: () => ({ annotations: { at: new Date(0) } }) as never,
+      }),
+      'plugin fiscal afterEvaluate returned annotations that are not JSON at $.at (Date)',
+    );
+  });
+
+  it('hands plugins a view: a plugin that writes into it changes nothing, and the evaluation fails', async () => {
+    const rule = makeRule({ id: 'r1', model: 'm', params: { rate: 1 } });
     const careless = pluginWith('careless', {
-      afterEvaluate(_input, result): UnsealedResult {
+      afterEvaluate(_input, result): undefined {
         // A careless plugin writing through the readonly types.
         const writable: MutableResult = result as unknown as MutableResult;
         writable.value = 0;
-        writable.outputs['value']!.contributors.push('ghost');
         writable.appliedRules.push({ id: 'SC', model: 'META_SHORT_CIRCUIT', params: {} });
         writable.appliedRules[0]!.params['rate'] = 2;
-        return result;
+        writable.outputs['value']!.contributors.push('ghost');
+        return undefined;
       },
     });
-    let seenByNext: unknown;
-    const next = pluginWith('next', {
-      afterEvaluate(_input, result): UnsealedResult {
-        seenByNext = result.value;
-        return result;
+    const adapter = new InMemorySnapshotAdapter();
+    const engine = engineWith([careless], [], adapter);
+    await engine.evaluate([rule], makeInput()).then(
+      () => expect.unreachable('should have failed'),
+      (error: unknown) => {
+        expect(error).toBeInstanceOf(PluginHookError);
+        // The result it was handed refuses writes: the first one throws a dedicated error.
+        expect(((error as PluginHookError).cause as Error).name).toBe('FrozenViewWriteError');
       },
-    });
-    const result = await engineWith([careless, next]).evaluate([rule], makeInput());
+    );
     expect(rule.params).toEqual({ rate: 1 });
-    expect(seenByNext).toBe(0);
-    expect(result.outputs['value']).toEqual({
-      name: 'value',
-      type: 'number',
-      combine: 'sum',
-      value: 0,
-      contributors: ['r1'],
-    });
-    expect(result.diagnostics.map((d) => d.message)).toEqual([
-      'plugin careless rewrote output value from 100 to 0',
-      'plugin careless changed engine-owned fields outputs; ignored (rewrite value instead)',
-      'plugin careless added applied rules: SC',
-      'plugin careless changed applied rules: r1',
-    ]);
-  });
-});
-
-describe('Outputs belong to the engine', () => {
-  const RISK = { type: 'string', combine: 'highestPriority' } as const;
-
-  function engineWithRisk(plugins: PPEPlugin[]): PPEEngine {
-    const host: PPEPlugin = {
-      name: 'model-host',
-      version: '1.0.0',
-      onInit(context: PluginContext): void {
-        context.modelRegistry.register(new StubModel('M', 100));
-        context.modelRegistry.register(new ValueModel('RISK', RISK, { k: 'low' }));
-      },
-    };
-    return new PPEEngine({ plugins: [host, ...plugins], dsls: [], strict: false });
-  }
-
-  const rules = (): Rule[] => [
-    makeRule({ id: 'r1', model: 'M' }),
-    makeRule({ id: 'k', model: 'RISK', output: 'risk' }),
-  ];
-
-  it('ignores a direct change of outputs.value.value and says so', async () => {
-    const sneaky = pluginWith('sneaky', {
-      afterEvaluate(_input, result): UnsealedResult {
-        const value = { ...result.outputs['value']!, value: 7 };
-        return { ...result, outputs: { ...result.outputs, value } };
-      },
-    });
-    const result = await engineWithRisk([sneaky]).evaluate(rules(), makeInput());
-    expect(result.value).toBe(100);
-    expect(result.outputs['value']!.value).toBe(100);
-    expect(result.diagnostics).toEqual([
-      {
-        source: 'hook',
-        plugin: 'sneaky',
-        hook: 'afterEvaluate',
-        message:
-          'plugin sneaky changed engine-owned fields outputs; ignored (rewrite value instead)',
-      },
-    ]);
-  });
-
-  it('ignores added, removed or changed outputs of any name', async () => {
-    const sneaky = pluginWith('sneaky', {
-      afterEvaluate(_input, result): UnsealedResult {
-        const kept = Object.fromEntries(
-          Object.entries(result.outputs).filter(([name]) => name !== 'risk'),
-        );
-        return {
-          ...result,
-          outputs: { ...kept, extra: { ...result.outputs['value']!, name: 'extra' } },
-        };
-      },
-    });
-    const result = await engineWithRisk([sneaky]).evaluate(rules(), makeInput());
-    expect(Object.keys(result.outputs).sort()).toEqual(['risk', 'value']);
-    expect(result.outputs['risk']!.value).toBe('low');
-    expect(result.diagnostics.map((d) => d.message)).toEqual([
-      'plugin sneaky changed engine-owned fields outputs; ignored (rewrite value instead)',
-    ]);
-  });
-
-  it('accepts a value rewrite that also syncs outputs.value itself, without a second diagnostic', async () => {
-    const tidy = pluginWith('tidy', {
-      afterEvaluate(_input, result): UnsealedResult {
-        const value = { ...result.outputs['value']!, value: 0 };
-        return { ...result, value: 0, outputs: { ...result.outputs, value } };
-      },
-    });
-    const result = await engineWithRisk([tidy]).evaluate(rules(), makeInput());
-    expect(result.outputs['value']!.value).toBe(0);
-    expect(result.diagnostics.map((d) => d.message)).toEqual([
-      'plugin tidy rewrote output value from 100 to 0',
-    ]);
+    expect(await adapter.exists(makeInput().requestId)).toBe(false);
   });
 });
 
 describe('Hook timeouts and onError typing', () => {
-  it('reports a hook timeout as a HookTimeoutError naming the plugin and hook', async () => {
+  it('fails the evaluation for a hook timeout: the cause is a HookTimeoutError naming the plugin and hook', async () => {
     const onError = vi.fn();
     const slow = pluginWith('slow', {
       beforeEvaluate: (input, rules) =>
@@ -536,7 +489,7 @@ describe('Hook timeouts and onError typing', () => {
     const host: PPEPlugin = {
       name: 'model-host',
       version: '1.0.0',
-      onInit: (context) => context.modelRegistry.register(new StubModel('M', 100)),
+      onInit: (context) => context.modelRegistry.register(new StubModel('m', 100)),
     };
     const engine = new PPEEngine({
       plugins: [host, slow],
@@ -544,46 +497,44 @@ describe('Hook timeouts and onError typing', () => {
       strict: false,
       timeout: { hook: 20 },
     });
-    const result = await engine.evaluate([makeRule({ id: 'r1', model: 'M' })], makeInput());
-    expect(result.value).toBe(100);
-    expect(result.diagnostics).toEqual([
-      {
-        source: 'hook',
-        plugin: 'slow',
-        hook: 'beforeEvaluate',
-        message: 'plugin slow hook beforeEvaluate timed out after 20 ms',
-      },
-    ]);
-    const error: unknown = onError.mock.calls[0]?.[0];
-    expect(error).toBeInstanceOf(HookTimeoutError);
+    const error = await failure(engine, [makeRule({ id: 'r1', model: 'm' })]);
+    expect(error).toBeInstanceOf(PluginHookError);
     expect(error).toMatchObject({
+      code: 'PLUGIN_HOOK',
+      plugin: 'slow',
+      hook: 'beforeEvaluate',
+      message:
+        'plugin slow beforeEvaluate failed: plugin slow hook beforeEvaluate timed out after 20 ms',
+    });
+    const cause = (error as PluginHookError).cause;
+    expect(cause).toBeInstanceOf(HookTimeoutError);
+    expect(cause).toMatchObject({
       code: 'HOOK_TIMEOUT',
       pluginName: 'slow',
       hook: 'beforeEvaluate',
       timeoutMs: 20,
     });
+    expect(onError).toHaveBeenCalledTimes(1);
+    expectSameFailure(onError.mock.calls[0]?.[0], error);
   });
 
-  it('wraps a non-PPEError hook error for onError, keeping the original as cause', async () => {
+  it('fails the evaluation for a non-PPEError hook error, keeping the original as cause', async () => {
     const thrown = new TypeError('bad shape');
     const onError = vi.fn();
     const broken = pluginWith('broken', {
-      afterEvaluate(): UnsealedResult {
+      afterEvaluate(): undefined {
         throw thrown;
       },
       onError,
     });
-    const result = await engineWith([broken]).evaluate(
-      [makeRule({ id: 'r1', model: 'M' })],
-      makeInput(),
-    );
-    expect(result.diagnostics.map((d) => d.message)).toEqual(['bad shape']);
-    const error: unknown = onError.mock.calls[0]?.[0];
-    expect(error).toBeInstanceOf(UnexpectedEngineError);
-    expect(error).toMatchObject({ code: 'UNEXPECTED', message: 'bad shape', cause: thrown });
+    const error = await failure(engineWith([broken]), [makeRule({ id: 'r1', model: 'm' })]);
+    expect(error).toBeInstanceOf(PluginHookError);
+    expectCopyOf((error as PluginHookError).cause, thrown);
+    // The PluginHookError is a PPEError: onError gets it as it is, not wrapped.
+    expectSameFailure(onError.mock.calls[0]?.[0], error);
   });
 
-  it('passes a PPEError to onError as is', async () => {
+  it('keeps a PPEError a hook throws as the cause of the PluginHookError', async () => {
     const thrown = new PPEError('known', 'KNOWN');
     const onError = vi.fn();
     const broken = pluginWith('broken', {
@@ -592,11 +543,14 @@ describe('Hook timeouts and onError typing', () => {
       },
       onError,
     });
-    await engineWith([broken]).evaluate([makeRule({ id: 'r1', model: 'M' })], makeInput());
-    expect(onError).toHaveBeenCalledWith(thrown, expect.anything());
+    const error = await failure(engineWith([broken]), [makeRule({ id: 'r1', model: 'm' })]);
+    expect(error).toBeInstanceOf(PluginHookError);
+    expectCopyOf((error as PluginHookError).cause, thrown);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expectSameFailure(onError.mock.calls[0]?.[0], error);
   });
 
-  it('gives onError a wrapped engine error while the caller gets the original', async () => {
+  it('gives onError and the caller an engine error holding a frozen copy of the throw', async () => {
     const thrown = new RangeError('model crash');
     const onError = vi.fn();
     const crashing: PPEPlugin = {
@@ -604,7 +558,7 @@ describe('Hook timeouts and onError typing', () => {
       version: '1.0.0',
       onInit: (context) =>
         context.modelRegistry.register({
-          name: 'CRASH',
+          name: 'crash',
           version: '1.0.0',
           validateParams: () => ({ valid: true }),
           calculate: () => {
@@ -614,11 +568,20 @@ describe('Hook timeouts and onError typing', () => {
       onError,
     };
     const engine = new PPEEngine({ plugins: [crashing], dsls: [], strict: false });
-    const outcome = engine.evaluate([makeRule({ id: 'r1', model: 'CRASH' })], makeInput());
-    await expect(outcome).rejects.toBe(thrown);
+    const outcome = engine.evaluate([makeRule({ id: 'r1', model: 'crash' })], makeInput());
+    const received: unknown = await outcome.then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    // The caller never holds the object the model threw: it is an engine error with a copy.
+    expect(received).toBeInstanceOf(UnexpectedEngineError);
+    expectCopyOf((received as { cause: unknown }).cause, thrown);
     expect(onError).toHaveBeenCalledTimes(1);
     const error: unknown = onError.mock.calls[0]?.[0];
     expect(error).toBeInstanceOf(UnexpectedEngineError);
-    expect(error).toMatchObject({ code: 'UNEXPECTED', message: 'model crash', cause: thrown });
+    // A frozen copy: the cause is a copy of what was thrown, never the object the caller gets.
+    expect(error).toMatchObject({ code: 'UNEXPECTED', message: 'model crash' });
+    expect((error as { cause: unknown }).cause).not.toBe(thrown);
+    expect((error as { cause: Error }).cause.message).toBe('model crash');
   });
 });

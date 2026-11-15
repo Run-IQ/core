@@ -1,0 +1,62 @@
+import { PPEError } from './PPEError.js';
+import { oneOf, str } from './args.js';
+import { describeThrown } from '../utils/values.js';
+import { clip, frozenErrorCopy } from '../utils/frozenCopy.js';
+import { describeFault, faultOf, trustedFault } from '../engine/pluginPort.js';
+import {
+  isEngineError,
+  isEngineErrorNamed,
+  markEngineError,
+  sealEngineError,
+} from './engineError.js';
+
+/** Every hook of a plugin. */
+export type HookName = 'onInit' | 'beforeEvaluate' | 'afterEvaluate' | 'onError';
+
+/**
+ * A plugin hook failed, so the evaluation fails (fail closed): a decision is never returned when
+ * it was computed without the preparation a plugin was supposed to do. Thrown for a hook that
+ * throws or times out (a frozen copy of a `HookTimeoutError` is then the `cause`), that returns a
+ * malformed value (the `cause` is then the text of what was refused, a bound passed included),
+ * whose returned input is refused (bounds, `validateProofInput`, strict mode), or whose effect the
+ * engine would have to refuse, discard or correct (rules removed without a skip, a state that is
+ * not JSON, engine-owned fields changed). `onError` is called on every plugin, nothing is saved.
+ * The error is frozen at creation. A failing `onError` is never dropped: every failure, in plugin order, is
+ * attached to the original error, which the caller still receives, in its `onErrorFailures`.
+ */
+export class PluginHookError extends PPEError {
+  constructor(
+    public readonly plugin: string,
+    public readonly hook: HookName,
+    cause: unknown,
+  ) {
+    plugin = str('PluginHookError', 0, plugin);
+    hook = oneOf('PluginHookError', 1, hook, [
+      'onInit',
+      'beforeEvaluate',
+      'afterEvaluate',
+      'onError',
+    ] as const);
+    // What the plugin threw is held as text, read once (see `faultOf`). So is a limit passed while
+    // reading what the plugin returned (the plugin's return is the fault: the text names the limit,
+    // its maximum and the pointer) and any refusal of the engine's internal classes, which never
+    // leave the engine. An error of a public class that the engine raised (a `ValidationError` for
+    // an input a hook returned, a `HookTimeoutError`) is copied, frozen. The message is built from
+    // what is kept.
+    const publicError = isEngineError(cause) && !isEngineErrorNamed(cause, 'EngineLimitError');
+    const fault = publicError ? undefined : (trustedFault(cause) ?? faultOf(cause));
+    super(
+      `plugin ${plugin} ${hook} failed: ${fault === undefined ? clip(describeThrown(cause)) : describeFault(fault)}`,
+      'PLUGIN_HOOK',
+    );
+    this.name = 'PluginHookError';
+    this.cause = fault === undefined ? frozenErrorCopy(cause) : Object.freeze({ ...fault });
+    // Frozen at creation (B74): a plugin cannot change what the caller receives.
+    sealEngineError(this, new.target, PluginHookError);
+  }
+
+  /** The text of the fault, or a frozen copy of the public error the engine raised. */
+  declare readonly cause: unknown;
+}
+
+markEngineError(PluginHookError);

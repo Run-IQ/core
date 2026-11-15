@@ -6,7 +6,7 @@ import { makeRule, makeInput, StubModel, StubPlugin, InMemorySnapshotAdapter } f
 describe('Idempotence', () => {
   it('refuses a duplicate requestId with DUPLICATE_REQUEST', async () => {
     const adapter = new InMemorySnapshotAdapter();
-    const model = new StubModel('M', 500);
+    const model = new StubModel('m', 500);
     const plugin = new StubPlugin('test', [model]);
 
     const engine = new PPEEngine({
@@ -16,7 +16,7 @@ describe('Idempotence', () => {
       strict: false,
     });
 
-    const rules = [makeRule({ id: 'r1', model: 'M', params: {} })];
+    const rules = [makeRule({ id: 'r1', model: 'm', params: {} })];
     const input = makeInput({ requestId: 'idempotent-001' });
 
     // First call

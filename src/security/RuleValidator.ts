@@ -1,9 +1,15 @@
-import { EXCEPTION_MODEL, SpecError, verifyRuleChecksum } from '@run-iq/spec';
+import { isSpecError } from '../utils/brand.js';
+import { refusalsOf } from '../engine/pluginBoundary.js';
+import { askValidateParams, defaultCrossing } from '../engine/pluginBoundary.js';
+import type { Crossing } from '../engine/pluginBoundary.js';
+import { EXCEPTION_MODEL, verifyRuleChecksum } from '@run-iq/spec';
 import type { Rule } from '../types/rule.js';
 import type { SkippedRule } from '../types/result.js';
 import type { ModelRegistry } from '../registry/ModelRegistry.js';
 import { ValidationError } from '../errors/ValidationError.js';
+import { UnexpectedEngineError } from '../errors/UnexpectedEngineError.js';
 import { ruleLabel } from '../utils/values.js';
+import { ChecksumMismatchError } from '../errors/ChecksumMismatchError.js';
 
 export interface RuleValidationResult {
   readonly valid: readonly Rule[];
@@ -29,14 +35,24 @@ export class RuleValidator {
   constructor(
     private readonly modelRegistry: ModelRegistry,
     private readonly onChecksumMismatch: 'throw' | 'skip' = 'skip',
+    private readonly crossing: Crossing = defaultCrossing(),
   ) {}
 
-  validate(rules: ReadonlyArray<Rule>): RuleValidationResult {
+  /**
+   * True when the rule's model is one the evaluation can run: registered when the evaluation
+   * began, or the exception model. Used for the rules a hook adds.
+   */
+  knowsModel(rule: Rule): boolean {
+    return rule.model === EXCEPTION_MODEL || this.modelRegistry.has(rule.model);
+  }
+
+  /** `pointers` is false for a rule a hook added: its place is not one of the caller's rules. */
+  validate(rules: ReadonlyArray<Rule>, pointers = true): RuleValidationResult {
     const valid: Rule[] = [];
     const invalid: SkippedRule[] = [];
 
-    for (const rule of rules) {
-      const skipped = this.checkRule(rule);
+    for (const [slot, rule] of rules.entries()) {
+      const skipped = this.checkRule(rule, pointers ? `/rules/${slot}` : undefined);
       if (skipped) {
         invalid.push(skipped);
       } else {
@@ -47,13 +63,24 @@ export class RuleValidator {
     return { valid, invalid };
   }
 
-  private checkRule(rule: Rule): SkippedRule | null {
+  private checkRule(rule: Rule, pointer?: string): SkippedRule | null {
+    // 0. An object inside the rule was not plain when it was read: the rule is excluded for it,
+    // naming where. What stands in the copy is a string, never an object the caller made up.
+    const refusals = refusalsOf(rule);
+    if (refusals !== undefined) {
+      return {
+        rule,
+        reason: 'INVALID_RULE',
+        detail: `Invalid rule ${ruleLabel(rule)}: ${refusals.join('; ')}`,
+      };
+    }
+
     // 1. Verify checksum (full rule integrity)
     let intact: boolean;
     try {
       intact = verifyRuleChecksum(rule);
     } catch (error) {
-      if (!(error instanceof SpecError)) throw error;
+      if (!isSpecError(error)) throw error;
       const detail = `Invalid rule ${String(rule.id)}@${String(rule.version)}: ${error.message}`;
       if (this.onChecksumMismatch === 'throw') {
         throw new ValidationError(detail, [detail]);
@@ -63,7 +90,7 @@ export class RuleValidator {
 
     if (!intact) {
       if (this.onChecksumMismatch === 'throw') {
-        throw new Error(`Checksum mismatch for rule ${rule.id}`);
+        throw new ChecksumMismatchError(ruleLabel(rule), pointer);
       }
       return {
         rule,
@@ -77,11 +104,16 @@ export class RuleValidator {
     // in beforeEvaluate (e.g., meta-rules). ExecutionPipeline will skip them.
     if (rule.model !== EXCEPTION_MODEL && this.modelRegistry.has(rule.model)) {
       const model = this.modelRegistry.get(rule.model);
-      const validation = model.validateParams(rule.params);
-      if (!validation.valid) {
-        const errors = validation.errors?.length
-          ? validation.errors.join('; ')
-          : 'the model gave no error';
+      // The result crosses the boundary once, through the one reader (see `askValidateParams`).
+      const verdict = askValidateParams(
+        model,
+        rule.params,
+        this.crossing,
+        UnexpectedEngineError.foreign,
+      );
+      if (verdict.kind === 'error') return { rule, reason: 'MODEL_ERROR', detail: verdict.detail };
+      if (verdict.kind === 'invalid') {
+        const errors = verdict.errors === '' ? 'the model gave no error' : verdict.errors;
         const detail = `Invalid params for rule ${ruleLabel(rule)} (model ${rule.model}): ${errors}`;
         return { rule, reason: 'INVALID_PARAMS', detail };
       }

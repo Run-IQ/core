@@ -18,7 +18,7 @@ const RISK: OutputDeclaration = {
 
 /** Declares an enum output; never calculated here, so it keeps the default number value type. */
 class RiskModel implements CalculationModel {
-  readonly name = 'Risk';
+  readonly name = 'risk';
   readonly version = '1.0.0';
   readonly output: OutputDeclaration = RISK;
   validateParams(): ValidationResult {
@@ -30,7 +30,7 @@ class RiskModel implements CalculationModel {
 }
 
 class RateModel implements CalculationModel {
-  readonly name = 'Rate';
+  readonly name = 'rate';
   readonly version = '1.0.0';
   validateParams(params: unknown): ValidationResult {
     const rate =
@@ -46,7 +46,7 @@ class RateModel implements CalculationModel {
 
 function makeRegistry(): ModelRegistry {
   const registry = new ModelRegistry();
-  registry.register(new StubModel('M'));
+  registry.register(new StubModel('m'));
   registry.register(new RiskModel());
   registry.register(new RateModel());
   return registry;
@@ -113,7 +113,7 @@ describe('ExceptionProcessor', () => {
   describe('inhibit', () => {
     it('skips the target with INHIBITED naming the source rule', () => {
       const x = carrier('X', 9000, [inhibit(['B'])]);
-      const b = makeRule({ id: 'B', model: 'M' });
+      const b = makeRule({ id: 'B', model: 'm' });
       const result = processor.apply([b, x], 'throw');
 
       expect(result.rules).toEqual([]);
@@ -130,7 +130,7 @@ describe('ExceptionProcessor', () => {
     it('lets an inhibited rule fire nothing: exceptions of exceptions', () => {
       const c = carrier('C', 9000, [inhibit(['A'])]);
       const a = carrier('A', 5000, [inhibit(['B'])]);
-      const b = makeRule({ id: 'B', model: 'M' });
+      const b = makeRule({ id: 'B', model: 'm' });
       const result = processor.apply([a, b, c], 'throw');
 
       expect(result.rules).toEqual([b]);
@@ -143,8 +143,8 @@ describe('ExceptionProcessor', () => {
     });
 
     it('resolves a mutual inhibition by priority', () => {
-      const low = makeRule({ id: 'a', model: 'M', priority: 100, exceptions: [inhibit(['b'])] });
-      const high = makeRule({ id: 'b', model: 'M', priority: 200, exceptions: [inhibit(['a'])] });
+      const low = makeRule({ id: 'a', model: 'm', priority: 100, exceptions: [inhibit(['b'])] });
+      const high = makeRule({ id: 'b', model: 'm', priority: 200, exceptions: [inhibit(['a'])] });
       const result = processor.apply([low, high], 'throw');
       expect(result.rules).toEqual([high]);
       expect(result.skipped).toEqual([
@@ -153,8 +153,8 @@ describe('ExceptionProcessor', () => {
     });
 
     it('resolves a mutual inhibition at equal priority by the lowest id, whatever the order', () => {
-      const a = makeRule({ id: 'a', model: 'M', priority: 100, exceptions: [inhibit(['b'])] });
-      const b = makeRule({ id: 'b', model: 'M', priority: 100, exceptions: [inhibit(['a'])] });
+      const a = makeRule({ id: 'a', model: 'm', priority: 100, exceptions: [inhibit(['b'])] });
+      const b = makeRule({ id: 'b', model: 'm', priority: 100, exceptions: [inhibit(['a'])] });
       const forward = processor.apply([a, b], 'throw');
       expect(forward.rules).toEqual([a]);
       expect(forward.skipped).toEqual([
@@ -169,13 +169,13 @@ describe('ExceptionProcessor', () => {
     it('selects targets by tags, and a rule never targets itself', () => {
       const k = makeRule({
         id: 'K',
-        model: 'M',
+        model: 'm',
         priority: 500,
         tags: ['promo'],
         exceptions: [{ kind: 'inhibit', targets: { tags: ['promo'] } }],
       });
-      const p = makeRule({ id: 'P', model: 'M', tags: ['promo'] });
-      const q = makeRule({ id: 'Q', model: 'M', tags: ['other'] });
+      const p = makeRule({ id: 'P', model: 'm', tags: ['promo'] });
+      const q = makeRule({ id: 'Q', model: 'm', tags: ['other'] });
       const result = processor.apply([q, p, k], 'throw');
       expect(result.rules).toEqual([k, q]);
       expect(result.skipped).toEqual([
@@ -186,7 +186,7 @@ describe('ExceptionProcessor', () => {
     it('never matches an exception-only rule by output: it has none', () => {
       const x = carrier('X', 9000, [{ kind: 'inhibit', targets: { outputs: ['value'] } }]);
       const y = carrier('Y', 100, [inhibit(['B'])]);
-      const b = makeRule({ id: 'B', model: 'M' });
+      const b = makeRule({ id: 'B', model: 'm' });
       const result = processor.apply([x, y, b], 'throw');
       expect(result.rules).toEqual([]);
       expect(result.skipped).toEqual([
@@ -201,7 +201,7 @@ describe('ExceptionProcessor', () => {
     it('records an inhibit whose targets were all already excluded, with no affected rule', () => {
       const x = carrier('X', 9000, [inhibit(['B'])]);
       const y = carrier('Y', 100, [inhibit(['B'])]);
-      const b = makeRule({ id: 'B', model: 'M' });
+      const b = makeRule({ id: 'B', model: 'm' });
       const result = processor.apply([b, y, x], 'throw');
       expect(result.skipped).toEqual([
         { rule: b, reason: 'INHIBITED', detail: 'inhibited by X@1' },
@@ -214,7 +214,7 @@ describe('ExceptionProcessor', () => {
     });
 
     it('lets a low priority rule inhibit a higher one that carries no exception', () => {
-      const h = makeRule({ id: 'H', model: 'M', priority: 9000 });
+      const h = makeRule({ id: 'H', model: 'm', priority: 9000 });
       const l = carrier('L', 10, [inhibit(['H'])]);
       const result = processor.apply([h, l], 'throw');
       expect(result.rules).toEqual([]);
@@ -229,10 +229,10 @@ describe('ExceptionProcessor', () => {
     describe('precedence: inhibiting a carrier that already fired', () => {
       const sc = carrier('SC', 9000, [{ kind: 'shortCircuit', output: 'value', value: 5 }]);
       const i = carrier('I', 100, [inhibit(['SC'])]);
-      const v = makeRule({ id: 'V', model: 'M' });
-      const d1 = makeRule({ id: 'd1', model: 'M', priority: 3, exceptions: [inhibit(['d2'])] });
-      const d2 = makeRule({ id: 'd2', model: 'M', priority: 2 });
-      const d3 = makeRule({ id: 'd3', model: 'M', priority: 1, exceptions: [inhibit(['d1'])] });
+      const v = makeRule({ id: 'V', model: 'm' });
+      const d1 = makeRule({ id: 'd1', model: 'm', priority: 3, exceptions: [inhibit(['d2'])] });
+      const d2 = makeRule({ id: 'd2', model: 'm', priority: 2 });
+      const d3 = makeRule({ id: 'd3', model: 'm', priority: 1, exceptions: [inhibit(['d1'])] });
 
       it('throws ExceptionPrecedenceError in throw mode, whatever the order', () => {
         for (const order of permutations([sc, i, v])) {
@@ -299,11 +299,11 @@ describe('ExceptionProcessor', () => {
     });
 
     it('lists affected ids sorted', () => {
-      const x = carrier('X', 9000, [{ kind: 'inhibit', targets: { models: ['M'] } }]);
+      const x = carrier('X', 9000, [{ kind: 'inhibit', targets: { models: ['m'] } }]);
       const rules = [
-        makeRule({ id: 'z', model: 'M' }),
-        makeRule({ id: 'a', model: 'M', priority: 50 }),
-        makeRule({ id: 'm', model: 'M', priority: 300 }),
+        makeRule({ id: 'z', model: 'm' }),
+        makeRule({ id: 'a', model: 'm', priority: 50 }),
+        makeRule({ id: 'm', model: 'm', priority: 300 }),
       ];
       const result = processor.apply([...rules, x], 'throw');
       expect(result.applied).toEqual([
@@ -319,8 +319,8 @@ describe('ExceptionProcessor', () => {
 
   describe('carrier that also computes', () => {
     it('keeps a carrier whose model is not EXCEPTION_MODEL in rules', () => {
-      const k = makeRule({ id: 'K', model: 'M', priority: 500, exceptions: [inhibit(['B'])] });
-      const b = makeRule({ id: 'B', model: 'M' });
+      const k = makeRule({ id: 'K', model: 'm', priority: 500, exceptions: [inhibit(['B'])] });
+      const b = makeRule({ id: 'B', model: 'm' });
       const result = processor.apply([b, k], 'throw');
       expect(result.rules).toEqual([k]);
       expect(result.skipped).toEqual([
@@ -330,7 +330,7 @@ describe('ExceptionProcessor', () => {
 
     it('removes an EXCEPTION_MODEL rule from rules without skipping it', () => {
       const x = carrier('X', 9000, [inhibit(['nobody'])]);
-      const b = makeRule({ id: 'B', model: 'M' });
+      const b = makeRule({ id: 'B', model: 'm' });
       const result = processor.apply([x, b], 'throw');
       expect(result.rules).toEqual([b]);
       expect(result.skipped).toEqual([]);
@@ -340,18 +340,18 @@ describe('ExceptionProcessor', () => {
 
     it('still fires the exceptions of a carrier that is SHORT_CIRCUITED or has INVALID_PARAMS', () => {
       const sc = carrier('SC', 9000, [{ kind: 'shortCircuit', output: 'value', value: 5 }]);
-      const k = makeRule({ id: 'K', model: 'M', priority: 10, exceptions: [inhibit(['W'])] });
-      const w = makeRule({ id: 'W', model: 'M', output: 'other' });
+      const k = makeRule({ id: 'K', model: 'm', priority: 10, exceptions: [inhibit(['W'])] });
+      const w = makeRule({ id: 'W', model: 'm', output: 'other' });
       const t = makeRule({
         id: 'T',
-        model: 'Rate',
+        model: 'rate',
         params: { rate: 0.5 },
         output: 'rate',
         priority: 10,
         exceptions: [inhibit(['W2'])],
       });
       const s = carrier('S', 8000, [substitute(['T'], { rate: 'bad' })]);
-      const w2 = makeRule({ id: 'W2', model: 'M', output: 'other' });
+      const w2 = makeRule({ id: 'W2', model: 'm', output: 'other' });
       const input = [sc, k, w, t, s, w2];
       const result = processor.apply(input, 'throw');
       expect(result.rules).toEqual([]);
@@ -381,8 +381,8 @@ describe('ExceptionProcessor', () => {
     });
 
     it('returns rules without exceptions untouched', () => {
-      const a = makeRule({ id: 'a', model: 'M', priority: 1 });
-      const b = makeRule({ id: 'b', model: 'M', priority: 2 });
+      const a = makeRule({ id: 'a', model: 'm', priority: 1 });
+      const b = makeRule({ id: 'b', model: 'm', priority: 2 });
       const result = processor.apply([a, b], 'throw');
       expect(result.rules).toHaveLength(2);
       expect(result.rules[0]).toBe(b);
@@ -395,7 +395,7 @@ describe('ExceptionProcessor', () => {
 
   describe('substitute', () => {
     it('lets the highest priority win on a conflicting key', () => {
-      const t = makeRule({ id: 'T', model: 'Rate', params: { rate: 0.5, base: 'x' } });
+      const t = makeRule({ id: 'T', model: 'rate', params: { rate: 0.5, base: 'x' } });
       const high = carrier('S-high', 9000, [substitute(['T'], { rate: 0.1 })]);
       const low = carrier('S-low', 5000, [substitute(['T'], { rate: 0.02 })]);
       const result = processor.apply([low, t, high], 'throw');
@@ -413,7 +413,7 @@ describe('ExceptionProcessor', () => {
       const t = deepFreeze(
         makeRule({
           id: 'T',
-          model: 'M',
+          model: 'm',
           params: { brackets: [1, 2, 3], opts: { a: 1, b: { c: 2 } } },
         }),
       );
@@ -430,7 +430,7 @@ describe('ExceptionProcessor', () => {
     });
 
     it('skips the target with INVALID_PARAMS when the model refuses the substituted params', () => {
-      const t = makeRule({ id: 'T', model: 'Rate', params: { rate: 0.5 } });
+      const t = makeRule({ id: 'T', model: 'rate', params: { rate: 0.5 } });
       const s = carrier('S', 9000, [substitute(['T'], { rate: 'high' })]);
       const result = processor.apply([t, s], 'throw');
 
@@ -448,7 +448,7 @@ describe('ExceptionProcessor', () => {
     });
 
     it('names every substituting rule, in application order, when the result is refused', () => {
-      const t = makeRule({ id: 'T', model: 'Rate', params: { rate: 0.5 } });
+      const t = makeRule({ id: 'T', model: 'rate', params: { rate: 0.5 } });
       const a = carrier('A', 9000, [substitute(['T'], { extra: 1 })]);
       const b = carrier('B', 5000, [substitute(['T'], { rate: 'x' })]);
       const result = processor.apply([t, a, b], 'throw');
@@ -462,7 +462,7 @@ describe('ExceptionProcessor', () => {
     });
 
     it('does not substitute an inhibited rule', () => {
-      const t = makeRule({ id: 'T', model: 'Rate', params: { rate: 0.5 } });
+      const t = makeRule({ id: 'T', model: 'rate', params: { rate: 0.5 } });
       const s = carrier('S', 9000, [substitute(['T'], { rate: 0.1 })]);
       const i = carrier('I', 100, [inhibit(['T'])]);
       const result = processor.apply([t, s, i], 'throw');
@@ -477,7 +477,7 @@ describe('ExceptionProcessor', () => {
     });
 
     it('does not see a conflict on a target already excluded when the carriers fire', () => {
-      const t = makeRule({ id: 'T', model: 'M' });
+      const t = makeRule({ id: 'T', model: 'm' });
       const a = carrier('A', 500, [substitute(['T'], { r: 1 })]);
       const b = carrier('B', 500, [substitute(['T'], { r: 2 })]);
       const x = carrier('X', 9000, [inhibit(['T'])]);
@@ -497,7 +497,7 @@ describe('ExceptionProcessor', () => {
     });
 
     it('names every rule of a substitution tie in throw mode', () => {
-      const t = makeRule({ id: 'T', model: 'Rate', params: { rate: 0.5 } });
+      const t = makeRule({ id: 'T', model: 'rate', params: { rate: 0.5 } });
       const a = carrier('A', 500, [substitute(['T'], { rate: 0.1 })]);
       const b = carrier('B', 500, [substitute(['T'], { rate: 0.2 })]);
       const c = carrier('C', 500, [substitute(['T'], { rate: 0.3 })]);
@@ -513,7 +513,7 @@ describe('ExceptionProcessor', () => {
     });
 
     it('applies non-conflicting substitutions of equal priority together', () => {
-      const t = makeRule({ id: 'T', model: 'Rate', params: { rate: 0.5 } });
+      const t = makeRule({ id: 'T', model: 'rate', params: { rate: 0.5 } });
       const a = carrier('A', 5000, [substitute(['T'], { rate: 0.2, x: { k: 1 } })]);
       const b = carrier('B', 5000, [substitute(['T'], { rate: 0.2, x: { j: 2 } })]);
       const result = processor.apply([b, t, a], 'throw');
@@ -522,7 +522,7 @@ describe('ExceptionProcessor', () => {
     });
 
     it('throws RuleConflictError on conflicting keys at equal priority in throw mode', () => {
-      const t = makeRule({ id: 'T', model: 'Rate', params: { rate: 0.5 } });
+      const t = makeRule({ id: 'T', model: 'rate', params: { rate: 0.5 } });
       const a = carrier('A', 5000, [substitute(['T'], { rate: 0.1 })]);
       const b = carrier('B', 5000, [substitute(['T'], { rate: 0.2 })]);
       for (const order of permutations([t, a, b])) {
@@ -538,7 +538,7 @@ describe('ExceptionProcessor', () => {
     });
 
     it("keeps the lowest id on conflicting keys at equal priority in 'first' mode", () => {
-      const t = makeRule({ id: 'T', model: 'Rate', params: { rate: 0.5 } });
+      const t = makeRule({ id: 'T', model: 'rate', params: { rate: 0.5 } });
       const a = carrier('A', 5000, [substitute(['T'], { rate: 0.1 })]);
       const b = carrier('B', 5000, [substitute(['T'], { rate: 0.2 })]);
       const expected = processor.apply([t, a, b], 'first');
@@ -561,14 +561,14 @@ describe('ExceptionProcessor', () => {
 
   describe('shortCircuit', () => {
     const risk = (id: string, priority = 100): Rule =>
-      makeRule({ id, model: 'Risk', output: 'riskLevel', priority });
+      makeRule({ id, model: 'risk', output: 'riskLevel', priority });
 
     it('excludes only the rules of the short-circuited output', () => {
       const sc = carrier('SC', 9000, [
         { kind: 'shortCircuit', output: 'riskLevel', value: 'high', reason: 'blacklisted' },
       ]);
       const r1 = risk('R1');
-      const v1 = makeRule({ id: 'V1', model: 'M' });
+      const v1 = makeRule({ id: 'V1', model: 'm' });
       const result = processor.apply([v1, r1, sc], 'throw');
 
       expect(result.rules).toEqual([v1]);
@@ -610,11 +610,11 @@ describe('ExceptionProcessor', () => {
     it('keeps a computing carrier of the short-circuited output and excludes the others', () => {
       const k = makeRule({
         id: 'K',
-        model: 'M',
+        model: 'm',
         priority: 500,
         exceptions: [{ kind: 'shortCircuit', output: 'value', value: 7 }],
       });
-      const v = makeRule({ id: 'V', model: 'M' });
+      const v = makeRule({ id: 'V', model: 'm' });
       const result = processor.apply([v, k], 'throw');
       expect(result.rules).toEqual([k]);
       expect(result.skipped).toEqual([
@@ -724,7 +724,7 @@ describe('ExceptionProcessor', () => {
         inhibit(['V']),
       ]);
       const r1 = risk('R1');
-      const v = makeRule({ id: 'V', model: 'M' });
+      const v = makeRule({ id: 'V', model: 'm' });
       const expected = processor.apply([b, r1, a, v], 'first');
       expect(expected.rules).toEqual([v]);
       expect(expected.shortCircuits.get('riskLevel')).toEqual({
@@ -764,7 +764,7 @@ describe('ExceptionProcessor', () => {
         inhibit(['V']),
       ]);
       const r1 = risk('R1');
-      const v = makeRule({ id: 'V', model: 'M' });
+      const v = makeRule({ id: 'V', model: 'm' });
       const result = processor.apply([sc, r1, v], 'throw');
       expect(result.rules).toEqual([r1, v]);
       expect(result.shortCircuits.size).toBe(0);
@@ -813,7 +813,7 @@ describe('ExceptionProcessor', () => {
         { kind: 'shortCircuit', output: 'riskLevel', value: 'high' },
       ]);
       const r1 = risk('R1');
-      const n1 = makeRule({ id: 'N1', model: 'M', output: 'riskLevel' });
+      const n1 = makeRule({ id: 'N1', model: 'm', output: 'riskLevel' });
       const result = processor.apply([n1, sc, r1], 'throw');
       expect(result.skipped).toEqual([
         {
@@ -832,12 +832,12 @@ describe('ExceptionProcessor', () => {
       const fixture = [
         carrier('C', 9000, [inhibit(['A'])]),
         carrier('A', 5000, [inhibit(['B'])]),
-        makeRule({ id: 'B', model: 'Rate', params: { rate: 0.5 } }),
+        makeRule({ id: 'B', model: 'rate', params: { rate: 0.5 } }),
         carrier('S2', 5000, [substitute(['B'], { rate: 0.3, more: [1] })]),
         carrier('S1', 6000, [substitute(['B'], { rate: 0.2 })]),
         carrier('SC', 4000, [{ kind: 'shortCircuit', output: 'riskLevel', value: 'high' }]),
-        makeRule({ id: 'R2', model: 'Risk', output: 'riskLevel', priority: 300 }),
-        makeRule({ id: 'R1', model: 'Risk', output: 'riskLevel', priority: 300 }),
+        makeRule({ id: 'R2', model: 'risk', output: 'riskLevel', priority: 300 }),
+        makeRule({ id: 'R1', model: 'risk', output: 'riskLevel', priority: 300 }),
       ];
       const expected = processor.apply(fixture, 'first');
       expectInvariants(fixture, expected);
@@ -873,13 +873,13 @@ describe('ExceptionProcessor short-circuits on decimal outputs (R38)', () => {
   const registry = makeRegistry();
   registry.register(
     new ValueModel(
-      'Amount',
+      'amount',
       { type: 'decimal', combine: 'sum', rounding: { scale: 2, mode: 'halfUp' } },
       {},
     ),
   );
   const processor = new ExceptionProcessor(registry);
-  const amount = makeRule({ id: 'A', model: 'Amount', output: 'amount' });
+  const amount = makeRule({ id: 'A', model: 'amount', output: 'amount' });
   const expected =
     'does not match type decimal: expected a decimal string (an optional "-", digits, ' +
     'an optional "." and digits, no exponent) or a safe integer';

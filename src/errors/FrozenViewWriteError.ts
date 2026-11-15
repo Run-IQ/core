@@ -1,0 +1,20 @@
+import { PPEError } from './PPEError.js';
+import { str } from './args.js';
+import { markEngineError, sealEngineError } from './engineError.js';
+
+/**
+ * Thrown by the view the engine hands to a model or a DSL when it writes into it. A model, a DSL
+ * or a `validateParams` that writes into its arguments is not allowed to change what the engine
+ * holds: the write is refused with this error, and the rule it belongs to is excluded.
+ */
+export class FrozenViewWriteError extends PPEError {
+  constructor(readonly key: string) {
+    key = str('FrozenViewWriteError', 0, key);
+    super(`wrote to its input: ${key}`, 'FROZEN_VIEW_WRITE');
+    this.name = 'FrozenViewWriteError';
+    // Frozen at creation: what the caller receives cannot be changed (B74).
+    sealEngineError(this, new.target, FrozenViewWriteError);
+  }
+}
+
+markEngineError(FrozenViewWriteError);

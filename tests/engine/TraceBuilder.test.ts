@@ -10,7 +10,7 @@ describe('TraceBuilder', () => {
       output: 'value',
       conditionResult: true,
       conditionDetail: null,
-      modelUsed: 'FLAT_RATE',
+      modelUsed: 'flat_rate',
       inputSnapshot: { amount: 1000 },
       contribution: 180,
       durationMs: 1.5,

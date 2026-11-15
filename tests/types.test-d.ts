@@ -1,4 +1,15 @@
+import type { Crossing } from '../src/engine/pluginBoundary.js';
 import { describe, expectTypeOf, it } from 'vitest';
+import { EVALUATE_OPTION_NAMES } from '../src/types/options.js';
+import { formatPointer as specFormatPointer, parsePointer as specParsePointer } from '@run-iq/spec';
+import {
+  DEFAULT_LIMITS,
+  buildContext,
+  formatPointer,
+  normalizeMeta,
+  parsePointer,
+  readsOf,
+} from '../src/index.js';
 import type {
   BeforeEvaluateResult,
   BreakdownItem,
@@ -9,8 +20,20 @@ import type {
   DecisionProof,
   DecisionStore,
   Diagnostic,
+  DSLCapabilities,
   DSLEvaluator,
+  EngineLimitError,
+  EngineLimitsInput,
+  EngineLimits,
+  EvaluateOptions,
   EvaluationInput,
+  InputSeedConfig,
+  JsonPointer,
+  NormalizedMeta,
+  PPEEngine,
+  PPEEngineConfig,
+  Reads,
+  RuleSetRef,
   EvaluationResult,
   FactEncoder,
   ModelRegistry,
@@ -31,6 +54,8 @@ import type {
   ProofException as SpecProofException,
   CombineStrategy as SpecCombineStrategy,
   DecisionProof as SpecDecisionProof,
+  FactAssertion,
+  JsonPointer as SpecJsonPointer,
   JsonValue,
   OutputDeclaration as SpecOutputDeclaration,
   OutputType as SpecOutputType,
@@ -38,7 +63,7 @@ import type {
 
 /** A model written before phase 2: it returns a bare number, with no output declaration. */
 class LegacyNumberModel implements CalculationModel {
-  readonly name = 'FLAT';
+  readonly name = 'flat';
   readonly version = '1.0.0';
 
   validateParams(_params: unknown): ValidationResult {
@@ -194,9 +219,15 @@ describe('breakdown, trace, input and hooks', () => {
     expectTypeOf<TraceStep['sourceRef']>().toEqualTypeOf<string | undefined>();
   });
 
-  it('accepts dimensions in the input meta', () => {
+  it('accepts dimensions, dates and assertions in the input meta', () => {
     expectTypeOf<EvaluationInput['meta']['dimensions']>().toEqualTypeOf<
-      Readonly<Record<string, string>> | undefined
+      Readonly<Record<string, string | readonly string[]>> | undefined
+    >();
+    expectTypeOf<EvaluationInput['meta']['dates']>().toEqualTypeOf<
+      Readonly<Record<string, string | Date>> | undefined
+    >();
+    expectTypeOf<EvaluationInput['meta']['assertions']>().toEqualTypeOf<
+      Readonly<Record<string, FactAssertion>> | undefined
     >();
   });
 
@@ -244,5 +275,70 @@ describe('the transitional aliases are exactly the Omit of spec and result types
     expectTypeOf<UnsettledException>().not.toHaveProperty('stratum');
     expectTypeOf<UnsettledException>().not.toHaveProperty('salt');
     expectTypeOf<UnsettledException['affected']>().toEqualTypeOf<SpecProofException['affected']>();
+  });
+});
+
+describe('what 9L adds to the public surface', () => {
+  it('re-exports the pointer functions and type of spec: plugins import only core', () => {
+    expectTypeOf(formatPointer).toEqualTypeOf<typeof specFormatPointer>();
+    expectTypeOf(parsePointer).toEqualTypeOf<typeof specParsePointer>();
+    expectTypeOf<JsonPointer>().toEqualTypeOf<SpecJsonPointer>();
+  });
+
+  it('exports the limits, the reads, the context and the options', () => {
+    expectTypeOf<keyof EngineLimits>().toEqualTypeOf<
+      | 'maxRules'
+      | 'maxInstances'
+      | 'maxCollectionLength'
+      | 'maxInputLeaves'
+      | 'maxInputDepth'
+      | 'maxStrata'
+      | 'maxSegments'
+      | 'maxRecursionDepth'
+      | 'maxReferentialNodes'
+      | 'maxGroupDepth'
+      | 'maxRuleLeaves'
+      | 'maxHookLeaves'
+      | 'maxRuleSetNodes'
+      | 'maxStringLength'
+      | 'maxRecordLength'
+      | 'maxTraceNodes'
+    >();
+    expectTypeOf(DEFAULT_LIMITS).toEqualTypeOf<Readonly<EngineLimits>>();
+    // @ts-expect-error DEFAULT_LIMITS is frozen: it is read-only for the compiler too
+    DEFAULT_LIMITS.maxRules = 5;
+    expectTypeOf<EngineLimitError['limit']>().toEqualTypeOf<keyof EngineLimits>();
+    expectTypeOf(readsOf).parameters.toEqualTypeOf<
+      [Rule, DSLEvaluator | undefined, CalculationModel<OutputValue> | undefined, Crossing?]
+    >();
+    expectTypeOf(readsOf).returns.toEqualTypeOf<Reads>();
+    expectTypeOf(normalizeMeta).returns.toEqualTypeOf<NormalizedMeta>();
+    expectTypeOf(buildContext).returns.toEqualTypeOf<Readonly<Record<string, unknown>>>();
+    expectTypeOf<EvaluateOptions>().toHaveProperty('requested');
+    // The list of names covers every option: a field added to EvaluateOptions and forgotten in
+    // the list fails here, not at run time.
+    expectTypeOf<(typeof EVALUATE_OPTION_NAMES)[number]>().toEqualTypeOf<keyof EvaluateOptions>();
+    expectTypeOf<RuleSetRef>().toMatchTypeOf<{ kind: 'pack' | 'local' }>();
+  });
+
+  it('types the reads of a DSL and of a model as pointers, and adds compute and capabilities', () => {
+    expectTypeOf<DSLEvaluator['listVariables']>().toEqualTypeOf<
+      ((expression: unknown) => JsonPointer[]) | undefined
+    >();
+    expectTypeOf<CalculationModel['listVariables']>().toEqualTypeOf<
+      ((params: unknown) => JsonPointer[]) | undefined
+    >();
+    expectTypeOf<DSLEvaluator['compute']>().toEqualTypeOf<
+      ((expression: unknown, context: Record<string, unknown>) => JsonValue) | undefined
+    >();
+    expectTypeOf<DSLEvaluator['capabilities']>().toEqualTypeOf<DSLCapabilities | undefined>();
+  });
+
+  it('lets evaluate take options, and the engine take limits and an input seed', () => {
+    expectTypeOf<Parameters<PPEEngine['evaluate']>>().toEqualTypeOf<
+      [rules: ReadonlyArray<Rule>, input: EvaluationInput, options?: EvaluateOptions]
+    >();
+    expectTypeOf<PPEEngineConfig['limits']>().toEqualTypeOf<EngineLimitsInput | undefined>();
+    expectTypeOf<PPEEngineConfig['inputSeed']>().toEqualTypeOf<InputSeedConfig | undefined>();
   });
 });

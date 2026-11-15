@@ -58,7 +58,14 @@ export type SkipReason =
   /** Another rule with the same priority won the conflict (`onConflict: 'first'`). */
   | 'RULE_CONFLICT'
   /** No model is registered for the rule's `model` (for plugins; core throws `ModelNotFoundError`). */
-  | 'MODEL_NOT_FOUND';
+  | 'MODEL_NOT_FOUND'
+  /** A plugin skipped the rule in `beforeEvaluate`; `detail` carries the plugin's words. */
+  | 'PLUGIN'
+  /**
+   * A model wrote into its frozen arguments (the rule, its params or the input): that rule is
+   * excluded and `detail` says `wrote to its input: ...`.
+   */
+  | 'MODEL_ERROR';
 
 /** One contribution that entered the decision, as the trace step of the same rule records it. */
 export interface BreakdownItem {
@@ -98,7 +105,12 @@ export interface EvaluationResult {
   readonly trace: EvaluationTrace;
   /** What went wrong without stopping the evaluation (hook errors...). */
   readonly diagnostics: readonly Diagnostic[];
-  /** Sorted dotted paths read by the conditions but absent from `input.data`. */
+  /**
+   * The JSON pointers (sorted by `comparePointers`) read by the conditions but absent from the
+   * evaluation context: facts of `data`, `/$dates/...` and `/$dimensions/...`. The reads of a
+   * model are not included yet, nor those of a rule whose `listVariables` does not conform
+   * (its diagnostic says so; 9M1 adds the `provisional` status for such a rule).
+   */
   readonly missingFacts: readonly string[];
   /** The `state` each plugin returned from `beforeEvaluate`, by plugin name. */
   readonly pluginState: Readonly<Record<string, JsonValue>>;

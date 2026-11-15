@@ -28,10 +28,10 @@ describe('RuleFilter: a dimension that spec cannot decide', () => {
   it('excludes the rule, naming why spec could not decide', async () => {
     matchDimension.mockReturnValue({
       result: 'unknown',
-      why: 'code "X" not valid at "2024-06-01"',
+      why: 'code "x" not valid at "2024-06-01"',
     });
     const filter = new RuleFilter(new DSLRegistry(), new PluginSandbox(500, 100));
-    const rule = makeRule({ id: 'r1', model: 'M', dimensions: { country: 'TG' } });
+    const rule = makeRule({ id: 'r1', model: 'm', dimensions: { country: 'TG' } });
     const input = makeInput({ meta: { tenantId: 't', dimensions: { country: 'TG' } } });
     const result = await filter.filter([rule], input, new Date('2024-06-15T23:30:00.000Z'));
     // Called with the rule's spec, the input value, the UTC civil date of the evaluation and no
@@ -42,7 +42,7 @@ describe('RuleFilter: a dimension that spec cannot decide', () => {
       {
         rule,
         reason: 'DIMENSION_MISMATCH',
-        detail: 'country: rule TG, input TG (unknown: code "X" not valid at "2024-06-01")',
+        detail: 'country: rule TG, input TG (unknown: code "x" not valid at "2024-06-01")',
       },
     ]);
   });

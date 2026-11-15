@@ -1,5 +1,4 @@
 import type { DSLEvaluator } from '../types/dsl.js';
-import { DSLTimeoutError } from '../errors/DSLTimeoutError.js';
 import { DSLEvaluationError } from '../errors/DSLEvaluationError.js';
 import { HookTimeoutError } from '../errors/HookTimeoutError.js';
 import type { PPEError } from '../errors/PPEError.js';
@@ -28,21 +27,21 @@ export class PluginSandbox {
     );
   }
 
+  /**
+   * Runs a DSL evaluator, whose contract is synchronous: the engine does not wait for it (a
+   * promise it returns is a breach of the port, handled there) and no timer can interrupt it. The
+   * answer comes back in a box (`{ answer }`): a promise resolved with a value a plugin made would
+   * read its `then`, outside the port. Whatever it throws, a `DSLTimeoutError` a plugin built
+   * included, is a failure of the evaluator.
+   */
   async runDSL(
     evaluator: DSLEvaluator,
     expression: unknown,
     context: Record<string, unknown>,
-  ): Promise<boolean> {
+  ): Promise<{ answer: unknown }> {
     try {
-      return await this.withTimeout(
-        () => evaluator.evaluate(expression, context),
-        this.dslTimeout,
-        () => new DSLTimeoutError(evaluator.dsl, this.dslTimeout),
-      );
+      return { answer: evaluator.evaluate(expression, context) };
     } catch (error) {
-      if (error instanceof DSLTimeoutError) {
-        throw error;
-      }
       throw new DSLEvaluationError(evaluator.dsl, error);
     }
   }

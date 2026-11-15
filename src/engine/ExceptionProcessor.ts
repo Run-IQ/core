@@ -1,3 +1,5 @@
+import { askValidateParams, defaultCrossing } from './pluginBoundary.js';
+import type { Crossing } from './pluginBoundary.js';
 import {
   DEFAULT_OUTPUT,
   DEFAULT_OUTPUT_DECLARATION,
@@ -15,6 +17,7 @@ import type {
 import type { Rule } from '../types/rule.js';
 import type { SkippedRule } from '../types/result.js';
 import type { ModelRegistry } from '../registry/ModelRegistry.js';
+import { UnexpectedEngineError } from '../errors/UnexpectedEngineError.js';
 import { ExceptionPrecedenceError } from '../errors/ExceptionPrecedenceError.js';
 import { deepMerge } from '../utils/deepMerge.js';
 import { compareByPriorityThenIdentity, resolveTie } from './resolveTie.js';
@@ -131,7 +134,10 @@ function paramsConflict(a: Record<string, unknown>, b: Record<string, unknown>):
  * `INVALID_PARAMS`.
  */
 export class ExceptionProcessor {
-  constructor(private readonly models: ModelRegistry) {}
+  constructor(
+    private readonly models: ModelRegistry,
+    private readonly crossing: Crossing = defaultCrossing(),
+  ) {}
 
   apply(rules: ReadonlyArray<Rule>, mode: 'throw' | 'first'): ExceptionResult {
     const ordered = [...rules].sort(compareByPriorityThenIdentity);
@@ -273,8 +279,8 @@ export class ExceptionProcessor {
         const by = [...new Set(patches.map((p) => ruleLabel(p.carrier)))].join(', ');
         final.set(target, {
           rule: target,
-          reason: 'INVALID_PARAMS',
-          detail: `after substitution by ${by}: ${refusal}`,
+          reason: refusal.reason,
+          detail: `after substitution by ${by}: ${refusal.detail}`,
         });
         continue;
       }
@@ -419,14 +425,20 @@ export class ExceptionProcessor {
   }
 
   /** Why the rule's model refuses `params`, or `undefined` if it accepts them or is unknown. */
-  private refuseParams(rule: Rule, params: unknown): string | undefined {
+  private refuseParams(
+    rule: Rule,
+    params: unknown,
+  ): { reason: 'INVALID_PARAMS' | 'MODEL_ERROR'; detail: string } | undefined {
     if (!this.models.has(rule.model)) return undefined;
     const model = this.models.get(rule.model);
-    const validation = model.validateParams(params);
-    if (validation.valid) return undefined;
-    return validation.errors?.length
-      ? validation.errors.join('; ')
-      : `params refused by model ${model.name}`;
+    // The result crosses the boundary once, through the one reader (see `askValidateParams`).
+    const verdict = askValidateParams(model, params, this.crossing, UnexpectedEngineError.foreign);
+    if (verdict.kind === 'valid') return undefined;
+    if (verdict.kind === 'error') return { reason: 'MODEL_ERROR', detail: verdict.detail };
+    return {
+      reason: 'INVALID_PARAMS',
+      detail: verdict.errors === '' ? `params refused by model ${model.name}` : verdict.errors,
+    };
   }
 }
 

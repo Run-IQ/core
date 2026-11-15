@@ -1,5 +1,6 @@
+import { isSpecError } from '../utils/brand.js';
 import Decimal from 'decimal.js';
-import { SpecError, toCanonicalDecimal } from '@run-iq/spec';
+import { toCanonicalDecimal } from '@run-iq/spec';
 import type { JsonValue, OutputRounding, RoundingMode } from '@run-iq/spec';
 
 /**
@@ -62,7 +63,7 @@ export function readDecimal(value: JsonValue): string | undefined {
   try {
     return toCanonicalDecimal(value);
   } catch (e) {
-    if (e instanceof SpecError && e.code === 'INVALID_DECIMAL') return undefined;
+    if (isSpecError(e, 'INVALID_DECIMAL')) return undefined;
     throw e;
   }
 }

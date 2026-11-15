@@ -10,10 +10,10 @@ import { ValidationError } from '../../src/errors/ValidationError.js';
 describe('RuleValidator', () => {
   it('passes rules with valid checksum', () => {
     const registry = new ModelRegistry();
-    registry.register(new StubModel('M'));
+    registry.register(new StubModel('m'));
     const validator = new RuleValidator(registry);
 
-    const rule = makeRule({ id: 'r1', model: 'M', params: { rate: 0.18 } });
+    const rule = makeRule({ id: 'r1', model: 'm', params: { rate: 0.18 } });
     const result = validator.validate([rule]);
     expect(result.valid).toHaveLength(1);
     expect(result.invalid).toHaveLength(0);
@@ -21,10 +21,10 @@ describe('RuleValidator', () => {
 
   it('rejects rules with tampered checksum', () => {
     const registry = new ModelRegistry();
-    registry.register(new StubModel('M'));
+    registry.register(new StubModel('m'));
     const validator = new RuleValidator(registry);
 
-    const rule = makeRule({ id: 'r1', model: 'M', params: { rate: 0.18 } });
+    const rule = makeRule({ id: 'r1', model: 'm', params: { rate: 0.18 } });
     // Tamper the checksum
     const tampered = { ...rule, checksum: 'bad_checksum' };
     const result = validator.validate([tampered]);
@@ -34,7 +34,7 @@ describe('RuleValidator', () => {
 
   it('rejects rules with invalid params', () => {
     const badModel: CalculationModel = {
-      name: 'BAD',
+      name: 'bad',
       version: '1.0.0',
       validateParams: (): ValidationResult => ({ valid: false, errors: ['bad param'] }),
       calculate: (_i: Record<string, unknown>, _r: Readonly<Rule>, _p: unknown) => 0,
@@ -43,29 +43,29 @@ describe('RuleValidator', () => {
     registry.register(badModel);
     const validator = new RuleValidator(registry);
 
-    const rule = makeRule({ id: 'r1', model: 'BAD', params: { x: 1 } });
+    const rule = makeRule({ id: 'r1', model: 'bad', params: { x: 1 } });
     const result = validator.validate([rule]);
     expect(result.invalid).toHaveLength(1);
     expect(result.invalid[0]!.reason).toBe('INVALID_PARAMS');
-    expect(result.invalid[0]!.detail).toBe('Invalid params for rule r1@1 (model BAD): bad param');
+    expect(result.invalid[0]!.detail).toBe('Invalid params for rule r1@1 (model bad): bad param');
   });
 
   it('says so when a model refuses params without giving errors', () => {
     const registry = new ModelRegistry();
     registry.register({
-      name: 'MUTE',
+      name: 'mute',
       version: '1.0.0',
       validateParams: (): ValidationResult => ({ valid: false }),
       calculate: () => 0,
     });
-    const result = new RuleValidator(registry).validate([makeRule({ id: 'r1', model: 'MUTE' })]);
+    const result = new RuleValidator(registry).validate([makeRule({ id: 'r1', model: 'mute' })]);
     expect(result.invalid.map((s) => [s.reason, s.detail])).toEqual([
-      ['INVALID_PARAMS', 'Invalid params for rule r1@1 (model MUTE): the model gave no error'],
+      ['INVALID_PARAMS', 'Invalid params for rule r1@1 (model mute): the model gave no error'],
     ]);
   });
 
   it('names the rule in the detail of a checksum mismatch', () => {
-    const rule = { ...makeRule({ id: 'r1', model: 'M' }), checksum: 'f'.repeat(64) };
+    const rule = { ...makeRule({ id: 'r1', model: 'm' }), checksum: 'f'.repeat(64) };
     const result = new RuleValidator(new ModelRegistry()).validate([rule]);
     expect(result.invalid.map((s) => [s.reason, s.detail])).toEqual([
       ['CHECKSUM_MISMATCH', 'Checksum mismatch for rule r1@1'],
@@ -73,7 +73,7 @@ describe('RuleValidator', () => {
   });
 
   it('excludes an exception carrier without exceptions as INVALID_RULE with the spec message', () => {
-    const carrier = { ...makeRule({ id: 'X', model: 'M' }), model: EXCEPTION_MODEL };
+    const carrier = { ...makeRule({ id: 'X', model: 'm' }), model: EXCEPTION_MODEL };
     const result = new RuleValidator(new ModelRegistry()).validate([carrier]);
     expect(result.valid).toEqual([]);
     expect(result.invalid.map((s) => [s.reason, s.detail])).toEqual([
@@ -106,7 +106,7 @@ describe('RuleValidator', () => {
 
   it('skips a malformed rule as INVALID_RULE with the spec error as detail', () => {
     const validator = new RuleValidator(new ModelRegistry());
-    const rule = makeRule({ id: 'r1', model: 'M' });
+    const rule = makeRule({ id: 'r1', model: 'm' });
     const malformed = { ...rule, effectiveFrom: new Date('not a date') };
     const result = validator.validate([malformed]);
     expect(result.valid).toHaveLength(0);
@@ -117,7 +117,7 @@ describe('RuleValidator', () => {
 
   it('throws a ValidationError for a malformed rule when onChecksumMismatch is throw', () => {
     const validator = new RuleValidator(new ModelRegistry(), 'throw');
-    const rule = makeRule({ id: 'r1', model: 'M' });
+    const rule = makeRule({ id: 'r1', model: 'm' });
     expect(() => validator.validate([{ ...rule, version: 1.5 }])).toThrow(ValidationError);
     expect(() => validator.validate([{ ...rule, version: 1.5 }])).toThrow(/Invalid rule r1@1\.5/);
   });

@@ -28,7 +28,7 @@ describe('PluginSandbox', () => {
     const sandbox = new PluginSandbox(500, 100);
     const dsl = new StubDSL('test', true);
     const result = await sandbox.runDSL(dsl, {}, {});
-    expect(result).toBe(true);
+    expect(result).toEqual({ answer: true });
   });
 
   it('throws DSLEvaluationError for non-timeout DSL errors', async () => {
@@ -41,7 +41,6 @@ describe('PluginSandbox', () => {
       },
     };
     await expect(sandbox.runDSL(throwingDSL, {}, {})).rejects.toThrow(DSLEvaluationError);
-    await expect(sandbox.runDSL(throwingDSL, {}, {})).rejects.not.toThrow(DSLTimeoutError);
   });
 
   it('catches errors from hooks', async () => {
@@ -57,17 +56,31 @@ describe('PluginSandbox', () => {
     ).rejects.toThrow('hook error');
   });
 
-  it('times out async DSL that exceeds timeout', async () => {
+  it('does not wait for a DSL that returns a promise: the answer is the promise, in a box', async () => {
     const sandbox = new PluginSandbox(500, 50);
     const slowDSL: DSLEvaluator = {
       dsl: 'slow',
       version: '1.0.0',
-      // An async evaluator, which the contract does not declare: only the timeout stops it.
       evaluate: (() =>
         new Promise<boolean>((resolve) => {
           setTimeout(() => resolve(true), 200);
         })) as unknown as DSLEvaluator['evaluate'],
     };
-    await expect(sandbox.runDSL(slowDSL, {}, {})).rejects.toThrow(DSLTimeoutError);
+    const started = performance.now();
+    const { answer } = await sandbox.runDSL(slowDSL, {}, {});
+    expect(performance.now() - started).toBeLessThan(100);
+    expect(answer).toBeInstanceOf(Promise);
+  });
+
+  it('treats a DSLTimeoutError a DSL threw as a failure of the DSL, not a timeout', async () => {
+    const sandbox = new PluginSandbox(500, 50);
+    const forging: DSLEvaluator = {
+      dsl: 'forging',
+      version: '1.0.0',
+      evaluate: () => {
+        throw new DSLTimeoutError('forging', 1);
+      },
+    };
+    await expect(sandbox.runDSL(forging, {}, {})).rejects.toThrow(DSLEvaluationError);
   });
 });

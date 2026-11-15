@@ -9,7 +9,7 @@ describe('Strict mode', () => {
     const adapter = new InMemorySnapshotAdapter();
     adapter.shouldFail = true;
 
-    const model = new StubModel('M', 100);
+    const model = new StubModel('m', 100);
     const plugin = new StubPlugin('test', [model]);
 
     const engine = new PPEEngine({
@@ -19,7 +19,7 @@ describe('Strict mode', () => {
       strict: true,
     });
 
-    const rules = [makeRule({ id: 'r1', model: 'M', params: {} })];
+    const rules = [makeRule({ id: 'r1', model: 'm', params: {} })];
     const input = makeInput({ meta: { tenantId: 'tenant-1', effectiveDate: new Date() } });
     await expect(engine.evaluate(rules, input)).rejects.toThrow(SnapshotFailureError);
   });
@@ -28,7 +28,7 @@ describe('Strict mode', () => {
     const adapter = new InMemorySnapshotAdapter();
     adapter.shouldFail = true;
 
-    const model = new StubModel('M', 100);
+    const model = new StubModel('m', 100);
     const plugin = new StubPlugin('test', [model]);
 
     const engine = new PPEEngine({
@@ -38,13 +38,13 @@ describe('Strict mode', () => {
       strict: false,
     });
 
-    const rules = [makeRule({ id: 'r1', model: 'M', params: {} })];
+    const rules = [makeRule({ id: 'r1', model: 'm', params: {} })];
     const result = await engine.evaluate(rules, makeInput());
     expect(result.value).toBe(100);
   });
 
   it('throws RuleConflictError in strict mode on priority conflict', async () => {
-    const model = new StubModel('M', 100);
+    const model = new StubModel('m', 100);
     const plugin = new StubPlugin('test', [model]);
 
     const engine = new PPEEngine({
@@ -55,8 +55,8 @@ describe('Strict mode', () => {
     });
 
     const rules = [
-      makeRule({ id: 'r1', model: 'M', priority: 100, params: {}, dominanceGroup: 'G1' }),
-      makeRule({ id: 'r2', model: 'M', priority: 100, params: {}, dominanceGroup: 'G1' }),
+      makeRule({ id: 'r1', model: 'm', priority: 100, params: {}, dominanceGroup: 'G1' }),
+      makeRule({ id: 'r2', model: 'm', priority: 100, params: {}, dominanceGroup: 'G1' }),
     ];
     const input = makeInput({ meta: { tenantId: 'tenant-1', effectiveDate: new Date() } });
     await expect(engine.evaluate(rules, input)).rejects.toThrow(RuleConflictError);

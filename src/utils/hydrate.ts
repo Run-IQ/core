@@ -1,4 +1,5 @@
-import { SpecError, toExecutableRule, validateRuleDefinition } from '@run-iq/spec';
+import { isSpecError } from '../utils/brand.js';
+import { toExecutableRule, validateRuleDefinition } from '@run-iq/spec';
 import type { RuleDefinitionInput } from '@run-iq/spec';
 import type { Rule } from '../types/rule.js';
 import { ValidationError } from '../errors/ValidationError.js';
@@ -35,7 +36,7 @@ export function hydrateRule(raw: Record<string, unknown>): Rule {
     // justification: required fields are type-checked above; toExecutableRule validates the rest
     rule = toExecutableRule(raw as unknown as RuleDefinitionInput);
   } catch (error) {
-    if (error instanceof SpecError) {
+    if (isSpecError(error)) {
       // Report every problem of the rule, not only the first one normalization hit.
       const { errors } = validateRuleDefinition(raw);
       const reasons = errors.length > 0 ? errors : [error.message];

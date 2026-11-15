@@ -1,4 +1,6 @@
 import { PPEError } from './PPEError.js';
+import { str, strings } from './args.js';
+import { markEngineError, sealEngineError } from './engineError.js';
 
 /**
  * The combined value of a number output is not finite (e.g. a sum that overflows): the decision
@@ -10,10 +12,17 @@ export class OutputNotFiniteError extends PPEError {
     /** The ids of the rules whose contributions were combined, by id then version. */
     public readonly contributors: readonly string[],
   ) {
+    output = str('OutputNotFiniteError', 0, output);
+    contributors = strings('OutputNotFiniteError', 1, contributors);
     super(
       `Output ${output} is not a finite number; contributors: ${contributors.join(', ')}`,
       'OUTPUT_NOT_FINITE',
     );
     this.name = 'OutputNotFiniteError';
+    this.contributors = Object.freeze([...contributors]);
+    // Frozen at creation: what the caller receives cannot be changed (B74).
+    sealEngineError(this, new.target, OutputNotFiniteError);
   }
 }
+
+markEngineError(OutputNotFiniteError);

@@ -43,8 +43,8 @@ describe('PluginRegistry', () => {
 
   it('allows plugins with different names', () => {
     const registry = new PluginRegistry();
-    registry.register(new StubPlugin('fiscal', [new StubModel('M1')]));
-    registry.register(new StubPlugin('payroll', [new StubModel('M2')]));
+    registry.register(new StubPlugin('fiscal', [new StubModel('m1')]));
+    registry.register(new StubPlugin('payroll', [new StubModel('m2')]));
     expect(registry.has('fiscal')).toBe(true);
     expect(registry.has('payroll')).toBe(true);
   });

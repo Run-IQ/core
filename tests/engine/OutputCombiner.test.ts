@@ -7,7 +7,7 @@ import { DecimalPrecisionError } from '../../src/errors/DecimalPrecisionError.js
 import type { Rule } from '../../src/types/rule.js';
 import { makeRule, permutations } from '../helpers.js';
 
-const rule = (id: string, priority = 100): Rule => makeRule({ id, model: 'M', priority });
+const rule = (id: string, priority = 100): Rule => makeRule({ id, model: 'm', priority });
 const of = (r: Rule, value: JsonValue): { rule: Rule; value: JsonValue } => ({ rule: r, value });
 
 const NUMBER = (combine: OutputDeclaration['combine']): OutputDeclaration => ({

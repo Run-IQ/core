@@ -7,7 +7,7 @@ describe('SnapshotManager lenient mode (via engine)', () => {
     const adapter = new InMemorySnapshotAdapter();
     adapter.shouldFail = true;
 
-    const model = new StubModel('M', 750);
+    const model = new StubModel('m', 750);
     const plugin = new StubPlugin('test', [model]);
 
     const engine = new PPEEngine({
@@ -17,7 +17,7 @@ describe('SnapshotManager lenient mode (via engine)', () => {
       strict: false,
     });
 
-    const rules = [makeRule({ id: 'r1', model: 'M', params: {} })];
+    const rules = [makeRule({ id: 'r1', model: 'm', params: {} })];
     const result = await engine.evaluate(rules, makeInput());
 
     expect(result.value).toBe(750);
@@ -29,7 +29,7 @@ describe('SnapshotManager lenient mode (via engine)', () => {
     const adapter = new InMemorySnapshotAdapter();
     adapter.shouldFail = true;
 
-    const model = new StubModel('M', 300);
+    const model = new StubModel('m', 300);
     const plugin = new StubPlugin('test', [model]);
 
     const engine = new PPEEngine({
@@ -39,7 +39,7 @@ describe('SnapshotManager lenient mode (via engine)', () => {
       strict: false,
     });
 
-    const rules = [makeRule({ id: 'r1', model: 'M', params: {} })];
+    const rules = [makeRule({ id: 'r1', model: 'm', params: {} })];
     const result = await engine.evaluate(rules, makeInput());
 
     expect(result.value).toBe(300);
@@ -51,7 +51,7 @@ describe('SnapshotManager lenient mode (via engine)', () => {
     const adapter = new InMemorySnapshotAdapter();
     adapter.shouldFail = true;
 
-    const model = new StubModel('M', 500);
+    const model = new StubModel('m', 500);
     const plugin = new StubPlugin('test', [model]);
 
     let capturedError: unknown = undefined;
@@ -66,7 +66,7 @@ describe('SnapshotManager lenient mode (via engine)', () => {
       },
     });
 
-    const rules = [makeRule({ id: 'r1', model: 'M', params: {} })];
+    const rules = [makeRule({ id: 'r1', model: 'm', params: {} })];
     const result = await engine.evaluate(rules, makeInput());
 
     expect(result.value).toBe(500);
@@ -78,7 +78,7 @@ describe('SnapshotManager lenient mode (via engine)', () => {
     const adapter = new InMemorySnapshotAdapter();
     adapter.shouldFail = true;
 
-    const model = new StubModel('M', 100);
+    const model = new StubModel('m', 100);
     const plugin = new StubPlugin('test', [model]);
 
     const engine = new PPEEngine({
@@ -89,8 +89,8 @@ describe('SnapshotManager lenient mode (via engine)', () => {
     });
 
     const rules = [
-      makeRule({ id: 'r1', model: 'M', priority: 200, params: {} }),
-      makeRule({ id: 'r2', model: 'M', priority: 100, params: {} }),
+      makeRule({ id: 'r1', model: 'm', priority: 200, params: {} }),
+      makeRule({ id: 'r2', model: 'm', priority: 100, params: {} }),
     ];
 
     const result = await engine.evaluate(rules, makeInput());

@@ -23,7 +23,8 @@
   ],
   "scripts": {
     "build": "tsup",
-    "test": "vitest run",
+    "test": "vitest run --project fast",
+    "test:heavy": "vitest run --project heavy --no-file-parallelism --maxWorkers=1",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "lint": "eslint src/ tests/ && prettier --check src/ tests/",
     "lint:fix": "eslint src/ tests/ --fix && prettier --write src/ tests/"
