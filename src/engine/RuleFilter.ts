@@ -253,7 +253,11 @@ export class RuleFilter {
         // A refused write taints the call even when the DSL caught it and answered (AE4).
         if (views.wrote !== undefined) throw new Error(views.wrote);
         // The verdict crosses once, through the one reader; it is still read by truthiness (N21).
-        if (!readVerdict(result, this.crossing, `condition of ${ruleLabel(rule)}`)) {
+        const holds = readVerdict(result, this.crossing, `condition of ${ruleLabel(rule)}`);
+        // A write made while the engine read the verdict (a trap of it) and caught by the DSL
+        // taints the call too (AG2).
+        if (views.wrote !== undefined) throw new Error(views.wrote);
+        if (!holds) {
           return { reason: 'CONDITION_FALSE', detail: 'condition evaluated to false' };
         }
       } catch (error) {

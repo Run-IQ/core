@@ -101,7 +101,7 @@ function computeReads(
     declared = false;
   };
 
-  const collect = (source: string, ask: () => unknown, origin: string): void => {
+  const collect = (source: string, ask: () => unknown, origin: string, scope: ViewScope): void => {
     let items: unknown[];
     try {
       // The answer crosses once, through the one reader: copied, bounded, its text weighed.
@@ -138,6 +138,9 @@ function computeReads(
         budget: crossing.budget,
         budgetMode: 'text',
       }) as unknown[];
+      // A refused write taints the call even when the plugin caught it and answered: the rule's
+      // reads are unknown (AG2).
+      if (scope.wrote !== undefined) throw new Error(scope.wrote);
       items = [];
       for (let index = 0; index < answer.length; index += 1) items.push(answer[index]);
     } catch (error) {
@@ -192,20 +195,24 @@ function computeReads(
     if (dsl?.listVariables === undefined) declared = false;
     else {
       const value = rule.condition.value;
+      const scope = new ViewScope();
       collect(
         rule.condition.dsl,
-        () => askListVariables(dsl, new ViewScope().trapped(value)),
+        () => askListVariables(dsl, scope.trapped(value)),
         `dsl:${rule.condition.dsl}`,
+        scope,
       );
     }
   }
   if (model?.listVariables === undefined) declared = false;
   else {
     const params = rule.params;
+    const scope = new ViewScope();
     collect(
       model.name,
-      () => askListVariables(model, new ViewScope().trapped(params)),
+      () => askListVariables(model, scope.trapped(params)),
       `model:${model.name}`,
+      scope,
     );
   }
 

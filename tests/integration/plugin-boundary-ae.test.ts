@@ -550,3 +550,131 @@ describe('B33, MC9: a stolen engine error and a forged internal fault, at every 
     }
   }
 });
+
+describe('AG2: a write made while the engine reads the returned value, and caught, taints the call', () => {
+  it('W3: a getter of the model output that writes and catches: MODEL_ERROR', async () => {
+    const model = modelNamed('getterwriter', {
+      calculate: (_input: unknown, _rule: unknown, params: unknown) =>
+        ({
+          get value(): number {
+            try {
+              (params as Record<string, unknown>)['rate'] = 9;
+            } catch {
+              // caught
+            }
+            return 4;
+          },
+        }) as never,
+    });
+    const result = await build([regModel(model)]).evaluate(
+      [makeRule({ id: 'g', model: 'getterwriter', params: { rate: 1 } })],
+      makeInput(),
+    );
+    expect(result.skippedRules[0]).toMatchObject({ reason: 'MODEL_ERROR' });
+    expect(result.skippedRules[0]?.detail).toContain('wrote to its input');
+    expect(result.appliedRules).toEqual([]);
+  });
+
+  it('W2: a trap of the DSL verdict that writes and catches: DSL_ERROR', async () => {
+    const dsl: DSLEvaluator = {
+      dsl: 'trapwriter',
+      version: '1.0.0',
+      evaluate: (expression) =>
+        new Proxy(
+          {},
+          {
+            getPrototypeOf() {
+              try {
+                (expression as Record<string, unknown>)['at'] = 1;
+              } catch {
+                // caught
+              }
+              return Object.prototype;
+            },
+          },
+        ) as never,
+    };
+    const result = await build([], {}, [dsl]).evaluate(
+      [makeRule({ id: 'd', model: 'm', condition: { dsl: 'trapwriter', value: { a: 1 } } })],
+      makeInput(),
+    );
+    expect(result.skippedRules[0]?.reason).toBe('DSL_ERROR');
+    expect(result.appliedRules).toEqual([]);
+  });
+
+  it('W5: a listVariables that writes, catches and answers: the reads are unknown', () => {
+    const dsl: DSLEvaluator = {
+      dsl: 'lvwriter',
+      version: '1.0.0',
+      evaluate: () => true,
+      listVariables: (expression) => {
+        try {
+          (expression as Record<string, unknown>)['at'] = 1;
+        } catch {
+          // caught
+        }
+        return ['/amount'];
+      },
+    };
+    const rule = makeRule({ id: 'c', model: 'm', condition: { dsl: 'lvwriter', value: { a: 1 } } });
+    const reads = readsOf(rule, dsl, undefined);
+    expect(reads.declared).toBe(false);
+    expect(reads.problems[0]?.kind).toBe('failed');
+    expect(reads.problems[0]?.message).toContain('wrote to its input');
+  });
+
+  it('K4b: validateParams that writes, catches and answers with a verdict: MODEL_ERROR, not INVALID_PARAMS', async () => {
+    const model = modelNamed('slowcatcher', {
+      validateParams: ((params: Record<string, unknown>) => {
+        try {
+          params['rate'] = 0;
+        } catch {
+          // caught
+        }
+        return { valid: false, errors: ['rate is bad'] };
+      }) as never,
+    });
+    const result = await build([regModel(model)]).evaluate(
+      [makeRule({ id: 's', model: 'slowcatcher', params: { rate: 1 } })],
+      makeInput(),
+    );
+    expect(result.skippedRules[0]?.reason).toBe('MODEL_ERROR');
+    expect(result.skippedRules[0]?.detail).toContain('wrote to its input');
+  });
+});
+
+describe('K13: a listVariables length that is not a length marks the reads unknown', () => {
+  it.each([[Number.NaN], [-1], [1.5], ['3'], [2 ** 53], [undefined]])('length %j', (length) => {
+    const answer = new Proxy([] as string[], {
+      get: (t, k, r) => (k === 'length' ? length : Reflect.get(t, k, r)),
+    });
+    const dsl: DSLEvaluator = {
+      dsl: 'badlength',
+      version: '1.0.0',
+      evaluate: () => true,
+      listVariables: () => answer,
+    };
+    const rule = makeRule({ id: 'c', model: 'm', condition: { dsl: 'badlength', value: {} } });
+    const reads = readsOf(rule, dsl, undefined);
+    expect(reads.declared).toBe(false);
+    expect(reads.problems[0]?.kind).toBe('failed');
+    expect(reads.problems[0]?.message).toContain('invalid length');
+  });
+});
+
+describe('K9, K17: the source of a listVariables limit, and an attributed limit is frozen', () => {
+  it('a listVariables answer past maxHookLeaves names its dsl, and the error is frozen', async () => {
+    const dsl: DSLEvaluator = {
+      dsl: 'lv',
+      version: '1.0.0',
+      evaluate: () => true,
+      listVariables: () => Array.from({ length: 10 }, (_, i) => `/${'a'.repeat(300)}${i}`),
+    };
+    const error = await failure(build([], { limits: { maxHookLeaves: 20 } }, [dsl]), [
+      makeRule({ id: 'c', model: 'm', condition: { dsl: 'lv', value: {} } }),
+    ]);
+    expect(error).toBeInstanceOf(EngineLimitError);
+    expect(error).toMatchObject({ limit: 'maxHookLeaves', source: 'dsl:lv' });
+    expect(Object.isFrozen(error)).toBe(true);
+  });
+});

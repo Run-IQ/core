@@ -254,6 +254,12 @@ export class ExecutionPipeline {
           });
           continue;
         }
+        // A write made while the engine read the output (a getter of it) and caught by the model
+        // taints the call as well: the slot is set, so the rule is excluded (AG2).
+        if (views.wrote !== undefined) {
+          skipped.push({ rule, reason: 'MODEL_ERROR', detail: views.wrote });
+          continue;
+        }
         const durationMs = Math.round((performance.now() - start) * 100) / 100;
         const { value, detail } = readCalculation(raw, declaration);
         if (!isJsonValue(value)) {
