@@ -11,10 +11,13 @@ export type HookName = 'onInit' | 'beforeEvaluate' | 'afterEvaluate' | 'onError'
 /**
  * A plugin hook failed, so the evaluation fails (fail closed): a decision is never returned when
  * it was computed without the preparation a plugin was supposed to do. Thrown for a hook that
- * throws or times out (`HookTimeoutError` is then the `cause`), that returns a malformed value,
+ * throws or times out (a frozen copy of a `HookTimeoutError` is then the `cause`), that returns a
+ * malformed value (the `cause` is then the text of what was refused, a bound passed included),
  * whose returned input is refused (bounds, `validateProofInput`, strict mode), or whose effect the
  * engine would have to refuse, discard or correct (rules removed without a skip, a state that is
  * not JSON, engine-owned fields changed). `onError` is called on every plugin, nothing is saved.
+ * The error is frozen at creation. A failing `onError` is never dropped: the first failure is
+ * attached to the original error, which the caller still receives, as `onErrorFailure`.
  */
 export class PluginHookError extends PPEError {
   constructor(

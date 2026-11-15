@@ -46,9 +46,12 @@ export interface PluginContext {
   readonly engineVersion: string;
 }
 
-/** What `afterEvaluate` returns: annotations on the result, under the plugin's name in `meta`. */
+/**
+ * What `afterEvaluate` returns, when it returns something: annotations on the result, under the
+ * plugin's name in `meta`. They are required and non-empty: to annotate nothing, return nothing.
+ */
 export interface AfterEvaluateResult {
-  readonly annotations?: Readonly<Record<string, JsonValue>> | undefined;
+  readonly annotations: Readonly<Record<string, JsonValue>>;
 }
 
 export interface BeforeEvaluateResult {
@@ -70,8 +73,10 @@ export interface PPEPlugin {
    * Called once, when the engine is built. Synchronous: a promise it returns is a breach, never
    * awaited, and a throw or a promise makes the construction fail with a `PluginHookError`
    * (`hook: 'onInit'`). The `name` and `version` of a plugin, a model and a DSL are read once, when
-   * they are registered, and checked: a name is 1 to 128 characters of letters, digits and
-   * `. _ - @ /`, a version is semver of at most 64 characters.
+   * they are registered, and checked: a plugin or DSL name matches
+   * `^[a-z0-9]+(?:[._-][a-z0-9]+)*$` and a model name is that, in lower case, with an optional
+   * scope (`@scope/name`); each is at most 128 characters. A version is SemVer 2.0.0 of at most 64
+   * characters.
    */
   onInit(context: PluginContext): void;
 
@@ -84,13 +89,12 @@ export interface PPEPlugin {
    * - The returned value is read once (`input`, `rules`, `skipped` and `state` by name, own,
    *   non-enumerable or inherited), then copied and bounded: a list's `length` is read once, at
    *   most `limits.maxRules` rules, each rule, skip and the state bounded by `maxInputLeaves`
-   *   (a rule by a fixed 100000 leaves) and `maxInputDepth`, without recursion. These are
+   *   (a rule by `limits.maxRuleLeaves`) and `maxInputDepth`, without recursion. These are
    *   failures: a hook that throws or exceeds `timeout.hook` (`HookTimeoutError` is the `cause`);
    *   a result that is not an object; an `input` that is not an object; `rules` that are not a
    *   list of objects; `skipped` that is neither absent nor a list of exactly
-   *   `{ rule, reason, detail? }` with a plugin reason (`PLUGIN`, or one of the deprecated
-   *   `INHIBITED_BY_META_RULE`, `COUNTRY_MISMATCH`, `MODEL_NOT_FOUND`: never a reason of the
-   *   engine's own stages); a `state` that is not JSON (`a state that is not JSON at $.a[1]
+   *   `{ rule, reason, detail? }` with the plugin reason `PLUGIN` and no other (every other
+   *   `SkipReason` belongs to the engine's own stages); a `state` that is not JSON (`a state that is not JSON at $.a[1]
    *   (Date)`); a getter that throws. The engine records every skip with `detail` `plugin <name>: <your words>` (`plugin <name>: skipped` when you give none): the record always says which plugin skipped.
    * - The hook is handed frozen data: a frozen input (with its own copies of the dates in
    *   `meta`) and a fresh frozen list of the engine's rules. The rules are deep-frozen and hold no
@@ -103,9 +107,11 @@ export interface PPEPlugin {
    *   unknown `meta` keys), and in strict mode the evaluation date. Changing the data is allowed
    *   once it passes. Changing `meta` at all is not (the date, the named dates, the dimensions,
    *   the tags, the context and the assertions are the caller's declarations; the engine never
-   *   guesses), nor `requestId` (the idempotence check and the record rest on it). The total of
-   *   the leaves one return makes the engine read (rules, skips, state and data) is held to
-   *   `limits.maxHookLeaves`. At most `limits.maxRules` rules may be returned.
+   *   guesses), nor `requestId` (the idempotence check and the record rest on it). One joint budget,
+   *   `limits.maxHookLeaves`, covers everything plugin code hands the engine in the evaluation
+   *   (every hook return, the models' outputs, the DSLs' verdicts and the texts of their errors,
+   *   the `validateParams` results): a bound passed in a hook's return is that hook's
+   *   `PluginHookError`, with the limit in its cause text. At most `limits.maxRules` rules may be returned.
    * - The rules it returns are checked against a ledger the engine keeps, one entry per rule
    *   instance given. A rule dropped without a skip, returned more often than it was given
    *   (checked per `id@version` and checksum, so two contents under one name cannot be swapped),
@@ -128,7 +134,8 @@ export interface PPEPlugin {
    * Runs after the decision is computed, in registration order, on a view of the result that
    * refuses every write (a `FrozenViewWriteError`, which fails the hook): nothing it does to the
    * view reaches the engine's records or the caller's rules. **It returns annotations, not a
-   * result**: nothing, or `{ annotations?: <JSON object> }`, and nothing else. The annotations are
+   * result**: nothing (`undefined`), or exactly `{ annotations }` with a non-empty JSON object, and
+   * nothing else (`{}`, `{ annotations: undefined }` and empty annotations are refused). The annotations are
    * read once through the reader (copied, bounded, their text weighed against the one budget of
    * the evaluation and counted in the record room) and merged into `result.meta` under the
    * plugin's name; the result is not copied. **Fail closed**: it cannot change the decision,
@@ -155,7 +162,9 @@ export interface PPEPlugin {
    * - The evaluation failed (a hook failure, which is a `PluginHookError`; invalid input,
    *   `ModelNotFoundError`, `OutputNotFiniteError`, conflicts...): called on every plugin, in
    *   registration order. No later hook runs and nothing is saved. If `onError`
-   *   throws, its failure is dropped: the evaluation's own error always reaches the caller.
+   *   throws, or returns a promise, its failure is never dropped and never replaces the original:
+   *   the caller still receives the evaluation's own error, with the first failure of an
+   *   `onError` attached as `onErrorFailure` (a `PluginHookError`, `hook: 'onError'`, text only).
    * - Not called for `PipelineTimeoutError`, nor for anything that happens after it: the
    *   pipeline still running is aborted at its next step (no further hook, no save, no
    *   `onError`).

@@ -30,6 +30,14 @@ export interface DSLEvaluator {
   readonly dsl: string;
   readonly version: string;
 
+  /**
+   * Decides whether the condition holds. Synchronous: a promise it returns is a breach (the rule
+   * is excluded with `DSL_ERROR`, `returned a promise`), never awaited, and `timeout.dsl` is
+   * inert in 9L, so a slow DSL blocks the evaluation. `expression` and `context` are write-trapping
+   * views of the engine's own data, never the caller's objects; every date in them is a string, never
+   * a `Date`. A refused write taints the call: even when the DSL catches the error and answers,
+   * the rule is excluded with `DSL_ERROR`. What it returns is read once, bounded, and weighed.
+   */
   evaluate(expression: unknown, context: Record<string, unknown>): boolean;
 
   /**

@@ -28,6 +28,8 @@ interface Access {
 const log: Access[] = [];
 const reached = new Set<string>();
 const traps = new Set<string>();
+/** The traps the engine itself used (the recorder test's own targets are `recorder`). */
+const evaluationTraps = new Set<string>();
 let unhandled: unknown[] = [];
 const onUnhandled = (reason: unknown): void => {
   unhandled.push(reason);
@@ -53,6 +55,7 @@ const OWNER: Record<string, string> = {
 
 const note = (where: string, trap: string, key?: string | symbol): void => {
   traps.add(trap);
+  if (where !== 'recorder') evaluationTraps.add(trap);
   log.push({
     where,
     trap,
@@ -506,8 +509,15 @@ describe('what the log shows', () => {
   });
 
   it('has seen the traps an engine uses on plugin data', () => {
-    for (const trap of ['get', 'ownKeys', 'getOwnPropertyDescriptor', 'getPrototypeOf', 'apply']) {
-      expect(traps.has(trap), `${trap} in ${[...traps].join(',')}`).toBe(true);
-    }
+    // MC6: the exact set of traps the engine used on plugin data (the writing ones never are),
+    // never a superset check.
+    expect([...evaluationTraps].sort()).toEqual([
+      'apply',
+      'get',
+      'getOwnPropertyDescriptor',
+      'getPrototypeOf',
+      'isExtensible',
+      'ownKeys',
+    ]);
   });
 });

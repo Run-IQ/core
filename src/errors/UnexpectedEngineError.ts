@@ -5,8 +5,9 @@ import { markEngineError } from './engineError.js';
 
 /**
  * A thrown value that is not a `PPEError` (a model's `RangeError`, a plugin's `TypeError`...),
- * wrapped so that `PPEPlugin.onError` always receives a `PPEError`. `cause` is the value as it
- * was thrown; the message is its message.
+ * wrapped so that `PPEPlugin.onError` always receives a `PPEError`. `cause` is the text of what
+ * was thrown (`name`, `message` and a string `code`, each read once and cut on a code point), never
+ * the object a plugin holds; the message is that text's message. The error is frozen at creation.
  */
 export class UnexpectedEngineError extends PPEError {
   override readonly cause: unknown;
