@@ -129,7 +129,7 @@ describe('AB1: the fault brand is not made by a constructor, and no field of an 
     }
   });
 
-  it('an object that looks like a fault, with a getter read once', async () => {
+  it('an object that looks like a fault, with a getter that is never run (AJ5)', async () => {
     let reads = 0;
     const lookalike = {
       name: 'Evil',
@@ -144,7 +144,8 @@ describe('AB1: the fault brand is not made by a constructor, and no field of an 
       },
     });
     const error = (await failure(build([hook]), [])) as PluginHookError;
-    expect(reads).toBe(1);
+    // Text is read by descriptor, data properties only: the accessor never runs.
+    expect(reads).toBe(0);
     expect(error.message.length).toBeLessThan(1200);
   });
 

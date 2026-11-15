@@ -1,5 +1,6 @@
 import { PPEError } from './PPEError.js';
-import { markEngineError } from './engineError.js';
+import { checkArgs } from './args.js';
+import { markEngineError, sealEngineError } from './engineError.js';
 
 /**
  * Thrown by `evaluate` for a `requestId` whose snapshot already exists. Until Task 10 core
@@ -7,13 +8,14 @@ import { markEngineError } from './engineError.js';
  */
 export class DuplicateRequestError extends PPEError {
   constructor(public readonly requestId: string) {
+    checkArgs('DuplicateRequestError', [[requestId, 's']]);
     super(
       `request ${requestId} was already evaluated; its stored decision is returned from Task 10`,
       'DUPLICATE_REQUEST',
     );
     this.name = 'DuplicateRequestError';
     // Frozen at creation: what the caller receives cannot be changed (B74).
-    Object.freeze(this);
+    sealEngineError(this, new.target, DuplicateRequestError);
   }
 }
 

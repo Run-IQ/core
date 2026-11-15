@@ -1,5 +1,6 @@
 import { PPEError } from './PPEError.js';
-import { markEngineError } from './engineError.js';
+import { checkArgs } from './args.js';
+import { markEngineError, sealEngineError } from './engineError.js';
 
 /** A plugin hook did not settle within `timeout.hook`. */
 export class HookTimeoutError extends PPEError {
@@ -8,10 +9,15 @@ export class HookTimeoutError extends PPEError {
     public readonly hook: 'beforeEvaluate' | 'afterEvaluate',
     public readonly timeoutMs: number,
   ) {
+    checkArgs('HookTimeoutError', [
+      [pluginName, 's'],
+      [hook, 's'],
+      [timeoutMs, 'n'],
+    ]);
     super(`plugin ${pluginName} hook ${hook} timed out after ${timeoutMs} ms`, 'HOOK_TIMEOUT');
     this.name = 'HookTimeoutError';
     // Frozen at creation: what the caller receives cannot be changed (B74).
-    Object.freeze(this);
+    sealEngineError(this, new.target, HookTimeoutError);
   }
 }
 

@@ -1,5 +1,6 @@
 import { PPEError } from './PPEError.js';
-import { markEngineError } from './engineError.js';
+import { checkArgs } from './args.js';
+import { markEngineError, sealEngineError } from './engineError.js';
 
 /**
  * A rule inhibits a carrier of exceptions that takes precedence over it (higher priority, or
@@ -13,13 +14,19 @@ export class ExceptionPrecedenceError extends PPEError {
     inhibitor: string,
     target: string,
   ) {
+    checkArgs('ExceptionPrecedenceError', [
+      [inhibitorId, 's'],
+      [targetId, 's'],
+      [inhibitor, 's'],
+      [target, 's'],
+    ]);
     super(
       `Exception precedence conflict: ${inhibitor} inhibits ${target}, which takes precedence and already fired`,
       'EXCEPTION_PRECEDENCE',
     );
     this.name = 'ExceptionPrecedenceError';
     // Frozen at creation: what the caller receives cannot be changed (B74).
-    Object.freeze(this);
+    sealEngineError(this, new.target, ExceptionPrecedenceError);
   }
 }
 

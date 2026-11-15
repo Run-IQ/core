@@ -2,6 +2,7 @@ import { raiseLimit } from '../errors/EngineLimitError.js';
 import { validateProofInput } from '@run-iq/spec';
 import type { ProofInput } from '@run-iq/spec';
 import type { EvaluationInput } from '../types/input.js';
+import { isEngineErrorNamed } from '../errors/engineError.js';
 import { ValidationError } from '../errors/ValidationError.js';
 import { InputCopier, listKeys } from '../input/copyInput.js';
 import { describeThrown } from '../utils/values.js';
@@ -203,8 +204,8 @@ export class InputSanitizer {
       // `validateProofInput` check them, so the type is not true yet.
       canonical = normalizeMeta(metaCopy as unknown as EvaluationInput['meta']);
     } catch (error) {
-      if (!(error instanceof ValidationError)) throw error;
-      reasons.push(...error.reasons);
+      if (!isEngineErrorNamed(error, 'ValidationError')) throw error;
+      reasons.push(...(error as ValidationError).reasons);
     }
     if (canonical !== undefined) {
       const checked: ProofInput = { data: data as ProofInput['data'], meta: canonical };

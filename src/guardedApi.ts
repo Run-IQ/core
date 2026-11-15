@@ -25,18 +25,18 @@ import { guard, guardMethods } from './errors/guard.js';
  * function, never a raw `TypeError`, `Error` or `SpecError` (AI7). The engine's own code calls the
  * unguarded implementations, so that its hot paths pay nothing.
  */
-export const hydrateRule = guard('hydrateRule', hydrateRuleImpl);
-export const hydrateRules = guard('hydrateRules', hydrateRulesImpl);
-export const canonicalStringify = guard('canonicalStringify', canonicalStringifyImpl);
-export const hashParams = guard('hashParams', hashParamsImpl);
-export const computeRuleChecksum = guard('computeRuleChecksum', computeRuleChecksumImpl);
-export const resolveLimits = guard('resolveLimits', resolveLimitsImpl);
-export const normalizeMeta = guard('normalizeMeta', normalizeMetaImpl);
-export const evaluationDate = guard('evaluationDate', evaluationDateImpl);
+export const hydrateRule = guard('hydrateRule', hydrateRuleImpl, true);
+export const hydrateRules = guard('hydrateRules', hydrateRulesImpl, true);
+export const canonicalStringify = guard('canonicalStringify', canonicalStringifyImpl, true);
+export const hashParams = guard('hashParams', hashParamsImpl, true);
+export const computeRuleChecksum = guard('computeRuleChecksum', computeRuleChecksumImpl, true);
+export const resolveLimits = guard('resolveLimits', resolveLimitsImpl, true);
+export const normalizeMeta = guard('normalizeMeta', normalizeMetaImpl, true);
+export const evaluationDate = guard('evaluationDate', evaluationDateImpl, true);
 export const readsOf = guard('readsOf', readsOfImpl);
-export const buildContext = guard('buildContext', buildContextImpl);
-export const formatPointer = guard('formatPointer', formatPointerImpl);
-export const parsePointer = guard('parsePointer', parsePointerImpl);
+export const buildContext = guard('buildContext', buildContextImpl, true);
+export const formatPointer = guard('formatPointer', formatPointerImpl, true);
+export const parsePointer = guard('parsePointer', parsePointerImpl, true);
 
 class ModelRegistry extends InternalModelRegistry {}
 class DSLRegistry extends InternalDSLRegistry {}

@@ -93,10 +93,26 @@ export function isPluginFault(value: unknown): value is PluginFaultError {
   return typeof value === 'object' && value !== null && FAULT_TEXT.has(value);
 }
 
+/**
+ * A text property of a thrown value, read by DESCRIPTOR: an own or inherited data property that
+ * holds a string. An accessor is never run (own or inherited), so no getter of the caller or of a
+ * plugin executes while a failure is described; the inherited `name` of a native error is still
+ * read (it is a data property of its prototype). The limit, stated: a Proxy's
+ * `getOwnPropertyDescriptor` and `getPrototypeOf` traps are consulted by the reflection calls.
+ */
 function property(value: object, key: string, max: number): string | undefined {
   try {
-    const answer: unknown = (value as Record<string, unknown>)[key];
-    return typeof answer === 'string' ? clipped(answer, max) : undefined;
+    let holder: object | null = value;
+    for (let depth = 0; holder !== null && depth < 16; depth += 1) {
+      const descriptor = Object.getOwnPropertyDescriptor(holder, key);
+      if (descriptor !== undefined) {
+        if (!('value' in descriptor)) return undefined;
+        const answer: unknown = descriptor.value;
+        return typeof answer === 'string' ? clipped(answer, max) : undefined;
+      }
+      holder = Object.getPrototypeOf(holder) as object | null;
+    }
+    return undefined;
   } catch {
     return undefined;
   }
@@ -176,7 +192,7 @@ function thenOf(value: unknown): Fn | undefined {
  * an unhandled one. A native promise (a subclass included) is handled through the captured
  * `Promise.prototype.then`, never its own `then`.
  */
-export function neutralize(value: unknown): void {
+export function neutralize(value: unknown, depth = 0): void {
   reading(() => {
     try {
       if (types.isPromise(value)) {
@@ -184,7 +200,14 @@ export function neutralize(value: unknown): void {
         return;
       }
       const then = thenOf(value);
-      if (then !== undefined) Reflect.apply(then, value, [undefined, noop]);
+      // The thenable is handed a resolver that neutralizes what it resolves with (a promise that
+      // rejects, a thenable inside a thenable), up to a bound, and a rejecter that does nothing.
+      if (then !== undefined) {
+        const resolve = (inner: unknown): void => {
+          if (depth < 8) neutralize(inner, depth + 1);
+        };
+        Reflect.apply(then, value, [resolve, noop]);
+      }
     } catch {
       // a thenable that throws is already a fault; a Proxy over a promise cannot be reached
     }

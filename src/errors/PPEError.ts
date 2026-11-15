@@ -1,4 +1,4 @@
-import { markEngineError, recordEngineInstance } from './engineError.js';
+import { markEngineError, sealEngineError } from './engineError.js';
 /**
  * The failures of the `onError` hooks the engine attached to an error: held outside it, so that an
  * error frozen at creation can still carry them.
@@ -28,12 +28,12 @@ export class PPEError extends Error {
     message: string,
     public readonly code: string,
   ) {
-    super(message);
+    // Anything that is not a string is shown as a fixed text: no conversion of it is ever run.
+    super(typeof message === 'string' ? message : 'invalid error message');
     this.name = 'PPEError';
     Object.setPrototypeOf(this, new.target.prototype);
-    recordEngineInstance(this, new.target);
     // A subclass freezes itself once its own fields are set; a bare PPEError is complete here (B74).
-    if (new.target === PPEError) Object.freeze(this);
+    if (new.target === PPEError) sealEngineError(this, new.target, PPEError);
   }
 }
 

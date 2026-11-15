@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import * as core from '../src/index.js';
 import { isEngineError } from '../src/errors/engineError.js';
 
@@ -50,6 +52,27 @@ const outcome = (run: () => unknown): unknown => {
   }
   return undefined;
 };
+
+describe('AJ: no exported data helper reads its argument before the inbound copier', () => {
+  it('guardedApi.ts passes every data helper through copyCallerData (a grep check)', () => {
+    const text = readFileSync(join(process.cwd(), 'src/guardedApi.ts'), 'utf8');
+    for (const name of [
+      'hydrateRule',
+      'hydrateRules',
+      'canonicalStringify',
+      'hashParams',
+      'computeRuleChecksum',
+      'resolveLimits',
+      'normalizeMeta',
+      'evaluationDate',
+      'buildContext',
+      'formatPointer',
+      'parsePointer',
+    ]) {
+      expect(text, name).toMatch(new RegExp(`guard\\('${name}', ${name}Impl, true\\)`));
+    }
+  });
+});
 
 describe('AI7: the exported helpers throw engine errors only', () => {
   it('covers every function the package exports (a new export fails this until it is listed)', () => {

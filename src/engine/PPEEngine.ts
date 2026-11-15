@@ -30,6 +30,8 @@ import { isRaisedLimit, raiseLimit } from '../errors/EngineLimitError.js';
 import { checkDerivedSeed } from '../input/inputSeed.js';
 import type { InputSeedConfig } from '../input/inputSeed.js';
 import { readEngineConfig } from './engineConfig.js';
+import { copyCallerValue } from './callerCopy.js';
+import { isEngineErrorNamed } from '../errors/engineError.js';
 import { EngineConfigError } from '../errors/EngineConfigError.js';
 import type { EngineLimits, EngineLimitsInput } from '../limits.js';
 import { EVALUATE_OPTION_NAMES } from '../types/options.js';
@@ -97,23 +99,35 @@ const ENGINE_VERSION = VERSION;
  */
 function checkEvaluateOptions(options: unknown): void {
   if (options === undefined) return;
-  const reasons: string[] = [];
-  try {
-    if (options === null || typeof options !== 'object' || Array.isArray(options)) {
-      throw new ValidationError('Invalid evaluate options', ['evaluate options must be an object']);
-    }
-    for (const name of Object.keys(options)) {
-      if (!(EVALUATE_OPTION_NAMES as readonly string[]).includes(name))
-        reasons.push(`unknown evaluate option: ${name}`);
-    }
-  } catch (error) {
-    if (error instanceof ValidationError) throw error;
-    // A revoked Proxy, a trap that throws: named, not raw.
-    throw new ValidationError('Invalid evaluate options', [
-      `options could not be read: ${describeThrown(error)}`,
+  // The options cross through the one inbound copier: own data properties only, a plain object.
+  const copy = copyCallerValue(options, '/options', { kind: 'record' }, (path, reason) => {
+    const text =
+      path === '/options' && reason === 'must be an object'
+        ? 'evaluate options must be an object'
+        : `evaluate options ${path}: ${reason}`;
+    return new ValidationError('Invalid evaluate options', [text]);
+  });
+  // Every unknown name is told, in the order given, whatever its value.
+  const unknown = Object.keys(copy).filter(
+    (name) => !(EVALUATE_OPTION_NAMES as readonly string[]).includes(name),
+  );
+  if (unknown.length > 0) {
+    throw new ValidationError(
+      'Invalid evaluate options',
+      unknown.map((name) => `unknown evaluate option: ${name}`),
+    );
+  }
+}
+
+/** The engines built by the constructor: a method called on anything else is refused (AJ4). */
+const ENGINES = new WeakSet<object>();
+
+function assertEngine(self: unknown, method: string): void {
+  if (typeof self !== 'object' || self === null || !ENGINES.has(self)) {
+    throw new ValidationError(`${method} called on something that is not a PPEEngine`, [
+      `${method} must be called on an engine`,
     ]);
   }
-  if (reasons.length > 0) throw new ValidationError('Invalid evaluate options', reasons);
 }
 
 export class PPEEngine {
@@ -224,6 +238,7 @@ export class PPEEngine {
         }
       }
       this.plugins = handles;
+      ENGINES.add(this);
     } catch (error) {
       throw UnexpectedEngineError.wrap(error);
     }
@@ -245,6 +260,7 @@ export class PPEEngine {
     input: EvaluationInput,
     options?: EvaluateOptions,
   ): Promise<UnsealedResult> {
+    assertEngine(this, 'PPEEngine.evaluate');
     const abort = new AbortController();
     const timeoutMs = this.pipelineTimeout;
     if (timeoutMs === undefined) return this.executeEvaluation(rules, input, options, abort.signal);
@@ -277,6 +293,7 @@ export class PPEEngine {
     options: EvaluateOptions | undefined,
     signal: AbortSignal,
   ): Promise<UnsealedResult> {
+    assertEngine(this, 'PPEEngine.executeEvaluation');
     const seen: { input?: EvaluationInput } = {};
     try {
       // An evaluation started from inside a plugin's callback (a nested engine) raises its errors
@@ -324,6 +341,7 @@ export class PPEEngine {
    * frozen, read again, or handed to a plugin.
    */
   private copySourceRules(rules: ReadonlyArray<Rule>, owned: WeakSet<object>): Rule[] {
+    assertEngine(this, 'PPEEngine.copySourceRules');
     try {
       // justification: each item is a copy of a rule; the validator checks it as one.
       const copies = readItems(
@@ -350,7 +368,7 @@ export class PPEEngine {
       });
       return copies;
     } catch (error) {
-      if (error instanceof ValidationError) throw error;
+      if (isEngineErrorNamed(error, 'ValidationError')) throw error;
       if (isRaisedLimit(error)) throw error;
       throw new ValidationError('Invalid rules', [describeThrown(error)]);
     }
@@ -367,6 +385,7 @@ export class PPEEngine {
     steps: number,
     pluginChars: number,
   ): void {
+    assertEngine(this, 'PPEEngine.assertRecordRoom');
     let chars = inputChars * (1 + steps) + pluginChars;
     for (const rule of rules) chars += charsOfRule(rule);
     if (chars > this.limits.maxRecordLength) {
@@ -380,6 +399,7 @@ export class PPEEngine {
    * The caller's input and each input a `beforeEvaluate` hook returns go through here.
    */
   private acceptInput(input: unknown): PreparedInput {
+    assertEngine(this, 'PPEEngine.acceptInput');
     const prepared = InputSanitizer.prepare(input, this.limits);
     if (this.strict && prepared.evaluationDate === undefined) {
       throw new ValidationError('effectiveDate is required in strict mode', [
@@ -396,6 +416,7 @@ export class PPEEngine {
     signal: AbortSignal,
     seen: { input?: EvaluationInput },
   ): Promise<UnsealedResult> {
+    assertEngine(this, 'PPEEngine.runPipeline');
     // The options and the number of rules come first: no hook runs, nothing is read, for a call
     // that is refused whatever the input.
     checkEvaluateOptions(options);

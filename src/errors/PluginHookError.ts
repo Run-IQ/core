@@ -1,9 +1,14 @@
 import { PPEError } from './PPEError.js';
+import { checkArgs } from './args.js';
 import { describeThrown } from '../utils/values.js';
 import { clip, frozenErrorCopy } from '../utils/frozenCopy.js';
 import { describeFault, faultOf, trustedFault } from '../engine/pluginPort.js';
-import { EngineLimitError } from './EngineLimitError.js';
-import { isEngineError, markEngineError } from './engineError.js';
+import {
+  isEngineError,
+  isEngineErrorNamed,
+  markEngineError,
+  sealEngineError,
+} from './engineError.js';
 
 /** Every hook of a plugin. */
 export type HookName = 'onInit' | 'beforeEvaluate' | 'afterEvaluate' | 'onError';
@@ -25,13 +30,18 @@ export class PluginHookError extends PPEError {
     public readonly hook: HookName,
     cause: unknown,
   ) {
+    checkArgs('PluginHookError', [
+      [plugin, 's'],
+      [hook, 's'],
+      [cause, '*'],
+    ]);
     // What the plugin threw is held as text, read once (see `faultOf`). So is a limit passed while
     // reading what the plugin returned (the plugin's return is the fault: the text names the limit,
     // its maximum and the pointer) and any refusal of the engine's internal classes, which never
     // leave the engine. An error of a public class that the engine raised (a `ValidationError` for
     // an input a hook returned, a `HookTimeoutError`) is copied, frozen. The message is built from
     // what is kept.
-    const publicError = isEngineError(cause) && !(cause instanceof EngineLimitError);
+    const publicError = isEngineError(cause) && !isEngineErrorNamed(cause, 'EngineLimitError');
     const fault = publicError ? undefined : (trustedFault(cause) ?? faultOf(cause));
     super(
       `plugin ${plugin} ${hook} failed: ${fault === undefined ? clip(describeThrown(cause)) : describeFault(fault)}`,
@@ -40,7 +50,7 @@ export class PluginHookError extends PPEError {
     this.name = 'PluginHookError';
     this.cause = fault === undefined ? frozenErrorCopy(cause) : Object.freeze({ ...fault });
     // Frozen at creation (B74): a plugin cannot change what the caller receives.
-    Object.freeze(this);
+    sealEngineError(this, new.target, PluginHookError);
   }
 
   /** The text of the fault, or a frozen copy of the public error the engine raised. */

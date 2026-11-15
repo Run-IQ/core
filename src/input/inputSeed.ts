@@ -1,3 +1,4 @@
+import { types } from 'node:util';
 import { ValidationError } from '../errors/ValidationError.js';
 import { CallbackError } from '../errors/CallbackError.js';
 import { callSync } from '../engine/pluginPort.js';
@@ -12,6 +13,14 @@ export type InputSeedConfig =
   | { readonly derive: (requestId: string) => Uint8Array; readonly secret?: undefined };
 
 const SEED_BYTES = 32;
+
+// The `byteLength` getter of every typed array, captured when the module loads.
+const TYPED_ARRAY_BYTE_LENGTH = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype) as object,
+  'byteLength',
+)?.get as (this: Uint8Array) => number;
+const byteLengthOf = (bytes: Uint8Array): number =>
+  Reflect.apply(TYPED_ARRAY_BYTE_LENGTH, bytes, []) as number;
 
 const refuse = (...reasons: string[]): never => {
   throw new ValidationError('Invalid inputSeed', reasons);
@@ -39,10 +48,15 @@ export function readInputSeedConfig(
     return refuse('inputSeed must have secret or derive');
   }
   if (secret !== undefined) {
-    if (!(secret instanceof Uint8Array)) return refuse('inputSeed.secret must be a Uint8Array');
-    if (secret.length < SEED_BYTES) return refuse('inputSeed.secret must be at least 32 bytes');
-    // A copy: the caller may change the bytes, or detach the buffer, after this check.
-    return { secret: new Uint8Array(secret) };
+    // Told by the engine's intrinsics, never by `instanceof` or the object's own `length`: a
+    // subclass or a Proxy that lies about its size cannot change what is checked and kept.
+    if (!types.isUint8Array(secret)) return refuse('inputSeed.secret must be a Uint8Array');
+    // A copy: the caller may change the bytes, or detach the buffer, after this check. The size
+    // checked is the size of the copy.
+    const copy = new Uint8Array(secret);
+    if (byteLengthOf(copy) < SEED_BYTES)
+      return refuse('inputSeed.secret must be at least 32 bytes');
+    return { secret: copy };
   }
   if (typeof derive !== 'function') return refuse('inputSeed.derive must be a function');
   return { derive: (requestId) => Reflect.apply(derive, owner, [requestId]) as Uint8Array };
@@ -63,7 +77,8 @@ export function checkDerivedSeed(seed: InputSeedConfig | undefined, requestId: s
   } catch (error) {
     throw new CallbackError('inputSeed.derive', error);
   }
-  if (!(derived instanceof Uint8Array) || derived.length !== SEED_BYTES) {
+  // By the intrinsics: no `length` of the answer, and no trap of it, is ever run.
+  if (!types.isUint8Array(derived) || byteLengthOf(derived) !== SEED_BYTES) {
     refuse('inputSeed.derive must return 32 bytes');
   }
 }

@@ -1,11 +1,16 @@
 import { PPEError } from './PPEError.js';
-import { markEngineError } from './engineError.js';
+import { checkArgs } from './args.js';
+import { markEngineError, sealEngineError } from './engineError.js';
 
 export class RuleConflictError extends PPEError {
   constructor(
     public readonly ruleIds: readonly string[],
     public readonly priority: number,
   ) {
+    checkArgs('RuleConflictError', [
+      [ruleIds, 'S'],
+      [priority, 'n'],
+    ]);
     super(
       `Rule conflict: rules [${ruleIds.join(', ')}] have the same priority ${priority}`,
       'RULE_CONFLICT',
@@ -13,7 +18,7 @@ export class RuleConflictError extends PPEError {
     this.name = 'RuleConflictError';
     this.ruleIds = Object.freeze([...ruleIds]);
     // Frozen at creation: what the caller receives cannot be changed (B74).
-    Object.freeze(this);
+    sealEngineError(this, new.target, RuleConflictError);
   }
 }
 

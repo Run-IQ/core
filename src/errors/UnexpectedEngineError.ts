@@ -1,6 +1,7 @@
 import { PPEError } from './PPEError.js';
+import { checkArgs } from './args.js';
 import { describeFault, faultOf, trustedFault } from '../engine/pluginPort.js';
-import { isEngineError, markEngineError } from './engineError.js';
+import { isEngineError, markEngineError, sealEngineError } from './engineError.js';
 
 /**
  * A thrown value that is not a `PPEError` (a model's `RangeError`, a plugin's `TypeError`...),
@@ -12,6 +13,10 @@ export class UnexpectedEngineError extends PPEError {
   override readonly cause: unknown;
 
   constructor(cause: unknown, message?: string) {
+    checkArgs('UnexpectedEngineError', [
+      [cause, '*'],
+      [message, 's?'],
+    ]);
     // Only text is read from a foreign thrown value (own data strings, bounded): none of its
     // conversion code (`toString`, `Symbol.toPrimitive`) is ever run.
     const engine = isEngineError(cause);
@@ -23,7 +28,7 @@ export class UnexpectedEngineError extends PPEError {
     this.name = 'UnexpectedEngineError';
     this.cause = fault === undefined ? cause : Object.freeze({ ...fault });
     // Frozen at creation (B74): the cause is the text of a fault, or a frozen engine error.
-    Object.freeze(this);
+    sealEngineError(this, new.target, UnexpectedEngineError);
   }
 
   /**

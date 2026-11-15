@@ -1,5 +1,6 @@
 import { PPEError } from './PPEError.js';
-import { markEngineError } from './engineError.js';
+import { checkArgs } from './args.js';
+import { markEngineError, sealEngineError } from './engineError.js';
 
 /**
  * A decimal the engine handles (a contribution, a short-circuit value, a combined or rounded
@@ -13,13 +14,17 @@ export class DecimalPrecisionError extends PPEError {
     /** The most digits a decimal may span. */
     public readonly limit: number,
   ) {
+    checkArgs('DecimalPrecisionError', [
+      [output, 's'],
+      [limit, 'n'],
+    ]);
     super(
       `Output ${output} holds a decimal spanning more than ${limit} digits: the decision is refused rather than rounded`,
       'DECIMAL_PRECISION',
     );
     this.name = 'DecimalPrecisionError';
     // Frozen at creation: what the caller receives cannot be changed (B74).
-    Object.freeze(this);
+    sealEngineError(this, new.target, DecimalPrecisionError);
   }
 }
 

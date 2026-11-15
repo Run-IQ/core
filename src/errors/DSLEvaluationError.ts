@@ -1,5 +1,6 @@
 import { PPEError } from './PPEError.js';
-import { markEngineError } from './engineError.js';
+import { checkArgs } from './args.js';
+import { markEngineError, sealEngineError } from './engineError.js';
 import { describeFault, faultOf, type PluginFault } from '../engine/pluginPort.js';
 
 export class DSLEvaluationError extends PPEError {
@@ -10,12 +11,16 @@ export class DSLEvaluationError extends PPEError {
     public readonly dslName: string,
     originalError: unknown,
   ) {
+    checkArgs('DSLEvaluationError', [
+      [dslName, 's'],
+      [originalError, '*'],
+    ]);
     const fault = faultOf(originalError);
     super(`DSL "${dslName}" evaluation failed: ${describeFault(fault)}`, 'DSL_EVALUATION_ERROR');
     this.originalError = Object.freeze({ ...fault });
     this.name = 'DSLEvaluationError';
     // Frozen at creation: what the caller receives cannot be changed (B74).
-    Object.freeze(this);
+    sealEngineError(this, new.target, DSLEvaluationError);
   }
 }
 

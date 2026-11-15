@@ -15,7 +15,8 @@ import {
   parsePointer,
 } from '@run-iq/spec';
 import type { DimensionSpec, Referential } from '@run-iq/spec';
-import { DSLEvaluationError } from '../errors/DSLEvaluationError.js';
+import { isEngineErrorNamed } from '../errors/engineError.js';
+import type { DSLEvaluationError } from '../errors/DSLEvaluationError.js';
 import { attributeLimit, isRaisedLimit } from '../errors/EngineLimitError.js';
 import { PER_VALUE_LIMITS, defaultCrossing, readVerdict } from './pluginBoundary.js';
 import type { Crossing } from './pluginBoundary.js';
@@ -266,8 +267,9 @@ export class RuleFilter {
         if (isRaisedLimit(error) && !PER_VALUE_LIMITS.has(error.limit)) {
           throw attributeLimit(error, `dsl:${rule.condition.dsl}`);
         }
-        const text =
-          error instanceof DSLEvaluationError ? describeFault(error.originalError) : undefined;
+        const text = isEngineErrorNamed(error, 'DSLEvaluationError')
+          ? describeFault((error as DSLEvaluationError).originalError)
+          : undefined;
         // The text of a fault is cut on a code point here too: a verdict that cannot be read gives
         // a failure that joins the reason of every property, and none of it is longer than this.
         // A refused write into a view is told by the slot of this call, not by what was thrown.

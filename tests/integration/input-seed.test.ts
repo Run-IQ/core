@@ -150,10 +150,7 @@ describe('inputSeed', () => {
         build({ secret: new Uint8Array(32), derive: () => new Uint8Array(32) }),
       ),
     ).toEqual(['Invalid inputSeed', ['inputSeed must have secret or derive, not both']]);
-    expect(await reasonsOf(() => build(3))).toEqual([
-      'Invalid inputSeed',
-      ['inputSeed must be an object'],
-    ]);
+    expect(await reasonsOf(() => build(3))).toEqual(['Invalid inputSeed', ['must be an object']]);
   });
 
   it('is optional', async () => {

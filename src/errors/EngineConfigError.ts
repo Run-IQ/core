@@ -1,5 +1,5 @@
 import { PPEError } from './PPEError.js';
-import { markEngineError } from './engineError.js';
+import { markEngineError, sealEngineError } from './engineError.js';
 import { clipText } from '../utils/weight.js';
 
 const MAX_TEXT = 256;
@@ -16,13 +16,17 @@ export class EngineConfigError extends PPEError {
   public readonly reason: string;
 
   constructor(path: string, reason: string) {
-    const shownPath = clipText(path, MAX_TEXT, MARK);
-    const shownReason = clipText(reason, MAX_TEXT * 4, MARK);
+    // A bad argument is itself a configuration fault, told as such (never a raw TypeError).
+    const wellFormed = typeof path === 'string' && typeof reason === 'string';
+    const shownPath = wellFormed ? clipText(path, MAX_TEXT, MARK) : '/EngineConfigError/arguments';
+    const shownReason = wellFormed
+      ? clipText(reason, MAX_TEXT * 4, MARK)
+      : 'path and reason must be strings';
     super(`invalid engine configuration at ${shownPath}: ${shownReason}`, 'ENGINE_CONFIG');
     this.name = 'EngineConfigError';
     this.path = shownPath;
     this.reason = shownReason;
-    Object.freeze(this);
+    sealEngineError(this, new.target, EngineConfigError);
   }
 }
 

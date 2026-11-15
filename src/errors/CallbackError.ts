@@ -1,5 +1,6 @@
 import { PPEError } from './PPEError.js';
-import { markEngineError } from './engineError.js';
+import { checkArgs } from './args.js';
+import { markEngineError, sealEngineError } from './engineError.js';
 import { describeFault, faultOf } from '../engine/pluginPort.js';
 
 /**
@@ -11,12 +12,16 @@ export class CallbackError extends PPEError {
   override readonly cause: unknown;
 
   constructor(callback: string, thrown: unknown) {
+    checkArgs('CallbackError', [
+      [callback, 's'],
+      [thrown, '*'],
+    ]);
     const fault = faultOf(thrown);
     super(`callback ${callback} failed: ${describeFault(fault)}`, 'CALLBACK_FAILURE');
     this.name = 'CallbackError';
     this.callback = callback;
     this.cause = Object.freeze({ ...fault });
-    Object.freeze(this);
+    sealEngineError(this, new.target, CallbackError);
   }
 }
 

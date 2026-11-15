@@ -1,6 +1,7 @@
 import { PPEError } from './PPEError.js';
+import { checkArgs } from './args.js';
 import type { EngineLimits } from '../limits.js';
-import { markEngineError } from './engineError.js';
+import { isEngineErrorNamed, markEngineError, sealEngineError } from './engineError.js';
 import { raised } from '../engine/trust.js';
 import { clipText } from '../utils/weight.js';
 
@@ -28,6 +29,13 @@ export class EngineLimitError extends PPEError {
     pointer?: string,
     source?: string,
   ) {
+    checkArgs('EngineLimitError', [
+      [limit, 's'],
+      [max, 'n'],
+      [actual, 'n'],
+      [pointer, 's?'],
+      [source, 's?'],
+    ]);
     // A pointer can be as long as the key that is refused: it is cut on a code point, with the
     // visible marker, as spec cuts its issue text (B92).
     const shown =
@@ -40,7 +48,7 @@ export class EngineLimitError extends PPEError {
     this.source = source;
     this.name = 'EngineLimitError';
     // Frozen at creation (B74), like every error the caller receives.
-    Object.freeze(this);
+    sealEngineError(this, new.target, EngineLimitError);
   }
 }
 
@@ -62,7 +70,7 @@ export function raiseLimit(
 
 /** True for a limit error. Only code that no plugin frame sits under asks. */
 export function isRaisedLimit(value: unknown): value is EngineLimitError {
-  return value instanceof EngineLimitError;
+  return isEngineErrorNamed(value, 'EngineLimitError');
 }
 
 /**

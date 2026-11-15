@@ -22,12 +22,32 @@ export function isEngineErrorPrototype(prototype: unknown): boolean {
  */
 const ENGINE_INSTANCES = new WeakSet<object>();
 
-/** Records `error` as the engine's own when `newTarget` is a class the engine marked. */
-export function recordEngineInstance(error: object, newTarget: { prototype: object }): void {
-  if (ENGINE_PROTOTYPES.has(newTarget.prototype)) ENGINE_INSTANCES.add(error);
+/**
+ * Completes an engine error: freezes it and, only when `newTarget` is exactly the class `Self`
+ * that is finishing its own constructor, records it as the engine's own. It is the LAST step of
+ * the leaf constructor, so an object that is recorded is complete and frozen. A forged object
+ * (`Reflect.construct(PPEError, args, ValidationError)`, which never runs the leaf constructor)
+ * and an object built by a subclass are never recorded.
+ */
+export function sealEngineError(
+  error: object,
+  newTarget: unknown,
+  Self: { prototype: object },
+): void {
+  Object.freeze(error);
+  if (newTarget === Self) ENGINE_INSTANCES.add(error);
 }
 
 /** True for an error the engine itself created (never for a foreign subclass of `PPEError`). */
 export function isEngineError(value: unknown): boolean {
   return typeof value === 'object' && value !== null && ENGINE_INSTANCES.has(value);
+}
+
+/**
+ * True for an error the engine created whose class is `name`. Identity first, then the name the
+ * engine itself set on its frozen object: never `instanceof`, which a subclass or a forged
+ * prototype can satisfy.
+ */
+export function isEngineErrorNamed(value: unknown, name: string): boolean {
+  return isEngineError(value) && (value as { name?: unknown }).name === name;
 }

@@ -196,41 +196,9 @@ describe('AH6: the constructor options', () => {
       Object.defineProperty(base(), 'strict', { enumerable: true, get: () => true }),
       '/strict',
     );
-    const inherited = Object.assign(Object.create({ dryRun: true }), { plugins: [], dsls: [] });
-    const engine = new PPEEngine(inherited);
-    expect(engine).toBeInstanceOf(PPEEngine);
-    expect((engine as unknown as { dryRun: boolean }).dryRun).toBe(false);
-    // an inherited member of `timeout` is ignored, not used
-    const withInherited = build({ timeout: Object.create({ pipeline: 5 }) });
-    expect(
-      (withInherited as unknown as { pipelineTimeout?: number }).pipelineTimeout,
-    ).toBeUndefined();
-  });
-
-  it('a known key that is not enumerable, and a limit that is an accessor or inherited, are refused or ignored (AI4)', () => {
-    const base = (): Record<string, unknown> => ({ plugins: [], dsls: [] });
-    let error: unknown;
-    try {
-      new PPEEngine(
-        Object.defineProperty(base(), 'strict', { value: false, enumerable: false }) as never,
-      );
-    } catch (thrown) {
-      error = thrown;
-    }
-    expect(error).toBeInstanceOf(EngineConfigError);
-    expect((error as EngineConfigError).path).toBe('/strict');
-    refused(
-      { limits: Object.defineProperty({}, 'maxRules', { enumerable: true, get: () => 5 }) },
-      '/limits/maxRules',
-    );
-    refused(
-      { limits: Object.defineProperty({}, 'maxRules', { value: 5, enumerable: false }) },
-      '/limits/maxRules',
-    );
-    const inherited = build({ limits: Object.create({ maxRules: 1 }) });
-    expect((inherited as unknown as { limits: { maxRules: number } }).limits.maxRules).toBe(
-      100_000,
-    );
+    // an object that inherits its options is not a plain object: refused, never read (AJ6)
+    direct(Object.assign(Object.create({ dryRun: true }), { plugins: [], dsls: [] }), '/');
+    refused({ timeout: Object.create({ pipeline: 5 }) }, '/timeout');
   });
 
   it('a polluted Object.prototype is not read as an option (AI4 d)', () => {

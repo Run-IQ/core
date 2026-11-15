@@ -1,5 +1,6 @@
 import { PPEError } from './PPEError.js';
-import { markEngineError } from './engineError.js';
+import { checkArgs } from './args.js';
+import { markEngineError, sealEngineError } from './engineError.js';
 
 /**
  * Thrown by the view the engine hands to a model or a DSL when it writes into it. A model, a DSL
@@ -8,10 +9,11 @@ import { markEngineError } from './engineError.js';
  */
 export class FrozenViewWriteError extends PPEError {
   constructor(readonly key: string) {
+    checkArgs('FrozenViewWriteError', [[key, 's']]);
     super(`wrote to its input: ${key}`, 'FROZEN_VIEW_WRITE');
     this.name = 'FrozenViewWriteError';
     // Frozen at creation: what the caller receives cannot be changed (B74).
-    Object.freeze(this);
+    sealEngineError(this, new.target, FrozenViewWriteError);
   }
 }
 

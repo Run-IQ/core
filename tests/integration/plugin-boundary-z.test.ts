@@ -389,7 +389,7 @@ describe('Z5 to Z7: what the caller keeps of a plugin fault is text', () => {
     expect(cause.message.endsWith('... [clipped]')).toBe(true);
   });
 
-  it('Zd3, Zd4: the message of the caller error is built from the text that is kept, read once', async () => {
+  it('Zd3, Zd4, AJ5: the message of the caller error is built from the text that is kept; an accessor never runs', async () => {
     let reads = 0;
     const bad = pluginWith('bad', {
       beforeEvaluate: () => {
@@ -403,9 +403,9 @@ describe('Z5 to Z7: what the caller keeps of a plugin fault is text', () => {
       },
     });
     const error = (await failure(build([bad]), [])) as PluginHookError;
-    expect(reads).toBe(1);
-    expect(error.message).toBe('plugin bad beforeEvaluate failed: first answer');
-    expect((error.cause as { message: string }).message).toBe('first answer');
+    expect(reads).toBe(0);
+    expect(error.message).toBe('plugin bad beforeEvaluate failed: Custom');
+    expect((error.cause as { message: string }).message).toBe('');
     const long = pluginWith('long', {
       beforeEvaluate: () => {
         throw new Error('m'.repeat(20_000_000));

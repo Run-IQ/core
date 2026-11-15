@@ -1,6 +1,11 @@
 import { ValidationError } from './ValidationError.js';
 import { isEngineError } from './engineError.js';
 import { describeThrown } from '../utils/values.js';
+import { copyCallerData } from '../engine/callerCopy.js';
+
+/** A refusal of the copier, for an exported function: a `ValidationError` naming it. */
+const refuseArgument = (name: string) => (path: string, reason: string) =>
+  new ValidationError(`${name}: ${path} ${reason}`, [`${path} ${reason}`]);
 
 /**
  * What a function the package exports throws, whatever went wrong inside: an error the engine
@@ -15,10 +20,20 @@ export function asExportError(name: string, error: unknown): Error {
 }
 
 /** `fn`, with every throw turned into an engine error (see `asExportError`). */
-export function guard<F extends (...args: never[]) => unknown>(name: string, fn: F): F {
+export function guard<F extends (...args: never[]) => unknown>(
+  name: string,
+  fn: F,
+  /** Copy every argument through the inbound copier first (the data helpers). */
+  copyArgs = false,
+): F {
   const guarded = function (this: unknown, ...args: never[]): unknown {
     try {
-      return Reflect.apply(fn, this, args);
+      const given = copyArgs
+        ? args.map((argument, position) =>
+            copyCallerData(argument, `/${name}/argument${position}`, refuseArgument(name)),
+          )
+        : args;
+      return Reflect.apply(fn, this, given);
     } catch (error) {
       throw asExportError(name, error);
     }
