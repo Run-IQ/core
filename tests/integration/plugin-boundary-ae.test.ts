@@ -620,6 +620,31 @@ describe('AG2: a write made while the engine reads the returned value, and caugh
     expect(result.appliedRules).toEqual([]);
   });
 
+  it('W3b: a tainted call has its returned value never read (the getter is not run)', async () => {
+    let reads = 0;
+    const model = modelNamed('tainted', {
+      calculate: (_input: unknown, _rule: unknown, params: unknown) => {
+        try {
+          (params as Record<string, unknown>)['rate'] = 9;
+        } catch {
+          // caught
+        }
+        return {
+          get value(): number {
+            reads += 1;
+            return 4;
+          },
+        } as never;
+      },
+    });
+    const result = await build([regModel(model)]).evaluate(
+      [makeRule({ id: 't', model: 'tainted', params: { rate: 1 } })],
+      makeInput(),
+    );
+    expect(result.skippedRules[0]).toMatchObject({ reason: 'MODEL_ERROR' });
+    expect(reads).toBe(0);
+  });
+
   it('W2: a trap of the DSL verdict that writes and catches: DSL_ERROR', async () => {
     const dsl: DSLEvaluator = {
       dsl: 'trapwriter',
