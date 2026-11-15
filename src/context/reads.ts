@@ -128,6 +128,7 @@ function computeReads(
         } catch (error) {
           throw new Error(
             `listVariables of ${source}/${index} could not be read: ${describeThrown(error)}`,
+            { cause: error },
           );
         }
       }

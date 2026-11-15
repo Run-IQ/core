@@ -70,7 +70,6 @@ async function failure(engine: PPEEngine, rules: unknown, input?: unknown): Prom
 
 import { ValidationError } from '../../src/errors/ValidationError.js';
 import { UnexpectedEngineError } from '../../src/errors/UnexpectedEngineError.js';
-import { ModelNotFoundError } from '../../src/errors/ModelNotFoundError.js';
 import { readsOf } from '../../src/context/reads.js';
 import { PluginFaultError } from '../../src/engine/pluginPort.js';
 

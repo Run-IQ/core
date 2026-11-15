@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { EXCEPTION_MODEL } from '@run-iq/spec';
+import { hasLoneSurrogate } from '../../src/utils/weight.js';
 import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import type { PPEEngineConfig } from '../../src/engine/PPEEngine.js';
 import { PluginHookError } from '../../src/errors/PluginHookError.js';
@@ -488,7 +489,7 @@ describe('X6: every channel is bounded', () => {
     expect(error.pointer?.length).toBeLessThan(1100);
     const pair = new EngineLimitError('maxStringLength', 10, 11, `/${'a'.repeat(1022)}\u{1F600}x`);
     expect(pair.pointer?.endsWith('... [clipped]')).toBe(true);
-    expect(pair.pointer?.includes('\uD83D\u{FFFD}')).toBe(false);
+    expect(hasLoneSurrogate(pair.pointer ?? '')).toBe(false);
   });
 });
 
