@@ -161,7 +161,8 @@ export class InputSanitizer {
       const metaProblem = callerSide ? notPlainReason(metaIn, '/meta') : undefined;
       if (metaProblem !== undefined) reasons.push(metaProblem);
       try {
-        metaKeys = listKeys(meta, '/meta', reasons);
+        // A caller's meta that is not plain is named above: its keys are not listed (no trap run).
+        metaKeys = metaProblem === undefined ? listKeys(meta, '/meta', reasons) : [];
       } catch (error) {
         reasons.push(`/meta could not be read: ${describeThrown(error)}`);
       }

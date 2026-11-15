@@ -81,5 +81,9 @@ export function guardMethods(
       writable: true,
       configurable: true,
     });
+    // The arity of the method, so that the inventory of parameters can be generated.
+    Object.defineProperty(cls.prototype[method as keyof typeof cls.prototype], 'length', {
+      value: (original as (...args: never[]) => unknown).length,
+    });
   }
 }

@@ -153,7 +153,13 @@ export function copyCallerData(
     if (depth > MAX_COPY_DEPTH) throw refuse(where, 'is nested too deeply');
     if (types.isProxy(current)) throw refuse(where, 'must not be a Proxy');
     if (ancestors.has(current)) throw refuse(where, 'is a cycle');
-    if (types.isDate(current)) return new Date(Reflect.apply(dateTime, current, []) as number);
+    if (types.isDate(current)) {
+      // A Date with own keys carries state a copy would drop: refused, never dropped in silence.
+      if (Object.keys(current).length > 0 || Object.getOwnPropertySymbols(current).length > 0) {
+        throw refuse(where, 'a Date with own keys is not plain data');
+      }
+      return new Date(Reflect.apply(dateTime, current, []) as number);
+    }
     ancestors.add(current);
     try {
       if (Array.isArray(current)) {
