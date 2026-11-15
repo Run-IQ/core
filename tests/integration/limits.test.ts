@@ -3,7 +3,6 @@ import { PPEEngine } from '../../src/engine/PPEEngine.js';
 import type { PPEEngineConfig } from '../../src/engine/PPEEngine.js';
 import { EngineLimitError } from '../../src/errors/EngineLimitError.js';
 import { EngineConfigError } from '../../src/errors/EngineConfigError.js';
-import { ValidationError } from '../../src/errors/ValidationError.js';
 import { DEFAULT_LIMITS } from '../../src/limits.js';
 import type { PPEPlugin, PluginContext } from '../../src/types/plugin.js';
 import { makeRule, makeInput, StubModel, InMemorySnapshotAdapter } from '../helpers.js';
