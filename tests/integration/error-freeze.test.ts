@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import * as errors from '../../src/errors/index.js';
 import { attributeLimit } from '../../src/errors/EngineLimitError.js';
 import { makeInput, makeRule, StubModel, InMemorySnapshotAdapter } from '../helpers.js';
+import { SnapshotManager } from '../../src/snapshot/SnapshotManager.js';
 import { PPEEngine } from '../../src/engine/PPEEngine.js';
 
 /**
@@ -275,4 +276,35 @@ describe('AH1: every error the caller receives, by each throw site', () => {
       assertDeepFrozen(error, 'config');
     });
   }
+});
+
+describe('AH1 backstop: a raw error from inside the engine never reaches the caller as it is', () => {
+  it('is wrapped in a frozen engine error, and onErrorFailures stays readable', async () => {
+    const raw = Object.assign(new Error('internal bug'), { secret: { token: 'hunter2' } });
+    const spy = vi.spyOn(SnapshotManager.prototype, 'exists').mockRejectedValue(raw);
+    try {
+      const engine = new PPEEngine({
+        plugins: [
+          {
+            name: 'watch',
+            version: '1.0.0',
+            onInit() {},
+            onError() {
+              throw new Error('watch onError failed');
+            },
+          },
+        ],
+        dsls: [],
+        strict: false,
+      });
+      const error = await engine.evaluate([], makeInput()).catch((e: unknown) => e);
+      expect(error).not.toBe(raw);
+      expect(error).toBeInstanceOf(errors.UnexpectedEngineError);
+      assertDeepFrozen(error, 'backstop');
+      expect(JSON.stringify(error, Object.getOwnPropertyNames(error))).not.toContain('hunter2');
+      expect((error as errors.PPEError).onErrorFailures).toHaveLength(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
